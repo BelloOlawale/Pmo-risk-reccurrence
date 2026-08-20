@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 from riskapp import models, schemas
 from riskapp.audit import record_change
 from riskapp.domain.scoring import compute_risk_rating
+from riskapp.domain.sla import compute_deadline
 from riskapp.domain.status import RiskStatus, ensure_transition
 
 
@@ -91,6 +92,8 @@ def get_project(db: Session, project_id: int) -> models.Project | None:
 
 
 def create_risk(db: Session, payload: schemas.RiskCreate) -> models.Risk:
+    rating = compute_risk_rating(payload.likelihood, payload.impact)
+    now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
     risk = models.Risk(
         project_id=payload.project_id,
         risk_code=_next_risk_code(db),
@@ -100,13 +103,16 @@ def create_risk(db: Session, payload: schemas.RiskCreate) -> models.Risk:
         risk_source=payload.risk_source,
         likelihood=payload.likelihood,
         impact=payload.impact,
-        risk_rating=compute_risk_rating(payload.likelihood, payload.impact),
+        risk_rating=rating,
         response_strategy=payload.response_strategy,
         response_plan=payload.response_plan,
         owner_user_id=payload.owner_user_id,
         risk_start_date=payload.risk_start_date,
         risk_end_date=payload.risk_end_date,
         status=RiskStatus.SUGGESTED.value,
+        created_at=now,
+        updated_at=now,
+        sla_deadline=compute_deadline(rating, now),
     )
     db.add(risk)
     db.commit()
@@ -162,6 +168,25 @@ def acknowledge_risk(
     return risk
 
 
+def _set_auto_deadline(
+    db: Session, risk: models.Risk, actor_user_id: int | None = None
+) -> None:
+    """Recompute the SLA deadline from the current rating, auditing if it changed."""
+    new_deadline = compute_deadline(risk.risk_rating, risk.created_at)
+    if new_deadline != risk.sla_deadline:
+        old_deadline = risk.sla_deadline
+        risk.sla_deadline = new_deadline
+        record_change(
+            db,
+            risk,
+            action="field_edit",
+            field="sla_deadline",
+            old_value=old_deadline,
+            new_value=new_deadline,
+            actor_user_id=actor_user_id,
+        )
+
+
 def update_risk(
     db: Session,
     risk: models.Risk,
@@ -177,6 +202,8 @@ def update_risk(
     data = payload.model_dump(exclude_unset=True)
     data.pop("actor_user_id", None)
     target_status = data.pop("status", None)
+    manual_deadline = data.pop("sla_deadline", None)
+    reset_deadline = data.pop("reset_sla_deadline", False)
 
     for field, new_value in data.items():
         if new_value is None and field in _NON_NULLABLE_FIELDS:
@@ -210,6 +237,48 @@ def update_risk(
                 new_value=new_rating,
                 actor_user_id=actor_user_id,
             )
+        # Recompute the deadline too, unless manually overridden.
+        if not risk.sla_manual_override:
+            _set_auto_deadline(db, risk, actor_user_id)
+
+    # Manual deadline override (PM / PMO Lead).
+    if manual_deadline is not None:
+        old_deadline = risk.sla_deadline
+        risk.sla_deadline = manual_deadline
+        record_change(
+            db,
+            risk,
+            action="field_edit",
+            field="sla_deadline",
+            old_value=old_deadline,
+            new_value=manual_deadline,
+            actor_user_id=actor_user_id,
+        )
+        if not risk.sla_manual_override:
+            risk.sla_manual_override = True
+            record_change(
+                db,
+                risk,
+                action="field_edit",
+                field="sla_manual_override",
+                old_value=False,
+                new_value=True,
+                actor_user_id=actor_user_id,
+            )
+
+    # Reset the override back to the auto-computed deadline.
+    if reset_deadline and risk.sla_manual_override:
+        risk.sla_manual_override = False
+        record_change(
+            db,
+            risk,
+            action="field_edit",
+            field="sla_manual_override",
+            old_value=True,
+            new_value=False,
+            actor_user_id=actor_user_id,
+        )
+        _set_auto_deadline(db, risk, actor_user_id)
 
     if target_status is not None and target_status != risk.status:
         target = ensure_transition(risk.status, target_status)

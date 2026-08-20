@@ -127,6 +127,7 @@ class Risk(TimestampMixin, Base):
 
     sla_deadline: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     sla_acknowledged: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    sla_manual_override: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     risk_start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     risk_end_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)

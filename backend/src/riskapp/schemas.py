@@ -93,6 +93,7 @@ class RiskRead(BaseModel):
     risk_end_date: dt.date | None
     sla_deadline: dt.datetime | None
     sla_acknowledged: bool
+    sla_manual_override: bool
     created_at: dt.datetime
 
 
@@ -110,6 +111,8 @@ class RiskUpdate(BaseModel):
     owner_user_id: int | None = None
     risk_start_date: dt.date | None = None
     risk_end_date: dt.date | None = None
+    sla_deadline: dt.datetime | None = None
+    reset_sla_deadline: bool = False
     status: str | None = None
     actor_user_id: int | None = None
 
