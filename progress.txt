@@ -1,0 +1,22 @@
+# PMO Risk Recurrence Predictor — Build Progress
+
+## Done
+[x] #00 Foundation — scaffold, domain core (scoring/status/sla), data model, API tracer bullet (87 tests)
+
+## Remaining (AFK — automatable)
+[ ] #01 Status transitions + append-only audit trail
+[ ] #02 SLA deadline assignment + acknowledge
+[ ] #03 Historical data import (seed 273 risks)
+[ ] #04 Hybrid retrieval (pure merge/dedupe/rank)
+[ ] #05 Semantic embeddings + pgvector
+[ ] #06 LLM suggestions + grounded citation audit
+[ ] #07 Accept / Edit / Dismiss + Quick Add
+[ ] #08 Celery + scheduler (SLA monitor, start-date email, weekly summary)
+[ ] #09 Notifications (email + in-app)
+[ ] #10 RBAC + Entra SSO
+[ ] #11 Admin bulk import (upload + field mapping)
+
+## Remaining (HITL — needs human/Azure)
+[ ] #12 Frontend + dashboards (React/ECharts)
+[ ] #13 Deployment + CI/CD
+[ ] #14 E2E validation + docs
