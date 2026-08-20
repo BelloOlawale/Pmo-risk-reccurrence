@@ -75,3 +75,21 @@ def allowed_transitions(current: RiskStatus | str) -> frozenset[RiskStatus]:
 def is_terminal(status: RiskStatus | str) -> bool:
     """Return True if ``status`` has no further transitions."""
     return not _TRANSITIONS[RiskStatus(status)]
+
+
+class InvalidTransitionError(ValueError):
+    """Raised when a requested status transition is not allowed."""
+
+
+def ensure_transition(current: RiskStatus | str, target: RiskStatus | str) -> RiskStatus:
+    """Return the target status if the transition is valid, else raise.
+
+    Raises:
+        InvalidTransitionError: if the transition is not allowed.
+        ValueError: if ``target`` is not a known status.
+    """
+    cur = RiskStatus(current)
+    tgt = RiskStatus(target)
+    if not can_transition(cur, tgt):
+        raise InvalidTransitionError(f"Cannot transition from {cur.value} to {tgt.value}")
+    return tgt

@@ -22,10 +22,10 @@ No manual override can skip a status without an audit entry — the audit row an
 
 ## Acceptance criteria
 
-- [ ] Valid transitions (per `test_status.py`) succeed; invalid ones return 409
-- [ ] Every status change writes exactly one `RiskAuditLog` row (old status, new status, actor, timestamp)
-- [ ] Every field edit writes an audit row per changed field
-- [ ] Editing `likelihood`/`impact` recomputes `risk_rating` and logs the change
-- [ ] `acknowledge` sets `sla_acknowledged=True` and logs `action="acknowledge"`
-- [ ] Audit rows are append-only (no update/delete path in the service)
-- [ ] Unit tests cover the diff, transition, and acknowledge paths
+- [x] Valid transitions (per `test_status.py`) succeed; invalid ones return 409
+- [x] Every status change writes exactly one `RiskAuditLog` row (old status, new status, actor, timestamp)
+- [x] Every field edit writes an audit row per changed field
+- [x] Editing `likelihood`/`impact` recomputes `risk_rating` and logs the change
+- [x] `acknowledge` sets `sla_acknowledged=True` and logs `action="acknowledge"`
+- [x] Audit rows are append-only (no update/delete path in the service)
+- [x] Unit tests cover the diff, transition, and acknowledge paths

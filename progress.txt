@@ -2,9 +2,9 @@
 
 ## Done
 [x] #00 Foundation — scaffold, domain core (scoring/status/sla), data model, API tracer bullet (87 tests)
+[x] #01 Status transitions + append-only audit trail (94 tests)
 
 ## Remaining (AFK — automatable)
-[ ] #01 Status transitions + append-only audit trail
 [ ] #02 SLA deadline assignment + acknowledge
 [ ] #03 Historical data import (seed 273 risks)
 [ ] #04 Hybrid retrieval (pure merge/dedupe/rank)

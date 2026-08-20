@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -92,4 +92,36 @@ class RiskRead(BaseModel):
     risk_start_date: dt.date | None
     risk_end_date: dt.date | None
     sla_deadline: dt.datetime | None
+    sla_acknowledged: bool
+    created_at: dt.datetime
+
+
+class RiskUpdate(BaseModel):
+    """Partial update of a risk. Omitted fields are left unchanged."""
+
+    description: str | None = None
+    category: str | None = None
+    subcategory: str | None = None
+    risk_source: Literal["Human", "Environmental", "Technical"] | None = None
+    likelihood: Literal["Low", "Medium", "High"] | None = None
+    impact: Literal["Low", "Medium", "High"] | None = None
+    response_strategy: Literal["Mitigate", "Transfer", "Avoid", "Accept"] | None = None
+    response_plan: str | None = None
+    owner_user_id: int | None = None
+    risk_start_date: dt.date | None = None
+    risk_end_date: dt.date | None = None
+    status: str | None = None
+    actor_user_id: int | None = None
+
+
+class RiskAuditLogRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    risk_id: int
+    user_id: int | None
+    action: str
+    field: str | None
+    old_value: Any | None
+    new_value: Any | None
     created_at: dt.datetime
