@@ -4,9 +4,9 @@
 [x] #00 Foundation — scaffold, domain core (scoring/status/sla), data model, API tracer bullet (87 tests)
 [x] #01 Status transitions + append-only audit trail (94 tests)
 [x] #02 SLA deadline assignment + manual override (99 tests)
+[x] #03 Historical data import (seed 273 risks / 21 projects)
 
 ## Remaining (AFK — automatable)
-[ ] #03 Historical data import (seed 273 risks)
 [ ] #04 Hybrid retrieval (pure merge/dedupe/rank)
 [ ] #05 Semantic embeddings + pgvector
 [ ] #06 LLM suggestions + grounded citation audit
