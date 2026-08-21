@@ -20,8 +20,8 @@
 
 ## Acceptance criteria
 
-- [ ] Exact matches always included regardless of keyword/semantic score
-- [ ] Duplicate risks (same key across the three sets) appear once
-- [ ] Semantic matches below the threshold are excluded
-- [ ] Ordering is stable and deterministic (exact → keyword → semantic)
-- [ ] Unit tests cover merge, dedup, threshold, and tie-breaking
+- [x] Exact matches always included regardless of keyword/semantic score
+- [x] Duplicate risks (same key across the three sets) appear once
+- [x] Semantic matches below the threshold are excluded
+- [x] Ordering is stable and deterministic (exact → keyword → semantic)
+- [x] Unit tests cover merge, dedup, threshold, and tie-breaking (15 new tests)
