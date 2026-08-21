@@ -1,7 +1,7 @@
 # PMO Risk Recurrence Predictor — App
 
 Standalone web application merging the FRD and the PMO Risk Management Document.
-See `../SPEC.md` for the authoritative build spec.
+See `SPEC.md` for the authoritative build spec.
 
 ## Structure
 
