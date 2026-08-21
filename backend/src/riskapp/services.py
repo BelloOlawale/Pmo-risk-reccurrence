@@ -9,8 +9,9 @@ from sqlalchemy.orm import Session, selectinload
 
 from riskapp import models, schemas
 from riskapp.audit import record_change
+from riskapp.config import settings
 from riskapp.domain.scoring import compute_risk_rating
-from riskapp.domain.sla import compute_deadline
+from riskapp.domain.sla import as_naive_utc, compute_deadline, deadline_anchor
 from riskapp.domain.status import RiskStatus, ensure_transition
 
 
@@ -112,7 +113,9 @@ def create_risk(db: Session, payload: schemas.RiskCreate) -> models.Risk:
         status=RiskStatus.SUGGESTED.value,
         created_at=now,
         updated_at=now,
-        sla_deadline=compute_deadline(rating, now),
+        sla_deadline=compute_deadline(
+            rating, deadline_anchor(payload.risk_start_date, now, settings.tz)
+        ),
     )
     db.add(risk)
     db.commit()
@@ -171,17 +174,22 @@ def acknowledge_risk(
 def _set_auto_deadline(
     db: Session, risk: models.Risk, actor_user_id: int | None = None
 ) -> None:
-    """Recompute the SLA deadline from the current rating, auditing if it changed."""
-    new_deadline = compute_deadline(risk.risk_rating, risk.created_at)
-    if new_deadline != risk.sla_deadline:
-        old_deadline = risk.sla_deadline
+    """Recompute the SLA deadline from the rating and start date, auditing if changed."""
+    new_deadline = compute_deadline(
+        risk.risk_rating,
+        deadline_anchor(risk.risk_start_date, risk.created_at, settings.tz),
+    )
+    current_deadline = (
+        as_naive_utc(risk.sla_deadline) if risk.sla_deadline is not None else None
+    )
+    if new_deadline != current_deadline:
         risk.sla_deadline = new_deadline
         record_change(
             db,
             risk,
             action="field_edit",
             field="sla_deadline",
-            old_value=old_deadline,
+            old_value=current_deadline,
             new_value=new_deadline,
             actor_user_id=actor_user_id,
         )
@@ -237,7 +245,10 @@ def update_risk(
                 new_value=new_rating,
                 actor_user_id=actor_user_id,
             )
-        # Recompute the deadline too, unless manually overridden.
+
+    # Recompute the deadline when the rating or the start date changed,
+    # unless manually overridden.
+    if any(key in data for key in ("likelihood", "impact", "risk_start_date")):
         if not risk.sla_manual_override:
             _set_auto_deadline(db, risk, actor_user_id)
 

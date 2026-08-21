@@ -87,3 +87,47 @@ def test_reset_override_recomputes(client: TestClient) -> None:
     body = resp.json()
     assert body["sla_manual_override"] is False
     assert _dt(body["sla_deadline"]) - _dt(body["created_at"]) == timedelta(hours=24)
+
+
+def test_deadline_from_start_date(client: TestClient) -> None:
+    project = _create_project(client)
+    # High x High -> High -> 24h from midnight 2026-08-25 Africa/Lagos (= 23:00 UTC on the 24th).
+    risk = _create_risk(client, project["id"], risk_start_date="2026-08-25")
+    assert _dt(risk["sla_deadline"]) == datetime(2026, 8, 25, 23, 0, 0)
+
+
+def test_deadline_falls_back_to_created_at_when_no_start_date(client: TestClient) -> None:
+    project = _create_project(client)
+    risk = _create_risk(client, project["id"], likelihood="High", impact="High")
+    assert _dt(risk["sla_deadline"]) - _dt(risk["created_at"]) == timedelta(hours=24)
+
+
+def test_start_date_change_recomputes_deadline(client: TestClient) -> None:
+    project = _create_project(client)
+    risk = _create_risk(client, project["id"], risk_start_date="2026-08-25")
+    assert _dt(risk["sla_deadline"]) == datetime(2026, 8, 25, 23, 0, 0)
+
+    resp = client.patch(f"/api/risks/{risk['id']}", json={"risk_start_date": "2026-08-30"})
+    assert resp.status_code == 200
+    assert _dt(resp.json()["sla_deadline"]) == datetime(2026, 8, 30, 23, 0, 0)
+
+
+def test_override_blocks_start_date_recompute(client: TestClient) -> None:
+    project = _create_project(client)
+    risk = _create_risk(client, project["id"], risk_start_date="2026-08-25")
+
+    client.patch(f"/api/risks/{risk['id']}", json={"sla_deadline": "2026-12-31T23:59:59"})
+    resp = client.patch(f"/api/risks/{risk['id']}", json={"risk_start_date": "2026-08-30"})
+    assert resp.status_code == 200
+    assert resp.json()["sla_deadline"].startswith("2026-12-31")
+
+
+def test_clearing_start_date_falls_back_to_created_at(client: TestClient) -> None:
+    project = _create_project(client)
+    risk = _create_risk(client, project["id"], risk_start_date="2026-08-25")
+
+    resp = client.patch(f"/api/risks/{risk['id']}", json={"risk_start_date": None})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["risk_start_date"] is None
+    assert _dt(body["sla_deadline"]) - _dt(body["created_at"]) == timedelta(hours=24)

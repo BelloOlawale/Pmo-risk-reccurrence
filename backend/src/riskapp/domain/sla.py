@@ -1,8 +1,13 @@
-"""SLA deadline, warning windows, and activity-based monitoring logic."""
+"""SLA deadline, warning windows, and activity-based monitoring logic.
+
+Datetimes here are UTC-normalized and naive, matching the application's
+storage convention. ``deadline_anchor`` is the single place a business
+``tz`` is applied to a date-only start date.
+"""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 
 # SLA response windows (hours) by rating.
 SLA_HOURS: dict[str, int] = {
@@ -36,9 +41,35 @@ def warning_hours(rating: str) -> int:
     return WARNING_HOURS[_normalize(rating)]
 
 
-def compute_deadline(rating: str, created_at: datetime) -> datetime:
-    """Return the SLA deadline: creation time plus the rating's response window."""
-    return created_at + timedelta(hours=sla_hours(rating))
+def as_naive_utc(value: datetime) -> datetime:
+    """Return ``value`` as a naive UTC datetime.
+
+    Timezone-aware values are converted to UTC and stripped of their offset;
+    naive values are returned unchanged (assumed to already be UTC).
+    """
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(UTC).replace(tzinfo=None)
+
+
+def deadline_anchor(
+    start_date: date | None, created_at: datetime, tz: tzinfo
+) -> datetime:
+    """Return the UTC-normalized datetime from which the SLA window starts.
+
+    The clock starts at midnight of ``start_date`` in the business timezone
+    ``tz``. When no start date is set, it falls back to the risk's creation
+    time. The result is always a naive UTC datetime.
+    """
+    if start_date is not None:
+        midnight_local = datetime.combine(start_date, time.min, tzinfo=tz)
+        return as_naive_utc(midnight_local)
+    return as_naive_utc(created_at)
+
+
+def compute_deadline(rating: str, start_at: datetime) -> datetime:
+    """Return the SLA deadline: the window start plus the rating's response window."""
+    return start_at + timedelta(hours=sla_hours(rating))
 
 
 def has_activity(
@@ -58,7 +89,7 @@ def has_activity(
 def evaluate_sla(
     *,
     rating: str,
-    created_at: datetime,
+    start_at: datetime,
     now: datetime,
     owner_edited: bool = False,
     status_changed: bool = False,
@@ -77,7 +108,7 @@ def evaluate_sla(
     ):
         return "satisfied"
 
-    deadline = compute_deadline(rating, created_at)
+    deadline = compute_deadline(rating, start_at)
     if now >= deadline:
         return "breach"
 
