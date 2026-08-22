@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -124,6 +125,9 @@ class Risk(TimestampMixin, Base):
     source_risk_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     llm_analysis: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Semantic embedding of the risk text (text-embedding-3-small, 1536 dims).
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)
 
     sla_deadline: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     sla_acknowledged: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

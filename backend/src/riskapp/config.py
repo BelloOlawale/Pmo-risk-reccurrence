@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     environment: str = "dev"
     app_timezone: str = "Africa/Lagos"
 
+    # Azure OpenAI (embeddings + chat completions)
+    azure_openai_endpoint: str = ""
+    azure_openai_api_key: str = ""
+    azure_openai_embedding_deployment: str = "text-embedding-3-small"
+    azure_openai_api_version: str = "2024-02-01"
+
     @property
     def tz(self) -> ZoneInfo:
         """Business timezone for date-only anchors (e.g. the SLA start date)."""
