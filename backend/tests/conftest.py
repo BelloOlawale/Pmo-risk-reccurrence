@@ -11,8 +11,19 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from riskapp import models
+from riskapp.config import settings
 from riskapp.db import get_db
 from riskapp.main import app
+
+
+@pytest.fixture(autouse=True)
+def _force_dev_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run the API in dev (header-based) auth mode, independent of local .env.
+
+    Keeps the suite green even when Entra credentials are present in .env.
+    """
+    monkeypatch.setattr(settings, "entra_tenant_id", "")
+    monkeypatch.setattr(settings, "entra_client_id", "")
 
 
 @pytest.fixture()
