@@ -39,10 +39,14 @@ class AzureOpenAIEmbeddings:
         deployment: str | None = None,
         api_version: str | None = None,
     ) -> None:
-        self._endpoint = endpoint or settings.azure_openai_endpoint
-        self._api_key = api_key or settings.azure_openai_api_key
-        self._deployment = deployment or settings.azure_openai_embedding_deployment
-        self._api_version = api_version or settings.azure_openai_api_version
+        self._endpoint = settings.azure_openai_endpoint if endpoint is None else endpoint
+        self._api_key = settings.azure_openai_api_key if api_key is None else api_key
+        self._deployment = (
+            settings.azure_openai_embedding_deployment if deployment is None else deployment
+        )
+        self._api_version = (
+            settings.azure_openai_api_version if api_version is None else api_version
+        )
         self._client: AzureOpenAI | None = None
 
     def _ensure_client(self) -> AzureOpenAI:
