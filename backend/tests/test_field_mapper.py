@@ -93,7 +93,8 @@ class TestMapPunukaRow:
         assert result["likelihood"] == "High"
         assert result["impact"] == "High"
         assert result["risk_rating"] == "High"
-        assert result["response_strategy"] == "Engage early"
+        assert result["response_plan"] == "Engage early"
+        assert result["response_strategy"] == ""
         assert result["risk_owner"] == "Punuka"
         assert result["source_risk_id"] == "R001"
         assert result["source_file_name"] == "punuka_bpa.xlsx"
@@ -203,5 +204,6 @@ class TestMapSeamlessHrRow:
         assert result["likelihood"] == "Medium"
         assert result["risk_rating"] == "High"  # Medium × High
         assert result["risk_owner"] == "Seamless HR"
-        assert result["response_strategy"] == "Shift commencement date"
+        assert result["response_plan"] == "Shift commencement date"
+        assert result["response_strategy"] == ""
         assert result["source_risk_id"] == "1"

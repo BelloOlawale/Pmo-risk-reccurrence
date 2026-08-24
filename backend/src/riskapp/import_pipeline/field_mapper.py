@@ -38,6 +38,24 @@ class MappedRisk(TypedDict, total=False):
 
 
 _VALID_LEVELS = frozenset({"Low", "Medium", "High"})
+_VALID_STRATEGIES = frozenset({"Mitigate", "Transfer", "Avoid", "Accept"})
+
+
+def classify_response(value: str) -> tuple[str, str]:
+    """Split a response column into (strategy, plan).
+
+    When the source value is exactly one of the four response strategies
+    (Mitigate / Transfer / Avoid / Accept), it is the strategy and there is
+    no plan. Otherwise the whole value is free-form text and belongs in the
+    response plan (a ``Text`` column), never the 30-char strategy column.
+    """
+    cleaned = value.strip()
+    if not cleaned:
+        return "", ""
+    titled = cleaned.title()
+    if titled in _VALID_STRATEGIES:
+        return titled, ""
+    return "", cleaned
 
 
 def normalize_level(value: str) -> str:
@@ -103,13 +121,15 @@ def map_punuka_row(
     """Map Schema A (PUNUKA) row to canonical fields."""
     likelihood = row.get("Likelihood", "")
     impact = row.get("Impact", "")
+    strategy, plan = classify_response(row.get("Mitigation Strategy", ""))
     return MappedRisk(
         risk_description=row.get("Risk Description", ""),
         risk_category=row.get("Risk Category", ""),
         likelihood=likelihood,
         impact=impact,
         risk_rating=compute_rating(likelihood, impact),
-        response_strategy=row.get("Mitigation Strategy", ""),
+        response_strategy=strategy,
+        response_plan=plan,
         risk_owner=row.get("Risk Owner", ""),
         source_risk_id=row.get("Risk ID", ""),
         source_file_name=source_file,
@@ -164,12 +184,14 @@ def map_seamless_hr_row(
     """Map Schema D (Seamless HR) row to canonical fields."""
     likelihood = map_numeric_to_level(row.get("Probability (1-5)", ""))
     impact = map_numeric_to_level(row.get("Impact (1-5)", ""))
+    strategy, plan = classify_response(row.get("Risk Response", ""))
     return MappedRisk(
         risk_description=row.get("Risk Description", ""),
         likelihood=likelihood,
         impact=impact,
         risk_rating=compute_rating(likelihood, impact),
-        response_strategy=row.get("Risk Response", ""),
+        response_strategy=strategy,
+        response_plan=plan,
         risk_owner=row.get("Owner", ""),
         source_risk_id=row.get("S/N", ""),
         source_file_name=source_file,
@@ -185,6 +207,13 @@ def map_punuka_extended_row(
     likelihood = row.get("Likelihood", "")
     impact = row.get("Impact", "")
 
+    strategy, plan = classify_response(
+        row.get("Response Strategy", row.get("Mitigation Strategy", ""))
+    )
+    response_plan_parts = [
+        p for p in (plan, row.get("Risk Response Plan", "")) if p
+    ]
+
     return MappedRisk(
         risk_description=row.get("Risk Description", row.get("Risk", "")),
         risk_category=row.get("Risk Category", ""),
@@ -192,8 +221,8 @@ def map_punuka_extended_row(
         impact=impact,
         risk_rating=compute_rating(likelihood, impact),
         project_lifecycle_stage=row.get("Project Lifecycle Stage", ""),
-        response_strategy=row.get("Response Strategy", row.get("Mitigation Strategy", "")),
-        response_plan=row.get("Risk Response Plan", ""),
+        response_strategy=strategy,
+        response_plan="; ".join(response_plan_parts),
         risk_owner=row.get("Risk Owner", ""),
         source_risk_id=row.get("Risk ID", ""),
         source_file_name=source_file,
@@ -234,13 +263,16 @@ def map_origin_row(
     likelihood = _extract_level_from_parens(row.get("Probability", ""))
     impact = _extract_level_from_parens(row.get("Impact", ""))
 
+    strategy, plan = classify_response(row.get("Response Strategy", ""))
+
     return MappedRisk(
         risk_description=row.get("Description", ""),
         risk_category=row.get("Category", ""),
         likelihood=likelihood,
         impact=impact,
         risk_rating=compute_rating(likelihood, impact),
-        response_strategy=row.get("Response Strategy", ""),
+        response_strategy=strategy,
+        response_plan=plan,
         risk_owner=row.get("Risk Owner", ""),
         source_risk_id=row.get("Risk ID", ""),
         source_file_name=source_file,
@@ -293,6 +325,7 @@ def map_generic_row(
               "Risk Response Strategy", "Mitigation/Contingency Actions",
               "Risk Reponse", "Mitigation Steps", "Response")
     )
+    strategy, plan = classify_response(response)
 
     return MappedRisk(
         risk_description=description,
@@ -300,7 +333,8 @@ def map_generic_row(
         likelihood=likelihood,
         impact=impact,
         risk_rating=compute_rating(likelihood, impact),
-        response_strategy=response,
+        response_strategy=strategy,
+        response_plan=plan,
         risk_owner=owner,
         source_risk_id=source_id,
         source_file_name=source_file,

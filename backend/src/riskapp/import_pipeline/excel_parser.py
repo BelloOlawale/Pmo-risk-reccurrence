@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from io import BytesIO
 from typing import Any
 
 import openpyxl
+from openpyxl.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 
@@ -21,21 +23,35 @@ def parse_excel(filepath: str) -> list[dict[str, str]]:
         wb = openpyxl.load_workbook(filepath, data_only=True)
     except Exception:
         return []
+    try:
+        return _parse_workbook(wb)
+    finally:
+        wb.close()
 
+
+def parse_excel_bytes(data: bytes) -> list[dict[str, str]]:
+    """Parse an uploaded .xlsx byte payload (used by the admin import API)."""
+    try:
+        wb = openpyxl.load_workbook(BytesIO(data), data_only=True)
+    except Exception:
+        return []
+    try:
+        return _parse_workbook(wb)
+    finally:
+        wb.close()
+
+
+def _parse_workbook(wb: Workbook) -> list[dict[str, str]]:
     ws = wb.active
     if ws is None:
-        wb.close()
         return []
 
     header_row_idx = _find_header_row(ws)
     if header_row_idx is None:
-        wb.close()
         return []
 
     headers = _extract_headers(ws, header_row_idx)
-    rows = _extract_rows(ws, header_row_idx, headers)
-    wb.close()
-    return rows
+    return _extract_rows(ws, header_row_idx, headers)
 
 
 def _clean(val: Any) -> str:

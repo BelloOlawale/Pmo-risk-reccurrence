@@ -44,6 +44,11 @@ from riskapp.services import get_or_create_department, get_or_create_project_typ
 HISTORICAL_RISK_STATUS = "Closed"
 HISTORICAL_RISK_SOURCE = "Historical"
 
+# Source risk IDs are short identifiers ("R1", "BA-001"). Anything sentence-long
+# means the header detection mis-aligned a stray row (e.g. section headers or
+# notes at the bottom of a sheet); those rows are not real risks and are skipped.
+_MAX_SOURCE_ID_LENGTH = 20
+
 _EXCEL_SUFFIXES = (".xlsx", ".xlsm")
 
 
@@ -177,6 +182,12 @@ def import_directory(db: Session, root_path: str) -> ImportResult:
                         row, schema, department_name, project_type_name, file_path.name
                     )
                     if not mapped or not mapped.get("risk_description"):
+                        result.risks_skipped += 1
+                        continue
+
+                    source_risk_id = (mapped.get("source_risk_id") or "").strip()
+                    if len(source_risk_id) > _MAX_SOURCE_ID_LENGTH:
+                        # Mis-aligned stray row (section header / note), not a risk.
                         result.risks_skipped += 1
                         continue
 
