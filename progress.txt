@@ -4,19 +4,20 @@
 [x] #00 Foundation — scaffold, domain core (scoring/status/sla), data model, API tracer bullet (87 tests)
 [x] #01 Status transitions + append-only audit trail (94 tests)
 [x] #02 SLA deadline assignment + manual override (99 tests)
-[x] #03 Historical data import (seed 273 risks / 21 projects)
+[x] #03 Historical data import (seed 272 risks / 21 projects)
 [x] #04 Hybrid retrieval (pure merge/dedupe/rank)
-[x] #05 Semantic embeddings + pgvector
+[x] #05 Semantic embeddings + pgvector (live Azure Postgres verified)
+[x] #06 LLM suggestions + grounded citation audit (live Azure OpenAI verified)
+[x] #07 Accept / Edit / Dismiss + Quick Add
+[x] #08 Celery + scheduler (SLA monitor, start-date email, weekly summary)
+[x] #09 Notifications (email + in-app)
+[x] #10 RBAC + Entra SSO (dev-mode headers now; OIDC path ready for creds)
+[x] #11 Admin bulk import (upload + field mapping + confirm)
+[x] #12 Frontend + dashboards (Vite + React + TS + ECharts; MSAL + dev-mode auth)
 
 ## Remaining (AFK — automatable)
-[ ] #06 LLM suggestions + grounded citation audit
-[ ] #07 Accept / Edit / Dismiss + Quick Add
-[ ] #08 Celery + scheduler (SLA monitor, start-date email, weekly summary)
-[ ] #09 Notifications (email + in-app)
-[ ] #10 RBAC + Entra SSO
-[ ] #11 Admin bulk import (upload + field mapping)
+(backend complete)
 
 ## Remaining (HITL — needs human/Azure)
-[ ] #12 Frontend + dashboards (React/ECharts)
 [ ] #13 Deployment + CI/CD
 [ ] #14 E2E validation + docs
