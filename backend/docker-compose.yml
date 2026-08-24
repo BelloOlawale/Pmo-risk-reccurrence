@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: riskapp-postgres
+    environment:
+      POSTGRES_USER: riskapp
+      POSTGRES_PASSWORD: riskapp
+      POSTGRES_DB: riskapp
+    ports:
+      - "5433:5432"
+    volumes:
+      - riskapp_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U riskapp -d riskapp"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  riskapp_pgdata:

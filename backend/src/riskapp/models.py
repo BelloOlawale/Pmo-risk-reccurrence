@@ -80,6 +80,7 @@ class Project(TimestampMixin, Base):
 
     department: Mapped[Department] = relationship(back_populates="projects")
     project_type: Mapped[ProjectType] = relationship(back_populates="projects")
+    pm_user: Mapped[User | None] = relationship(foreign_keys=[pm_user_id])
     risks: Mapped[list[Risk]] = relationship(back_populates="project")
 
     @property
@@ -211,3 +212,22 @@ class SuggestionDismissal(Base):
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class Notification(TimestampMixin, Base):
+    """In-app notification for a user (bell + unread count in the frontend)."""
+
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    recipient_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
+    type: Mapped[str] = mapped_column(String(50), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    risk_id: Mapped[int | None] = mapped_column(ForeignKey("risks.id"), nullable=True, index=True)
+    project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("projects.id"), nullable=True, index=True
+    )
+    read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

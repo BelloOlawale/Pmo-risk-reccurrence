@@ -29,7 +29,7 @@ def _next_project_code(db: Session) -> str:
     return f"{prefix}{count + 1:03d}"
 
 
-def _next_risk_code(db: Session) -> str:
+def next_risk_code(db: Session) -> str:
     count = (
         db.scalar(
             select(func.count())
@@ -59,7 +59,27 @@ def get_or_create_project_type(db: Session, name: str) -> models.ProjectType:
     return project_type
 
 
-def create_project(db: Session, payload: schemas.ProjectCreate) -> models.Project:
+def get_or_create_user(
+    db: Session, upn: str, display_name: str | None = None
+) -> models.User:
+    """Return the user for ``upn``, creating one on first sight.
+
+    The user row is flushed (id assigned) but not committed — callers decide
+    when to persist (identity resolution in auth commits immediately).
+    """
+    user = db.scalar(select(models.User).where(models.User.upn == upn))
+    if user is None:
+        user = models.User(upn=upn, display_name=display_name or upn)
+        db.add(user)
+        db.flush()
+    elif display_name and user.display_name != display_name:
+        user.display_name = display_name
+    return user
+
+
+def create_project(
+    db: Session, payload: schemas.ProjectCreate, *, pm_user_id: int | None = None
+) -> models.Project:
     department = get_or_create_department(db, payload.department)
     project_type = get_or_create_project_type(db, payload.project_type)
 
@@ -67,6 +87,7 @@ def create_project(db: Session, payload: schemas.ProjectCreate) -> models.Projec
         project_code=_next_project_code(db),
         name=payload.name,
         customer=payload.customer,
+        pm_user_id=pm_user_id,
         start_date=payload.start_date,
         end_date=payload.end_date,
         stage_gate=payload.stage_gate,
@@ -97,7 +118,7 @@ def create_risk(db: Session, payload: schemas.RiskCreate) -> models.Risk:
     now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
     risk = models.Risk(
         project_id=payload.project_id,
-        risk_code=_next_risk_code(db),
+        risk_code=next_risk_code(db),
         description=payload.description,
         category=payload.category,
         subcategory=payload.subcategory,
@@ -110,6 +131,7 @@ def create_risk(db: Session, payload: schemas.RiskCreate) -> models.Risk:
         owner_user_id=payload.owner_user_id,
         risk_start_date=payload.risk_start_date,
         risk_end_date=payload.risk_end_date,
+        source=payload.source or "Custom",
         status=RiskStatus.SUGGESTED.value,
         created_at=now,
         updated_at=now,
@@ -168,6 +190,131 @@ def acknowledge_risk(
         )
         db.commit()
         db.refresh(risk)
+    return risk
+
+
+def accept_risk(
+    db: Session, risk: models.Risk, actor_user_id: int | None = None
+) -> models.Risk:
+    """Accept a Suggested risk: transition to Open, assign owner, start SLA.
+
+    The owner defaults to the project's PM when the risk has no explicit owner.
+    Raises :class:`InvalidTransitionError` if the risk is not Suggested.
+    """
+    target = ensure_transition(risk.status, RiskStatus.OPEN.value)
+    now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
+    old_status = risk.status
+    risk.status = target.value
+    risk.accepted_date = now
+
+    owner_changed = False
+    if risk.owner_user_id is None and risk.project.pm_user_id is not None:
+        risk.owner_user_id = risk.project.pm_user_id
+        owner_changed = True
+
+    if risk.sla_deadline is None:
+        risk.sla_deadline = compute_deadline(
+            risk.risk_rating,
+            deadline_anchor(risk.risk_start_date, risk.created_at or now, settings.tz),
+        )
+
+    record_change(
+        db,
+        risk,
+        action="status_change",
+        field="status",
+        old_value=old_status,
+        new_value=target.value,
+        actor_user_id=actor_user_id,
+    )
+    if owner_changed:
+        record_change(
+            db,
+            risk,
+            action="field_edit",
+            field="owner_user_id",
+            old_value=None,
+            new_value=risk.owner_user_id,
+            actor_user_id=actor_user_id,
+        )
+
+    db.commit()
+    db.refresh(risk)
+    return risk
+
+
+def dismiss_risk(
+    db: Session,
+    risk: models.Risk,
+    *,
+    actor_user_id: int | None = None,
+    reason: str | None = None,
+) -> models.Risk:
+    """Dismiss a Suggested risk and remember it so it never reappears.
+
+    Raises :class:`InvalidTransitionError` if the risk is not Suggested.
+    """
+    target = ensure_transition(risk.status, RiskStatus.DISMISSED.value)
+    old_status = risk.status
+    risk.status = target.value
+
+    record_change(
+        db,
+        risk,
+        action="status_change",
+        field="status",
+        old_value=old_status,
+        new_value=target.value,
+        actor_user_id=actor_user_id,
+    )
+    db.add(
+        models.SuggestionDismissal(
+            project_id=risk.project_id,
+            historical_risk_key=risk.risk_code,
+            reason=reason,
+        )
+    )
+
+    db.commit()
+    db.refresh(risk)
+    return risk
+
+
+def de_escalate_risk(
+    db: Session,
+    risk: models.Risk,
+    *,
+    rationale: str,
+    actor_user_id: int | None = None,
+) -> models.Risk:
+    """De-escalate an Escalated risk back to In Progress, with a rationale.
+
+    Restricted to PM / PMO Lead (enforced at the API layer). The rationale is
+    audit-logged so the decision is always traceable.
+    """
+    target = ensure_transition(risk.status, RiskStatus.IN_PROGRESS.value)
+    old_status = risk.status
+    risk.status = target.value
+    record_change(
+        db,
+        risk,
+        action="status_change",
+        field="status",
+        old_value=old_status,
+        new_value=target.value,
+        actor_user_id=actor_user_id,
+    )
+    record_change(
+        db,
+        risk,
+        action="de_escalate",
+        field="escalation_rationale",
+        old_value=None,
+        new_value=rationale,
+        actor_user_id=actor_user_id,
+    )
+    db.commit()
+    db.refresh(risk)
     return risk
 
 
