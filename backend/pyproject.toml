@@ -25,6 +25,7 @@ dependencies = [
     "PyJWT>=2.8",
     "azure-communication-email>=1.0.0",
     "azure-core>=1.30",
+    "azure-storage-blob>=12.19",
 ]
 
 [project.optional-dependencies]

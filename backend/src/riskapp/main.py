@@ -18,6 +18,7 @@ from riskapp.auth import (
     can_access_risk,
     require_roles,
 )
+from riskapp.blob import AzureBlobStorage, BlobStorageProvider, register_blob_name
 from riskapp.config import settings
 from riskapp.db import get_db
 from riskapp.domain.status import InvalidTransitionError
@@ -70,6 +71,10 @@ def get_chat_provider() -> ChatProvider:
 
 def get_embedding_provider() -> EmbeddingProvider:
     return AzureOpenAIEmbeddings()
+
+
+def get_blob_provider() -> BlobStorageProvider:
+    return AzureBlobStorage()
 
 
 # Role-gated dependencies (dev mode defaults to System Admin, so these are no-ops
@@ -441,6 +446,7 @@ async def initiate_import(
     project_id: Annotated[int, Form()],
     db: DbDep,
     file: Annotated[UploadFile, File()],
+    blob: Annotated[BlobStorageProvider, Depends(get_blob_provider)],
 ) -> schemas.ImportInitiatedRead:
     if get_project(db, project_id) is None:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -457,6 +463,12 @@ async def initiate_import(
         file.filename or "upload.xlsx",
         rows,
         headers,
+    )
+    # Persist the uploaded register to Blob so imported risks carry a durable
+    # source_file_url. No-op (None) when Blob is not configured.
+    job.source_file_url = blob.upload_bytes(
+        register_blob_name(project_id, job.id, job.file_name),
+        data,
     )
     return schemas.ImportInitiatedRead(
         import_id=job.id,

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from riskapp import models
 from riskapp.import_api import ImportJob, run_import, suggest_mapping
 from riskapp.import_pipeline.excel_parser import parse_excel
+from riskapp.main import app, get_blob_provider
 
 FIXTURE = Path(__file__).parent / "fixtures" / "punuka_bpa.xlsx"
 
@@ -89,6 +90,21 @@ class TestRunImport:
         assert report.skipped == 1
         assert report.errors[0].field == "risk_description"
 
+    def test_import_sets_source_file_url(self, db_session: Session) -> None:
+        project = _project(db_session)
+        job = self._job(project.id)
+        job.source_file_url = (
+            "https://riskappstorage1.blob.core.windows.net/"
+            "risk-registers/imports/1/job-1/punuka_bpa.xlsx"
+        )
+        mapping = suggest_mapping(job.headers)
+
+        report = run_import(db_session, job, mapping)
+        assert report.imported > 0
+
+        risks = db_session.scalars(select(models.Risk)).all()
+        assert all(r.source_file_url == job.source_file_url for r in risks)
+
 
 class TestImportApi:
     def test_initiate_and_confirm(self, client: TestClient, db_session: Session) -> None:
@@ -125,3 +141,43 @@ class TestImportApi:
             headers={"X-User-Role": "Project Manager"},
         )
         assert resp.status_code == 403
+
+    def test_initiate_persists_file_to_blob(self, client: TestClient, db_session: Session) -> None:
+        project = _project(db_session)
+        data = FIXTURE.read_bytes()
+        uploaded: dict[str, str] = {}
+
+        class FakeBlob:
+            def upload_bytes(
+                self, blob_name: str, data: bytes, *, content_type: str | None = None
+            ) -> str:
+                uploaded["name"] = blob_name
+                return f"https://fake.blob.core.windows.net/risk-registers/{blob_name}"
+
+        app.dependency_overrides[get_blob_provider] = lambda: FakeBlob()
+        try:
+            resp = client.post(
+                "/api/imports",
+                data={"project_id": str(project.id)},
+                files={"file": ("punuka_bpa.xlsx", data)},
+                headers={"X-User-Role": "System Admin"},
+            )
+            assert resp.status_code == 200
+            import_id = resp.json()["import_id"]
+            assert uploaded["name"].startswith(f"imports/{project.id}/{import_id}/")
+
+            confirm = client.post(
+                f"/api/imports/{import_id}/confirm",
+                json={"mapping": resp.json()["suggested_mapping"]},
+                headers={"X-User-Role": "System Admin"},
+            )
+            assert confirm.status_code == 200
+        finally:
+            app.dependency_overrides.pop(get_blob_provider, None)
+
+        risks = db_session.scalars(select(models.Risk)).all()
+        assert risks
+        assert all(
+            r.source_file_url and "fake.blob.core.windows.net" in r.source_file_url
+            for r in risks
+        )

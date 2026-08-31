@@ -1,13 +1,14 @@
 """Admin bulk-import API: upload → field mapping → import.
 
-A two-step flow matching SPEC §8. Step one parses an uploaded register and
-returns its detected columns plus a suggested canonical-field mapping. Step two
-imports the rows with the confirmed mapping, computing the 3×3 risk rating for
-every row and reporting per-row errors.
+A two-step flow matching SPEC §8. Step one parses an uploaded register, persists
+the raw file to Blob (when configured), and returns its detected columns plus a
+suggested canonical-field mapping. Step two imports the rows with the confirmed
+mapping, computing the 3×3 risk rating for every row, reporting per-row errors,
+and stamping each risk with the durable ``source_file_url``.
 
-The parsed upload is held in a small in-memory registry. This is the single
-process MVP shape; production can move it to Blob/Redis without changing the
-API contract (see issue #13).
+The parsed upload is also held in a small in-memory registry so the confirm
+step can run without re-reading Blob. In a multi-replica deployment this should
+move to Blob/Redis without changing the API contract (see issue #13).
 """
 
 from __future__ import annotations
@@ -93,6 +94,7 @@ class ImportJob:
     file_name: str
     headers: list[str]
     rows: list[dict[str, str]]
+    source_file_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -114,7 +116,11 @@ _LOCK = threading.Lock()
 
 
 def create_import_job(
-    project_id: int, file_name: str, rows: list[dict[str, str]], headers: list[str]
+    project_id: int,
+    file_name: str,
+    rows: list[dict[str, str]],
+    headers: list[str],
+    source_file_url: str | None = None,
 ) -> ImportJob:
     job = ImportJob(
         id=uuid.uuid4().hex,
@@ -122,6 +128,7 @@ def create_import_job(
         file_name=file_name,
         headers=headers,
         rows=rows,
+        source_file_url=source_file_url,
     )
     with _LOCK:
         _REGISTRY[job.id] = job
@@ -188,6 +195,7 @@ def run_import(db: Session, job: ImportJob, mapping: dict[str, str]) -> ImportRe
                 status="Open",
                 source="Custom",
                 source_file_name=job.file_name,
+                source_file_url=job.source_file_url,
                 source_risk_id=_cell(row, mapping, "source_risk_id") or None,
                 sla_deadline=compute_deadline(
                     rating, deadline_anchor(None, now, settings.tz)

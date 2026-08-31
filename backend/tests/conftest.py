@@ -21,9 +21,13 @@ def _force_dev_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run the API in dev (header-based) auth mode, independent of local .env.
 
     Keeps the suite green even when Entra credentials are present in .env.
+    Also blanks the Blob/Azure OpenAI config so no test ever calls live Azure.
     """
     monkeypatch.setattr(settings, "entra_tenant_id", "")
     monkeypatch.setattr(settings, "entra_client_id", "")
+    monkeypatch.setattr(settings, "blob_account_name", "")
+    monkeypatch.setattr(settings, "blob_account_key", "")
+    monkeypatch.setattr(settings, "blob_container", "")
 
 
 @pytest.fixture()
