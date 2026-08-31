@@ -414,10 +414,13 @@ def dismiss_project_suggestion(
 
 
 @app.get("/api/notifications", response_model=list[schemas.NotificationRead])
-def list_notifications(user_id: int, db: DbDep) -> list[schemas.NotificationRead]:
+def list_notifications(principal: PrincipalDep, db: DbDep) -> list[schemas.NotificationRead]:
+    """List the caller's own in-app notifications (scoped to their identity)."""
+    if principal.user_id is None:
+        return []
     entries = db.scalars(
         select(models.Notification)
-        .where(models.Notification.recipient_user_id == user_id)
+        .where(models.Notification.recipient_user_id == principal.user_id)
         .order_by(models.Notification.created_at.desc(), models.Notification.id.desc())
         .limit(100)
     ).all()
@@ -426,11 +429,13 @@ def list_notifications(user_id: int, db: DbDep) -> list[schemas.NotificationRead
 
 @app.post("/api/notifications/{notification_id}/read", response_model=schemas.NotificationRead)
 def mark_notification_read(
-    notification_id: int, db: DbDep
+    notification_id: int, principal: PrincipalDep, db: DbDep
 ) -> schemas.NotificationRead:
     notification = db.get(models.Notification, notification_id)
     if notification is None:
         raise HTTPException(status_code=404, detail="Notification not found")
+    if notification.recipient_user_id != principal.user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
     notification.read = True
     db.commit()
     db.refresh(notification)

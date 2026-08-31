@@ -3,19 +3,14 @@ import { Link } from 'react-router-dom';
 
 import { api } from '../api/client';
 import type { Notification } from '../api/types';
-import { useAuth } from '../auth/AuthContext';
 import { useApi } from '../hooks/useApi';
 import { formatDateTime } from '../utils/format';
 
 export function NotificationBell() {
-  const { userId } = useAuth();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  const { data, setData } = useApi(
-    () => api.get<Notification[]>(`/api/notifications?user_id=${userId ?? 0}`),
-    [userId],
-  );
+  const { data, setData } = useApi(() => api.get<Notification[]>('/api/notifications'), []);
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
