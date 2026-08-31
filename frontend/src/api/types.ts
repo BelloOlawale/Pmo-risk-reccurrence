@@ -21,6 +21,9 @@ export interface Project {
   start_date: string | null;
   end_date: string | null;
   stage_gate: string | null;
+  risk_count: number;
+  risk_ids: number[];
+  risk_codes: string[];
 }
 
 export type Likelihood = 'Low' | 'Medium' | 'High';
@@ -113,4 +116,21 @@ export interface ProjectCreatePayload {
   end_date?: string | null;
   stage_gate?: string | null;
   pm_upn?: string | null;
+}
+
+export interface RiskCreatePayload {
+  project_id: number;
+  description: string;
+  category?: string | null;
+  subcategory?: string | null;
+  risk_source?: RiskSource | null;
+  likelihood: Likelihood;
+  impact: Impact;
+  response_strategy?: ResponseStrategy | null;
+  response_plan?: string | null;
+  owner_user_id?: number | null;
+  risk_start_date?: string | null;
+  risk_end_date?: string | null;
+  source?: 'Historical' | 'Custom' | 'Kickoff' | null;
+  identified_during?: string | null;
 }

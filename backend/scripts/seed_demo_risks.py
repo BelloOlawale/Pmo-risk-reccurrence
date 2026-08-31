@@ -29,13 +29,69 @@ MARKER = "Demo Seed"
 
 # description, category, likelihood, impact, target_status, deadline_offset_hours, acknowledge
 DEMO_RISKS: list[tuple[str, str, str, str, str, float, bool]] = [
-    ("Customer data residency for the new region has not been validated", "Compliance", "High", "High", "Open", 1.5, False),
-    ("Privileged access review for the legacy admin group is overdue", "Security", "High", "Medium", "In Progress", 20.0, False),
-    ("Third-party integration rate limits may stall the nightly sync", "Technical", "Medium", "Medium", "Open", 6.0, False),
-    ("Model drift observed after the last retraining window", "Technical", "High", "High", "Escalated", -3.0, False),
-    ("Vendor onboarding paperwork outstanding for Q3 delivery", "Operational", "Low", "Medium", "Open", 72.0, False),
-    ("Budget variance on the data-platform workstream", "Financial", "Medium", "High", "Escalated", -26.0, False),
-    ("Access review completed and signed off with compliance", "Compliance", "High", "High", "In Progress", 5.0, True),
+    (
+        "Customer data residency for the new region has not been validated",
+        "Compliance",
+        "High",
+        "High",
+        "Open",
+        1.5,
+        False,
+    ),
+    (
+        "Privileged access review for the legacy admin group is overdue",
+        "Security",
+        "High",
+        "Medium",
+        "In Progress",
+        20.0,
+        False,
+    ),
+    (
+        "Third-party integration rate limits may stall the nightly sync",
+        "Technical",
+        "Medium",
+        "Medium",
+        "Open",
+        6.0,
+        False,
+    ),
+    (
+        "Model drift observed after the last retraining window",
+        "Technical",
+        "High",
+        "High",
+        "Escalated",
+        -3.0,
+        False,
+    ),
+    (
+        "Vendor onboarding paperwork outstanding for Q3 delivery",
+        "Operational",
+        "Low",
+        "Medium",
+        "Open",
+        72.0,
+        False,
+    ),
+    (
+        "Budget variance on the data-platform workstream",
+        "Financial",
+        "Medium",
+        "High",
+        "Escalated",
+        -26.0,
+        False,
+    ),
+    (
+        "Access review completed and signed off with compliance",
+        "Compliance",
+        "High",
+        "High",
+        "In Progress",
+        5.0,
+        True,
+    ),
 ]
 
 
@@ -59,7 +115,15 @@ def main() -> int:
 
         now = dt.datetime.now(dt.UTC)
         seeded = 0
-        for description, category, likelihood, impact, target_status, offset_hours, ack in DEMO_RISKS:
+        for (
+            description,
+            category,
+            likelihood,
+            impact,
+            target_status,
+            offset_hours,
+            ack,
+        ) in DEMO_RISKS:
             risk = create_risk(
                 db,
                 schemas.RiskCreate(
@@ -84,7 +148,10 @@ def main() -> int:
             if ack:
                 acknowledge_risk(db, risk)
             seeded += 1
-            print(f"  {risk.risk_code:>8}  {risk.risk_rating:<6} {risk.status:<11} deadline {deadline:%Y-%m-%d %H:%M} UTC")
+            print(
+                f"  {risk.risk_code:>8}  {risk.risk_rating:<6} "
+                f"{risk.status:<11} deadline {deadline:%Y-%m-%d %H:%M} UTC"
+            )
 
         print(f"Seeded {seeded} demo risks on {project.project_code}.")
         return 0

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from riskapp import models
 from riskapp.import_pipeline.importer import (
     SchemaType,
+    _build_risk,
     detect_schema,
     import_directory,
 )
@@ -183,3 +184,21 @@ class TestImportDirectory:
         names = {p.name for p in projects}
         assert "BUSINESS SOLUTIONS — Business Process Automation" in names
         assert "BUSINESS SOLUTIONS — ERP Implementation" in names
+
+
+def test_build_risk_persists_project_lifecycle_stage() -> None:
+    """The 'Project Lifecycle Stage' / 'PLC' source column lands in identified_during."""
+    mapped = {
+        "risk_description": "Vendor lock-in",
+        "likelihood": "High",
+        "impact": "Medium",
+        "project_lifecycle_stage": "Execution",
+        "response_strategy": "Mitigate",
+        "response_plan": "Adopt multi-cloud",
+        "source_file_name": "x.xlsx",
+        "source_risk_id": "R1",
+    }
+    risk = _build_risk(1, mapped, lambda: "RSK-999")  # type: ignore[arg-type]
+    assert risk.identified_during == "Execution"
+    assert risk.response_strategy == "Mitigate"
+    assert risk.response_plan == "Adopt multi-cloud"

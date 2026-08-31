@@ -132,6 +132,7 @@ def create_risk(db: Session, payload: schemas.RiskCreate) -> models.Risk:
         risk_start_date=payload.risk_start_date,
         risk_end_date=payload.risk_end_date,
         source=payload.source or "Custom",
+        identified_during=payload.identified_during,
         status=RiskStatus.SUGGESTED.value,
         created_at=now,
         updated_at=now,

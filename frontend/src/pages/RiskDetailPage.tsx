@@ -22,6 +22,7 @@ interface EditForm {
   owner_user_id: string;
   risk_start_date: string;
   risk_end_date: string;
+  identified_during: string;
 }
 
 const EMPTY_FORM: EditForm = {
@@ -36,6 +37,7 @@ const EMPTY_FORM: EditForm = {
   owner_user_id: '',
   risk_start_date: '',
   risk_end_date: '',
+  identified_during: '',
 };
 
 function toForm(risk: Risk): EditForm {
@@ -51,6 +53,7 @@ function toForm(risk: Risk): EditForm {
     owner_user_id: risk.owner_user_id !== null ? String(risk.owner_user_id) : '',
     risk_start_date: risk.risk_start_date ?? '',
     risk_end_date: risk.risk_end_date ?? '',
+    identified_during: risk.identified_during ?? '',
   };
 }
 
@@ -138,6 +141,7 @@ export function RiskDetailPage() {
         owner_user_id: form.owner_user_id === '' ? null : Number(form.owner_user_id),
         risk_start_date: form.risk_start_date || null,
         risk_end_date: form.risk_end_date || null,
+        identified_during: form.identified_during || null,
         actor_user_id: auth.userId,
       });
       setEditing(false);
@@ -346,6 +350,14 @@ export function RiskDetailPage() {
                           type="date"
                           value={form.risk_end_date}
                           onChange={(e) => setForm({ ...form, risk_end_date: e.target.value })}
+                        />
+                      </div>
+                      <div className="field">
+                        <label>Project life cycle</label>
+                        <input
+                          value={form.identified_during}
+                          onChange={(e) => setForm({ ...form, identified_during: e.target.value })}
+                          placeholder="e.g. Execution, Discovery…"
                         />
                       </div>
                     </div>

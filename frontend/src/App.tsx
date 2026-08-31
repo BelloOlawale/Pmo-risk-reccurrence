@@ -1,17 +1,21 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 
 import { Layout } from './components/Layout';
+import { ActiveRiskRegisterPage } from './pages/ActiveRiskRegisterPage';
 import { OnboardProjectPage } from './pages/OnboardProjectPage';
 import { PortfolioDashboardPage } from './pages/PortfolioDashboardPage';
 import { ProjectDashboardPage } from './pages/ProjectDashboardPage';
-import { ProjectListPage } from './pages/ProjectListPage';
+import { ProjectsPage } from './pages/ProjectsPage';
 import { RiskDetailPage } from './pages/RiskDetailPage';
+import { RiskRegistersPage } from './pages/RiskRegistersPage';
 
 export default function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        <Route path="/" element={<ProjectListPage />} />
+        <Route path="/" element={<RiskRegistersPage />} />
+        <Route path="/active-register" element={<ActiveRiskRegisterPage />} />
+        <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/projects/:projectId" element={<ProjectDashboardPage />} />
         <Route path="/risks/:riskId" element={<RiskDetailPage />} />
         <Route path="/onboard" element={<OnboardProjectPage />} />

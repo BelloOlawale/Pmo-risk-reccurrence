@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     acs_access_key: str = ""
     acs_sender_email: str = ""
 
+    # Azure Blob Storage (uploaded registers + citation links).
+    blob_account_name: str = ""
+    blob_account_key: str = ""
+    blob_container: str = ""
+
     # Redis broker for Celery (scheduler + worker).
     redis_url: str = "redis://localhost:6379/0"
 

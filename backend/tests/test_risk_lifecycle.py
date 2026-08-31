@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -14,11 +12,12 @@ from riskapp.services import (
     create_project,
     create_risk,
     dismiss_risk,
-    get_risk,
 )
 
 
-def _seed_project(db: Session, *, code: str = "PRJ-1", pm_user_id: int | None = None) -> models.Project:
+def _seed_project(
+    db: Session, *, code: str = "PRJ-1", pm_user_id: int | None = None
+) -> models.Project:
     payload = schemas.ProjectCreate(
         name=f"Project {code}",
         department="Digital Advisory",
@@ -63,8 +62,9 @@ class TestAccept:
         risk = _suggested_risk(db_session, project)
         accept_risk(db_session, risk)
 
-        from riskapp.domain.status import InvalidTransitionError
         import pytest
+
+        from riskapp.domain.status import InvalidTransitionError
 
         with pytest.raises(InvalidTransitionError):
             accept_risk(db_session, risk)

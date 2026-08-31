@@ -37,7 +37,7 @@ export function ProjectDashboardPage() {
     <div>
       <div className="page-header">
         <div>
-          <Link to="/" className="muted">
+          <Link to="/projects" className="muted">
             ← Projects
           </Link>
           <h1>{project?.name ?? 'Project'}</h1>

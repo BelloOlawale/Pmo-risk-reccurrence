@@ -54,6 +54,9 @@ class ProjectRead(BaseModel):
     start_date: dt.date | None
     end_date: dt.date | None
     stage_gate: str | None
+    risk_count: int = 0
+    risk_ids: list[int] = Field(default_factory=list)
+    risk_codes: list[str] = Field(default_factory=list)
 
 
 class RiskCreate(BaseModel):
@@ -70,6 +73,7 @@ class RiskCreate(BaseModel):
     risk_start_date: dt.date | None = None
     risk_end_date: dt.date | None = None
     source: Literal["Historical", "Custom", "Kickoff"] | None = None
+    identified_during: str | None = None
 
 
 class RiskRead(BaseModel):
@@ -128,6 +132,7 @@ class RiskUpdate(BaseModel):
     reset_sla_deadline: bool = False
     status: str | None = None
     actor_user_id: int | None = None
+    identified_during: str | None = None
 
 
 class RiskDismiss(BaseModel):

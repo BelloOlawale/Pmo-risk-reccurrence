@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 
 import type { Risk } from '../api/types';
 import { ratingRank, statusRank } from '../utils/colors';
-import { countdownState, formatDateTime } from '../utils/format';
+import { countdownState, formatDate, formatDateTime } from '../utils/format';
 import { RatingBadge, StatusBadge } from './Badges';
 
 type SortKey = 'code' | 'rating' | 'status' | 'owner' | 'sla';
@@ -126,6 +126,8 @@ export function RiskTable({ risks, onSelect }: RiskTableProps) {
               </th>
               <th>Description</th>
               <th>Category</th>
+              <th>Likelihood</th>
+              <th>Impact</th>
               <th className="sortable" onClick={() => toggleSort('rating')}>
                 Rating{sortIndicator('rating')}
               </th>
@@ -136,8 +138,13 @@ export function RiskTable({ risks, onSelect }: RiskTableProps) {
                 Owner{sortIndicator('owner')}
               </th>
               <th className="sortable" onClick={() => toggleSort('sla')}>
-                SLA{sortIndicator('sla')}
+                SLA deadline{sortIndicator('sla')}
               </th>
+              <th>Risk start</th>
+              <th>Risk end</th>
+              <th>Project life cycle</th>
+              <th>Response strategy</th>
+              <th>Response plan</th>
               <th>Source</th>
             </tr>
           </thead>
@@ -151,6 +158,8 @@ export function RiskTable({ risks, onSelect }: RiskTableProps) {
                     {risk.description}
                   </td>
                   <td>{risk.category ?? '—'}</td>
+                  <td>{risk.likelihood}</td>
+                  <td>{risk.impact}</td>
                   <td>
                     <RatingBadge rating={risk.risk_rating} />
                   </td>
@@ -159,9 +168,16 @@ export function RiskTable({ risks, onSelect }: RiskTableProps) {
                   </td>
                   <td>{risk.owner_user_id !== null ? `User #${risk.owner_user_id}` : '—'}</td>
                   <td>
-                    <span className={`sla-countdown tone-${cd.tone}`} title={formatDateTime(risk.sla_deadline)}>
-                      {cd.label}
+                    <span className={`tone-${cd.tone}`} title={cd.label}>
+                      {formatDateTime(risk.sla_deadline)}
                     </span>
+                  </td>
+                  <td>{formatDate(risk.risk_start_date)}</td>
+                  <td>{formatDate(risk.risk_end_date)}</td>
+                  <td>{risk.identified_during ?? '—'}</td>
+                  <td>{risk.response_strategy ?? '—'}</td>
+                  <td className="cell-ellipsis" title={risk.response_plan ?? ''}>
+                    {risk.response_plan ?? '—'}
                   </td>
                   <td>{risk.source ?? '—'}</td>
                 </tr>
@@ -169,7 +185,7 @@ export function RiskTable({ risks, onSelect }: RiskTableProps) {
             })}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="empty-state">
+                <td colSpan={15} className="empty-state">
                   No risks match the current filters.
                 </td>
               </tr>

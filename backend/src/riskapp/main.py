@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from riskapp import models, schemas
@@ -137,7 +137,28 @@ def list_projects(principal: PrincipalDep, db: DbDep) -> list[schemas.ProjectRea
     if not principal.is_pmo_or_admin:
         stmt = stmt.where(models.Project.pm_user_id == principal.user_id)
     projects = db.scalars(stmt.order_by(models.Project.id)).all()
-    return [schemas.ProjectRead.model_validate(p) for p in projects]
+
+    # Risk counts + risk ids grouped by project — the link from the projects
+    # table back to the risk register (the FK is risk.project_id -> project.id).
+    risk_rows = db.execute(
+        select(models.Risk.project_id, models.Risk.id, models.Risk.risk_code)
+    ).all()
+    counts: dict[int, int] = {}
+    risk_ids: dict[int, list[int]] = {}
+    risk_codes: dict[int, list[str]] = {}
+    for project_id, risk_id, risk_code in risk_rows:
+        counts[project_id] = counts.get(project_id, 0) + 1
+        risk_ids.setdefault(project_id, []).append(risk_id)
+        risk_codes.setdefault(project_id, []).append(risk_code)
+
+    result: list[schemas.ProjectRead] = []
+    for project in projects:
+        item = schemas.ProjectRead.model_validate(project)
+        item.risk_count = counts.get(project.id, 0)
+        item.risk_ids = risk_ids.get(project.id, [])
+        item.risk_codes = risk_codes.get(project.id, [])
+        result.append(item)
+    return result
 
 
 @app.get("/api/projects/{project_id}", response_model=schemas.ProjectRead)
@@ -149,7 +170,12 @@ def read_project(
         raise HTTPException(status_code=404, detail="Project not found")
     if not can_access_project(principal, project):
         raise HTTPException(status_code=403, detail="Forbidden")
-    return schemas.ProjectRead.model_validate(project)
+    risk_count = db.scalar(
+        select(func.count(models.Risk.id)).where(models.Risk.project_id == project_id)
+    ) or 0
+    item = schemas.ProjectRead.model_validate(project)
+    item.risk_count = int(risk_count)
+    return item
 
 
 @app.post(
@@ -166,6 +192,26 @@ def add_risk(
     if not can_access_project(principal, project):
         raise HTTPException(status_code=403, detail="Forbidden")
     return schemas.RiskRead.model_validate(create_risk(db, payload))
+
+
+@app.get("/api/risks", response_model=list[schemas.RiskRead])
+def list_risks(principal: PrincipalDep, db: DbDep) -> list[schemas.RiskRead]:
+    """Global risk register: every risk in the system, across all projects.
+
+    Row-level scoping mirrors ``can_access_risk``: PMO Lead / Admin see all
+    risks; owners see the risks assigned to them; PMs see the risks of their
+    own projects.
+    """
+    stmt = select(models.Risk)
+    if not principal.is_pmo_or_admin:
+        stmt = stmt.where(
+            or_(
+                models.Risk.owner_user_id == principal.user_id,
+                models.Risk.project.has(models.Project.pm_user_id == principal.user_id),
+            )
+        )
+    risks = db.scalars(stmt.order_by(models.Risk.id)).all()
+    return [schemas.RiskRead.model_validate(r) for r in risks]
 
 
 @app.get("/api/risks/{risk_id}", response_model=schemas.RiskRead)

@@ -144,7 +144,7 @@ class AzureCommunicationEmail:
                 "RISKAPP_ACS_ENDPOINT and RISKAPP_ACS_ACCESS_KEY."
             )
         try:
-            from azure.communication.email import EmailClient  # type: ignore[import-untyped]
+            from azure.communication.email import EmailClient
             from azure.core.credentials import AzureKeyCredential
         except ImportError as exc:  # pragma: no cover - dependency not in dev env
             raise RuntimeError(

@@ -23,6 +23,8 @@ celery_app.conf.update(
     task_serializer="json",
     result_serializer="json",
     accept_content=["json"],
+    # Register the task module so the worker picks up riskapp.tasks on boot.
+    include=["riskapp.tasks"],
     beat_schedule={
         "monitor-sla-hourly": {
             "task": "riskapp.tasks.monitor_sla",

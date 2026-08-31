@@ -71,8 +71,8 @@ export function OnboardProjectPage() {
     <div>
       <div className="page-header">
         <div>
-          <Link to="/" className="muted">
-            ← Risk Registers
+          <Link to="/projects" className="muted">
+            ← Projects
           </Link>
           <h1>Onboard Project</h1>
           <div className="subtitle">

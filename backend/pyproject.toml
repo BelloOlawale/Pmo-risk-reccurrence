@@ -23,6 +23,8 @@ dependencies = [
     "redis>=5.0",
     "python-multipart>=0.0.9",
     "PyJWT>=2.8",
+    "azure-communication-email>=1.0.0",
+    "azure-core>=1.30",
 ]
 
 [project.optional-dependencies]
@@ -56,4 +58,8 @@ strict = true
 
 [[tool.mypy.overrides]]
 module = "openpyxl.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "azure.*"
 ignore_missing_imports = true

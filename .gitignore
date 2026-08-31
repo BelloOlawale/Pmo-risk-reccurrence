@@ -19,6 +19,9 @@ local.settings.json
 *.db
 *.sqlite3
 
+# Celery Beat schedule files (generated at runtime)
+celerybeat-schedule*
+
 # Node / frontend
 node_modules/
 dist/

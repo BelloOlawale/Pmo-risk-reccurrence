@@ -276,6 +276,7 @@ def _build_risk(
         source=HISTORICAL_RISK_SOURCE,
         source_file_name=mapped.get("source_file_name") or None,
         source_risk_id=mapped.get("source_risk_id") or None,
+        identified_during=mapped.get("project_lifecycle_stage") or None,
     )
 
 

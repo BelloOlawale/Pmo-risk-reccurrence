@@ -97,7 +97,9 @@ class TestPureScoping:
 
 
 class TestApiScoping:
-    def test_pm_cannot_read_another_pms_project(self, client: TestClient, db_session: Session) -> None:
+    def test_pm_cannot_read_another_pms_project(
+        self, client: TestClient, db_session: Session
+    ) -> None:
         alice = _user(db_session, "alice@example.com")
         bob = _user(db_session, "bob@example.com")
         project = _project(db_session, "PRJ-A", alice)
@@ -131,7 +133,9 @@ class TestApiScoping:
         assert resp.status_code == 200
         assert len(resp.json()) == 2
 
-    def test_pm_list_is_scoped_to_own_projects(self, client: TestClient, db_session: Session) -> None:
+    def test_pm_list_is_scoped_to_own_projects(
+        self, client: TestClient, db_session: Session
+    ) -> None:
         alice = _user(db_session, "alice@example.com")
         bob = _user(db_session, "bob@example.com")
         _project(db_session, "PRJ-A", alice)
@@ -203,7 +207,9 @@ class TestDeEscalation:
         assert resp.status_code == 200
         assert resp.json()["status"] == "In Progress"
 
-    def test_owner_without_role_cannot_de_escalate(self, client: TestClient, db_session: Session) -> None:
+    def test_owner_without_role_cannot_de_escalate(
+        self, client: TestClient, db_session: Session
+    ) -> None:
         pm = _user(db_session, "pm@example.com")
         project = _project(db_session, "PRJ-D", pm)
         risk = _risk(db_session, "RSK-D", project, pm, status="Escalated")

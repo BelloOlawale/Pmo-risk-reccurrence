@@ -15,3 +15,16 @@ export const ALLOWED_TRANSITIONS: Record<string, string[]> = {
 export function allowedTransitions(status: string): string[] {
   return ALLOWED_TRANSITIONS[status] ?? [];
 }
+
+/** Statuses that count as "active" — still being managed, not yet resolved/closed. */
+export const ACTIVE_STATUSES = new Set([
+  'Suggested',
+  'Open',
+  'In Progress',
+  'Escalated',
+  'Event',
+]);
+
+export function isActiveStatus(status: string): boolean {
+  return ACTIVE_STATUSES.has(status);
+}

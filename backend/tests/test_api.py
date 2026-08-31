@@ -83,3 +83,55 @@ def test_create_risk_rejects_invalid_rating(client: TestClient) -> None:
         },
     )
     assert resp.status_code == 422  # Literal validation rejects "Critical"
+
+
+def test_list_all_risks_across_projects(client: TestClient) -> None:
+    """The global register returns risks from every project, regardless of project."""
+    p1 = client.post(
+        "/api/projects", json={"name": "Alpha", "department": "D", "project_type": "T"}
+    ).json()
+    p2 = client.post(
+        "/api/projects", json={"name": "Beta", "department": "D", "project_type": "T"}
+    ).json()
+    r1 = client.post(
+        "/api/risks",
+        json={"project_id": p1["id"], "description": "r1", "likelihood": "Low", "impact": "Low"},
+    ).json()
+    r2 = client.post(
+        "/api/risks",
+        json={"project_id": p2["id"], "description": "r2", "likelihood": "High", "impact": "High"},
+    ).json()
+
+    resp = client.get("/api/risks")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 2
+    assert {r["risk_code"] for r in data} == {r1["risk_code"], r2["risk_code"]}
+
+
+def test_projects_list_includes_risk_count_and_ids(client: TestClient) -> None:
+    """The projects table links to the register via risk id and count."""
+    p = client.post(
+        "/api/projects", json={"name": "P", "department": "D", "project_type": "T"}
+    ).json()
+    r1 = client.post(
+        "/api/risks",
+        json={"project_id": p["id"], "description": "r", "likelihood": "Low", "impact": "Low"},
+    ).json()
+    r2 = client.post(
+        "/api/risks",
+        json={
+            "project_id": p["id"],
+            "description": "r2",
+            "likelihood": "Medium",
+            "impact": "Medium",
+        },
+    ).json()
+
+    resp = client.get("/api/projects")
+    assert resp.status_code == 200
+    match = [x for x in resp.json() if x["id"] == p["id"]]
+    assert len(match) == 1
+    assert match[0]["risk_count"] == 2
+    assert sorted(match[0]["risk_ids"]) == sorted([r1["id"], r2["id"]])
+    assert sorted(match[0]["risk_codes"]) == sorted([r1["risk_code"], r2["risk_code"]])

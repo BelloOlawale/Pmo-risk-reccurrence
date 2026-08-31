@@ -78,7 +78,7 @@ app/
 │   │   ├── domain/            # pure, side-effect-free logic (no DB/HTTP)
 │   │   │   ├── scoring.py     # 3×3 rating matrix
 │   │   │   ├── status.py      # lifecycle state machine
-│   │   │   ├── sla.py         # deadlines, warning windows, activity detection
+│   │   │   ├── sla.py         # deadlines, warning windows, activity detec tion
 │   │   │   ├── retrieval.py   # merge/dedupe/rank candidates
 │   │   │   └── similarity.py  # cosine fallback (SQLite dev only)
 │   │   ├── vector_store.py    # pgvector semantic search (<=> cosine, HNSW)
@@ -345,6 +345,37 @@ There are two suggestion surfaces:
   on `:8000`, Vite on `:5173` (proxies `/api` → `:8000`).
 - **prod** — GitHub Actions → build/push to Azure Container Registry → Azure
   Container Apps (web + Celery worker + Beat), secrets in Key Vault.
+
+### Scale & cost (scale-to-zero)
+
+The system runs on Container Apps' **consumption plan** (pay per vCPU-second /
+GB-second, scale to zero), so "always on" is a deliberate choice per replica,
+not a flat VM bill. Only one process genuinely needs 24/7 presence:
+
+| Component | Replicas | Scale rule | Why |
+|---|---|---|---|
+| **web** (FastAPI + SPA) | min 0, max 2 | HTTP requests; scale to zero off-hours | Only needed while a PM is using it |
+| **worker** (Celery) | min 0, max 2 | KEDA on Redis queue length | Only runs when tasks are queued |
+| **Beat** (scheduler) | min 1, max 1 | none (resident) | Timer loop must stay resident to fire hourly/daily/weekly jobs |
+
+- **Worker + Beat** are combined into one replica (`celery -A riskapp worker -B`)
+  so the single always-on replica serves both, at the smallest size
+  (0.25 vCPU + 0.5 GB).
+- **Web** scales to zero outside business hours (nights/weekends). Trade-off: a
+  few seconds cold start on the first morning request.
+- **Off-hours Postgres stop/start** is *not* used — it breaks the overnight SLA
+  monitor and adds operational risk.
+
+**Cost ballpark** (US regions, varies): compute is ~$30–40/month even fully
+always-on (web ~$15–20, worker+Beat ~$15–20). The anchor is managed services,
+not compute: PostgreSQL Flexible Server (burstable) ~$30–60, Redis (Basic)
+~$16. Azure OpenAI is a few $/month for a PMO-sized corpus. Realistic total
+~$80–120/month.
+
+**Optional optimisation** — replace Celery Beat with a consumption-plan Azure
+Function timer trigger that calls `POST /api/internal/sla-monitor` hourly (and
+the daily/weekly equivalents). This costs pennies and lets *every* Container
+App scale to zero. Deferred unless the bill matters.
 
 ### Configuration (env vars, `RISKAPP_*` prefix)
 
