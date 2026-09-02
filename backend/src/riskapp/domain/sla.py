@@ -72,6 +72,18 @@ def compute_deadline(rating: str, start_at: datetime) -> datetime:
     return start_at + timedelta(hours=sla_hours(rating))
 
 
+def compute_end_date(start_date: date | None, rating: str) -> date | None:
+    """Return the Risk End Date: the start date plus the rating's SLA window.
+
+    Reuses the same SLA duration (``sla_hours``) that drives the deadline, so
+    ``Risk End Date = Risk Start Date + SLA duration`` stays consistent with the
+    monitoring logic. Returns ``None`` when there is no start date to anchor from.
+    """
+    if start_date is None:
+        return None
+    return start_date + timedelta(hours=sla_hours(rating))
+
+
 def has_activity(
     *,
     owner_edited: bool = False,

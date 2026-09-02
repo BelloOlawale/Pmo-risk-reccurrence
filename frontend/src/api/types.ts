@@ -18,9 +18,12 @@ export interface Project {
   department_name: string;
   project_type_name: string;
   status: string;
+  pm_user_id: number | null;
   start_date: string | null;
   end_date: string | null;
   stage_gate: string | null;
+  closed_date: string | null;
+  closed_by_user_id: number | null;
   risk_count: number;
   risk_ids: number[];
   risk_codes: string[];

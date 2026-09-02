@@ -11,7 +11,12 @@ from riskapp import models, schemas
 from riskapp.audit import record_change
 from riskapp.config import settings
 from riskapp.domain.scoring import compute_risk_rating
-from riskapp.domain.sla import as_naive_utc, compute_deadline, deadline_anchor
+from riskapp.domain.sla import (
+    as_naive_utc,
+    compute_deadline,
+    compute_end_date,
+    deadline_anchor,
+)
 from riskapp.domain.status import RiskStatus, ensure_transition
 
 
@@ -92,6 +97,7 @@ def create_project(
         end_date=payload.end_date,
         stage_gate=payload.stage_gate,
         status="Active",
+        created_source="User",
     )
     project.department = department
     project.project_type = project_type
@@ -113,6 +119,28 @@ def get_project(db: Session, project_id: int) -> models.Project | None:
     return db.scalar(stmt)
 
 
+def close_project(
+    db: Session, project: models.Project, *, actor_user_id: int | None = None
+) -> models.Project:
+    """Close an Active project, recording who closed it and when.
+
+    Closing a project only changes its project-level lifecycle status. Risks,
+    risk statuses and historical data are left untouched.
+
+    Raises:
+        ValueError: if the project is already closed.
+    """
+    if project.status == "Closed":
+        raise ValueError("Project is already closed")
+    now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
+    project.status = "Closed"
+    project.closed_date = now
+    project.closed_by_user_id = actor_user_id
+    db.commit()
+    db.refresh(project)
+    return project
+
+
 def create_risk(db: Session, payload: schemas.RiskCreate) -> models.Risk:
     rating = compute_risk_rating(payload.likelihood, payload.impact)
     now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
@@ -130,7 +158,7 @@ def create_risk(db: Session, payload: schemas.RiskCreate) -> models.Risk:
         response_plan=payload.response_plan,
         owner_user_id=payload.owner_user_id,
         risk_start_date=payload.risk_start_date,
-        risk_end_date=payload.risk_end_date,
+        risk_end_date=compute_end_date(payload.risk_start_date, rating),
         source=payload.source or "Custom",
         identified_during=payload.identified_during,
         status=RiskStatus.SUGGESTED.value,
@@ -343,6 +371,25 @@ def _set_auto_deadline(
         )
 
 
+def _set_auto_end_date(
+    db: Session, risk: models.Risk, actor_user_id: int | None = None
+) -> None:
+    """Recompute the Risk End Date from the start date and rating, auditing if changed."""
+    new_end = compute_end_date(risk.risk_start_date, risk.risk_rating)
+    old_end = risk.risk_end_date
+    if new_end != old_end:
+        risk.risk_end_date = new_end
+        record_change(
+            db,
+            risk,
+            action="field_edit",
+            field="risk_end_date",
+            old_value=old_end,
+            new_value=new_end,
+            actor_user_id=actor_user_id,
+        )
+
+
 def update_risk(
     db: Session,
     risk: models.Risk,
@@ -360,6 +407,8 @@ def update_risk(
     target_status = data.pop("status", None)
     manual_deadline = data.pop("sla_deadline", None)
     reset_deadline = data.pop("reset_sla_deadline", False)
+    # Risk End Date is always derived; never trust a client-supplied value.
+    data.pop("risk_end_date", None)
 
     for field, new_value in data.items():
         if new_value is None and field in _NON_NULLABLE_FIELDS:
@@ -399,6 +448,7 @@ def update_risk(
     if any(key in data for key in ("likelihood", "impact", "risk_start_date")):
         if not risk.sla_manual_override:
             _set_auto_deadline(db, risk, actor_user_id)
+        _set_auto_end_date(db, risk, actor_user_id)
 
     # Manual deadline override (PM / PMO Lead).
     if manual_deadline is not None:

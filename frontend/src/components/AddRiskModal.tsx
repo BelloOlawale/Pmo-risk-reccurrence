@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 
 import { api, ApiError } from '../api/client';
 import type { Project, ResponseStrategy, Risk, RiskSource } from '../api/types';
+import { computeRiskEndDate, computeRiskRating, todayISO } from '../utils/format';
 
 interface AddRiskModalProps {
   projects: Project[];
@@ -23,7 +24,6 @@ interface FormState {
   response_strategy: string;
   response_plan: string;
   risk_start_date: string;
-  risk_end_date: string;
   identified_during: string;
 }
 
@@ -38,7 +38,6 @@ const EMPTY: FormState = {
   response_strategy: '',
   response_plan: '',
   risk_start_date: '',
-  risk_end_date: '',
   identified_during: '',
 };
 
@@ -49,6 +48,9 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const today = todayISO();
+  const rating = computeRiskRating(form.likelihood, form.impact);
+  const riskEndDate = computeRiskEndDate(form.risk_start_date, rating);
 
   function set<K extends keyof FormState>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -67,6 +69,10 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
       setError('Description is required.');
       return;
     }
+    if (form.risk_start_date && form.risk_start_date < today) {
+      setError('Risk start date cannot be in the past.');
+      return;
+    }
 
     setSaving(true);
     try {
@@ -81,7 +87,6 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
         response_strategy: (form.response_strategy || null) as ResponseStrategy | null,
         response_plan: form.response_plan.trim() || null,
         risk_start_date: form.risk_start_date || null,
-        risk_end_date: form.risk_end_date || null,
         identified_during: form.identified_during.trim() || null,
         source: 'Custom',
       });
@@ -181,6 +186,7 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
               <label>Risk start date</label>
               <input
                 type="date"
+                min={today}
                 value={form.risk_start_date}
                 onChange={(e) => set('risk_start_date', e.target.value)}
               />
@@ -189,9 +195,12 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
               <label>Risk end date</label>
               <input
                 type="date"
-                value={form.risk_end_date}
-                onChange={(e) => set('risk_end_date', e.target.value)}
+                value={riskEndDate ?? ''}
+                readOnly
+                disabled
+                title="Automatically calculated based on risk rating and SLA."
               />
+              <span className="field-hint">Automatically calculated based on risk rating and SLA.</span>
             </div>
             <div className="field">
               <label>Project life cycle</label>

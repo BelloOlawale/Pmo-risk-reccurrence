@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 
 import { api } from '../api/client';
 import type { ResponseStrategy, Risk, RiskAuditLog, RiskSource } from '../api/types';
@@ -8,7 +8,14 @@ import { useAuth } from '../auth/AuthContext';
 import { RatingBadge, SectionCard, StatusBadge } from '../components/Badges';
 import { useApi } from '../hooks/useApi';
 import { allowedTransitions } from '../utils/status';
-import { countdownState, formatDate, formatDateTime } from '../utils/format';
+import {
+  computeRiskEndDate,
+  computeRiskRating,
+  countdownState,
+  formatDate,
+  formatDateTime,
+  todayISO,
+} from '../utils/format';
 
 interface EditForm {
   description: string;
@@ -21,7 +28,6 @@ interface EditForm {
   response_plan: string;
   owner_user_id: string;
   risk_start_date: string;
-  risk_end_date: string;
   identified_during: string;
 }
 
@@ -36,7 +42,6 @@ const EMPTY_FORM: EditForm = {
   response_plan: '',
   owner_user_id: '',
   risk_start_date: '',
-  risk_end_date: '',
   identified_during: '',
 };
 
@@ -52,7 +57,6 @@ function toForm(risk: Risk): EditForm {
     response_plan: risk.response_plan ?? '',
     owner_user_id: risk.owner_user_id !== null ? String(risk.owner_user_id) : '',
     risk_start_date: risk.risk_start_date ?? '',
-    risk_end_date: risk.risk_end_date ?? '',
     identified_during: risk.identified_during ?? '',
   };
 }
@@ -84,6 +88,8 @@ function fmtValue(value: unknown): string {
 
 export function RiskDetailPage() {
   const { riskId } = useParams();
+  const [searchParams] = useSearchParams();
+  const fromActiveRegister = searchParams.get('from') === 'active-register';
   const auth = useAuth();
   const id = Number(riskId);
 
@@ -101,6 +107,10 @@ export function RiskDetailPage() {
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [statusTarget, setStatusTarget] = useState('');
+
+  const today = todayISO();
+  const editRating = computeRiskRating(form.likelihood, form.impact);
+  const editEndDate = computeRiskEndDate(form.risk_start_date, editRating);
 
   useEffect(() => {
     if (risk && !editing) {
@@ -126,6 +136,10 @@ export function RiskDetailPage() {
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
+    if (form.risk_start_date && form.risk_start_date < today) {
+      setActionError('Risk start date cannot be in the past.');
+      return;
+    }
     setSaving(true);
     setActionError(null);
     try {
@@ -140,7 +154,6 @@ export function RiskDetailPage() {
         response_plan: form.response_plan || null,
         owner_user_id: form.owner_user_id === '' ? null : Number(form.owner_user_id),
         risk_start_date: form.risk_start_date || null,
-        risk_end_date: form.risk_end_date || null,
         identified_during: form.identified_during || null,
         actor_user_id: auth.userId,
       });
@@ -186,8 +199,11 @@ export function RiskDetailPage() {
     <div>
       <div className="page-header">
         <div>
-          <Link to={`/projects/${risk?.project_id ?? ''}`} className="muted">
-            ← Back to project
+          <Link
+            to={fromActiveRegister ? '/active-register' : `/projects/${risk?.project_id ?? ''}`}
+            className="muted"
+          >
+            {fromActiveRegister ? '← Back to active risks' : '← Back to project'}
           </Link>
           <h1 style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span className="mono">{risk?.risk_code ?? 'Risk'}</span>
@@ -340,6 +356,7 @@ export function RiskDetailPage() {
                         <label>Risk start date</label>
                         <input
                           type="date"
+                          min={today}
                           value={form.risk_start_date}
                           onChange={(e) => setForm({ ...form, risk_start_date: e.target.value })}
                         />
@@ -348,9 +365,14 @@ export function RiskDetailPage() {
                         <label>Risk end date</label>
                         <input
                           type="date"
-                          value={form.risk_end_date}
-                          onChange={(e) => setForm({ ...form, risk_end_date: e.target.value })}
+                          value={editEndDate ?? ''}
+                          readOnly
+                          disabled
+                          title="Automatically calculated based on risk rating and SLA."
                         />
+                        <span className="field-hint">
+                          Automatically calculated based on risk rating and SLA.
+                        </span>
                       </div>
                       <div className="field">
                         <label>Project life cycle</label>
@@ -420,10 +442,6 @@ export function RiskDetailPage() {
                     <div>
                       <div className="kv-label">Risk end</div>
                       <div className="kv-value">{formatDate(risk.risk_end_date)}</div>
-                    </div>
-                    <div>
-                      <div className="kv-label">SLA deadline</div>
-                      <div className="kv-value">{formatDateTime(risk.sla_deadline)}</div>
                     </div>
                     <div>
                       <div className="kv-label">SLA status</div>

@@ -16,6 +16,7 @@ from riskapp.auth import (
     Role,
     can_access_project,
     can_access_risk,
+    can_close_project,
     require_roles,
 )
 from riskapp.blob import AzureBlobStorage, BlobStorageProvider, register_blob_name
@@ -34,6 +35,7 @@ from riskapp.llm.chat import AzureOpenAIChat, ChatProvider
 from riskapp.services import (
     accept_risk,
     acknowledge_risk,
+    close_project,
     create_project,
     create_risk,
     de_escalate_risk,
@@ -134,11 +136,15 @@ def add_project(
 
 
 @app.get("/api/projects", response_model=list[schemas.ProjectRead])
-def list_projects(principal: PrincipalDep, db: DbDep) -> list[schemas.ProjectRead]:
+def list_projects(
+    principal: PrincipalDep, db: DbDep, status: str | None = None
+) -> list[schemas.ProjectRead]:
     stmt = select(models.Project).options(
         selectinload(models.Project.department),
         selectinload(models.Project.project_type),
     )
+    if status is not None:
+        stmt = stmt.where(models.Project.status == status)
     if not principal.is_pmo_or_admin:
         stmt = stmt.where(models.Project.pm_user_id == principal.user_id)
     projects = db.scalars(stmt.order_by(models.Project.id)).all()
@@ -164,6 +170,27 @@ def list_projects(principal: PrincipalDep, db: DbDep) -> list[schemas.ProjectRea
         item.risk_codes = risk_codes.get(project.id, [])
         result.append(item)
     return result
+
+
+@app.post(
+    "/api/projects/{project_id}/close",
+    response_model=schemas.ProjectRead,
+)
+def close_project_endpoint(
+    project_id: int, principal: PrincipalDep, db: DbDep
+) -> schemas.ProjectRead:
+    project = get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not can_close_project(principal, project):
+        raise HTTPException(
+            status_code=403, detail="Only the assigned Project Manager can close this project"
+        )
+    try:
+        closed = close_project(db, project, actor_user_id=principal.user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return schemas.ProjectRead.model_validate(closed)
 
 
 @app.get("/api/projects/{project_id}", response_model=schemas.ProjectRead)

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import { ratingColor, statusColor, statusLabel } from '../utils/colors';
 
@@ -35,19 +35,38 @@ export function StatusBadge({ status }: { status: string }) {
 export function SectionCard({
   title,
   actions,
+  collapsible = false,
+  defaultCollapsed = false,
   children,
 }: {
   title: string;
   actions?: ReactNode;
+  collapsible?: boolean;
+  defaultCollapsed?: boolean;
   children: ReactNode;
 }) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  const isCollapsed = collapsible && collapsed;
+
   return (
     <div className="card">
-      <div className="card-header">
-        <span>{title}</span>
-        {actions}
+      <div
+        className={`card-header${collapsible ? ' card-header-toggle' : ''}`}
+        onClick={collapsible ? () => setCollapsed((c) => !c) : undefined}
+      >
+        <span className="card-header-title">
+          {collapsible ? (
+            <span className="expand-indicator">{isCollapsed ? '▸' : '▾'}</span>
+          ) : null}
+          {title}
+        </span>
+        {actions ? (
+          <span className="card-header-actions" onClick={(e) => e.stopPropagation()}>
+            {actions}
+          </span>
+        ) : null}
       </div>
-      <div className="card-body">{children}</div>
+      {!isCollapsed ? <div className="card-body">{children}</div> : null}
     </div>
   );
 }

@@ -3,18 +3,25 @@ import { Link, useNavigate } from 'react-router-dom';
 
 import { api } from '../api/client';
 import type { Project, Risk } from '../api/types';
+import { useAuth } from '../auth/AuthContext';
 import { AddRiskModal } from '../components/AddRiskModal';
 import { RatingBadge, StatusBadge } from '../components/Badges';
 import { useApi } from '../hooks/useApi';
-import { countdownState, formatDate, formatDateTime } from '../utils/format';
+import { formatDate } from '../utils/format';
 import { isActiveStatus } from '../utils/status';
 
 export function ActiveRiskRegisterPage() {
   const navigate = useNavigate();
-  const { data: projects } = useApi(() => api.get<Project[]>('/api/projects'));
+  const auth = useAuth();
+  const { data: projects, reload: reloadProjects } = useApi(() =>
+    api.get<Project[]>('/api/projects?status=Active'),
+  );
   const { data: risks, error, loading, reload } = useApi(() => api.get<Risk[]>('/api/risks'));
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [addingProject, setAddingProject] = useState<Project | null>(null);
+  const [closingProject, setClosingProject] = useState<Project | null>(null);
+  const [closing, setClosing] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
 
   // Active risks grouped by project id.
   const activeByProject = useMemo(() => {
@@ -29,10 +36,11 @@ export function ActiveRiskRegisterPage() {
     return map;
   }, [risks]);
 
-  // Projects that actually have at least one active risk, in list order.
+  // Project Status is the source of truth for the Active Risk Register.
+  // The backend query already filters to Active; this guard keeps the rule explicit.
   const projectsWithActive = useMemo(
-    () => (projects ?? []).filter((p) => (activeByProject.get(p.id)?.length ?? 0) > 0),
-    [projects, activeByProject],
+    () => (projects ?? []).filter((p) => p.status === 'Active'),
+    [projects],
   );
 
   const totalActive = useMemo(
@@ -53,13 +61,37 @@ export function ActiveRiskRegisterPage() {
     });
   }
 
+  function canCloseProject(p: Project): boolean {
+    // In dev mode the role/user are known locally, so only the assigned
+    // Project Manager sees the action. In Entra (production) mode roles are
+    // resolved server-side; the button stays visible and the backend enforces
+    // the same rule with a 403 for anyone else.
+    if (!auth.isDevMode) return true;
+    return auth.role === 'Project Manager' && auth.userId !== null && p.pm_user_id === auth.userId;
+  }
+
+  async function confirmClose() {
+    if (!closingProject) return;
+    setClosing(true);
+    setCloseError(null);
+    try {
+      await api.post<Project>(`/api/projects/${closingProject.id}/close`);
+      setClosingProject(null);
+      reloadProjects();
+    } catch (err) {
+      setCloseError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setClosing(false);
+    }
+  }
+
   return (
     <div>
       <div className="page-header">
         <div>
           <h1>Active Risk Register</h1>
           <div className="subtitle">
-            Active risks mapped by project — expand a project to see its live risks
+            Active projects — expand a project to see its active risks
           </div>
         </div>
       </div>
@@ -76,9 +108,8 @@ export function ActiveRiskRegisterPage() {
       ) : projectsWithActive.length === 0 ? (
         <div className="card">
           <div className="empty-state">
-            No active risks yet.{' '}
-            <Link to="/onboard">Onboard a project</Link> to generate its suggestions, or{' '}
-            <Link to="/">add a risk</Link>.
+            No active projects yet.{' '}
+            <Link to="/onboard">Onboard a project</Link> to start its risk register.
           </div>
         </div>
       ) : (
@@ -106,8 +137,20 @@ export function ActiveRiskRegisterPage() {
                       setAddingProject(p);
                     }}
                   >
-                    + Quick add
+                    + Add New
                   </button>
+                  {canCloseProject(p) ? (
+                    <button
+                      className="btn btn-sm btn-danger"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setClosingProject(p);
+                        setCloseError(null);
+                      }}
+                    >
+                      Close Project
+                    </button>
+                  ) : null}
                 </div>
 
                 {!isCollapsed ? (
@@ -123,7 +166,6 @@ export function ActiveRiskRegisterPage() {
                           <th>Rating</th>
                           <th>Status</th>
                           <th>Owner</th>
-                          <th>SLA deadline</th>
                           <th>Risk start</th>
                           <th>Risk end</th>
                           <th>Project life cycle</th>
@@ -134,9 +176,11 @@ export function ActiveRiskRegisterPage() {
                       </thead>
                       <tbody>
                         {activeRisks.map((risk) => {
-                          const cd = countdownState(risk);
                           return (
-                            <tr key={risk.id} onClick={() => navigate(`/risks/${risk.id}`)}>
+                            <tr
+                              key={risk.id}
+                              onClick={() => navigate(`/risks/${risk.id}?from=active-register`)}
+                            >
                               <td className="mono">{risk.risk_code}</td>
                               <td className="cell-ellipsis" title={risk.description}>
                                 {risk.description}
@@ -151,14 +195,6 @@ export function ActiveRiskRegisterPage() {
                                 <StatusBadge status={risk.status} />
                               </td>
                               <td>{risk.owner_user_id !== null ? `User #${risk.owner_user_id}` : '—'}</td>
-                              <td>
-                                <span
-                                  className={`tone-${cd.tone}`}
-                                  title={formatDateTime(risk.sla_deadline)}
-                                >
-                                  {formatDateTime(risk.sla_deadline)}
-                                </span>
-                              </td>
                               <td>{formatDate(risk.risk_start_date)}</td>
                               <td>{formatDate(risk.risk_end_date)}</td>
                               <td>{risk.identified_during ?? '—'}</td>
@@ -170,6 +206,13 @@ export function ActiveRiskRegisterPage() {
                             </tr>
                           );
                         })}
+                        {activeRisks.length === 0 ? (
+                          <tr>
+                            <td colSpan={14} className="empty-state">
+                              No active risks for this project.
+                            </td>
+                          </tr>
+                        ) : null}
                       </tbody>
                     </table>
                   </div>
@@ -190,6 +233,36 @@ export function ActiveRiskRegisterPage() {
             reload();
           }}
         />
+      ) : null}
+
+      {closingProject ? (
+        <div className="modal-overlay" onClick={() => setClosingProject(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Close Project?</h2>
+              <button className="btn btn-sm" onClick={() => setClosingProject(null)} aria-label="Close">
+                ✕
+              </button>
+            </div>
+            <p>
+              Are you sure you want to close{' '}
+              <strong>“{closingProject.name}”</strong>?
+            </p>
+            <p className="muted">
+              Closing this project will remove it from the Active Risk Register. The project and
+              its risk history will remain available in the Projects area.
+            </p>
+            {closeError ? <div className="error-banner">{closeError}</div> : null}
+            <div className="btn-group">
+              <button className="btn" onClick={() => setClosingProject(null)}>
+                Cancel
+              </button>
+              <button className="btn btn-danger" disabled={closing} onClick={() => void confirmClose()}>
+                {closing ? 'Closing…' : 'Close Project'}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

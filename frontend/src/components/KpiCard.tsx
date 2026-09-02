@@ -15,8 +15,13 @@ const TONE_COLORS: Record<NonNullable<KpiCardProps['tone']>, string> = {
 
 export function KpiCard({ label, value, hint, tone = 'default' }: KpiCardProps) {
   return (
-    <div className="kpi">
-      <div className="kpi-label">{label}</div>
+    <div className={`kpi${tone !== 'default' ? ` kpi-${tone}` : ''}`}>
+      <div className="kpi-label">
+        {tone !== 'default' ? (
+          <span className="kpi-dot" style={{ background: TONE_COLORS[tone] }} />
+        ) : null}
+        {label}
+      </div>
       <div className="kpi-value" style={{ color: TONE_COLORS[tone] }}>
         {value}
       </div>

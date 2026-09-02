@@ -5,7 +5,14 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from riskapp.config import settings
+
+
+def _today() -> dt.date:
+    """Today's date in the application business timezone."""
+    return dt.datetime.now(settings.tz).date()
 
 
 class DepartmentCreate(BaseModel):
@@ -40,6 +47,13 @@ class ProjectCreate(BaseModel):
     stage_gate: str | None = None
     pm_upn: str | None = None
 
+    @field_validator("start_date")
+    @classmethod
+    def _start_date_not_past(cls, v: dt.date | None) -> dt.date | None:
+        if v is not None and v < _today():
+            raise ValueError("Project start date cannot be in the past")
+        return v
+
 
 class ProjectRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -51,9 +65,12 @@ class ProjectRead(BaseModel):
     department_name: str
     project_type_name: str
     status: str
+    pm_user_id: int | None = None
     start_date: dt.date | None
     end_date: dt.date | None
     stage_gate: str | None
+    closed_date: dt.datetime | None = None
+    closed_by_user_id: int | None = None
     risk_count: int = 0
     risk_ids: list[int] = Field(default_factory=list)
     risk_codes: list[str] = Field(default_factory=list)
@@ -74,6 +91,13 @@ class RiskCreate(BaseModel):
     risk_end_date: dt.date | None = None
     source: Literal["Historical", "Custom", "Kickoff"] | None = None
     identified_during: str | None = None
+
+    @field_validator("risk_start_date")
+    @classmethod
+    def _risk_start_date_not_past(cls, v: dt.date | None) -> dt.date | None:
+        if v is not None and v < _today():
+            raise ValueError("Risk start date cannot be in the past")
+        return v
 
 
 class RiskRead(BaseModel):
@@ -133,6 +157,13 @@ class RiskUpdate(BaseModel):
     status: str | None = None
     actor_user_id: int | None = None
     identified_during: str | None = None
+
+    @field_validator("risk_start_date")
+    @classmethod
+    def _risk_start_date_not_past(cls, v: dt.date | None) -> dt.date | None:
+        if v is not None and v < _today():
+            raise ValueError("Risk start date cannot be in the past")
+        return v
 
 
 class RiskDismiss(BaseModel):

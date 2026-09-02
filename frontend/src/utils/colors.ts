@@ -10,6 +10,7 @@ export const RATING_COLORS: Record<string, string> = {
 export const RATING_ORDER = ['High', 'Medium', 'Low'] as const;
 
 export const STATUS_COLORS: Record<string, string> = {
+  Active: '#3b82f6',
   Suggested: '#94a3b8',
   Open: '#3b82f6',
   'In Progress': '#8b5cf6',

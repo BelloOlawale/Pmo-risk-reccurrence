@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 
 import { api, ApiError } from '../api/client';
 import type { Project, ProjectCreatePayload } from '../api/types';
+import { todayISO } from '../utils/format';
 
 interface FormState {
   name: string;
@@ -32,6 +33,7 @@ export function OnboardProjectPage() {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const today = todayISO();
 
   function set<K extends keyof FormState>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -42,6 +44,10 @@ export function OnboardProjectPage() {
     setError(null);
     if (!form.name.trim() || !form.department.trim() || !form.project_type.trim()) {
       setError('Name, department, and project type are required.');
+      return;
+    }
+    if (form.start_date && form.start_date < today) {
+      setError('Project start date cannot be in the past.');
       return;
     }
 
@@ -113,6 +119,11 @@ export function OnboardProjectPage() {
                 />
               </div>
               <div className="field">
+                <label>Status</label>
+                <input value="Active" disabled title="New projects start as Active" />
+                <span className="field-hint">New projects start as Active.</span>
+              </div>
+              <div className="field">
                 <label>Customer</label>
                 <input
                   value={form.customer}
@@ -124,6 +135,7 @@ export function OnboardProjectPage() {
                 <label>Start date</label>
                 <input
                   type="date"
+                  min={today}
                   value={form.start_date}
                   onChange={(e) => set('start_date', e.target.value)}
                 />

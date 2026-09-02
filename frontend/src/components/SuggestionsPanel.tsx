@@ -9,14 +9,14 @@ interface SuggestionsPanelProps {
   onAccepted: () => void;
 }
 
-function matchLabel(matchType: string): string {
-  return matchType.charAt(0).toUpperCase() + matchType.slice(1);
-}
-
 /**
  * Suggested recurring risks for a project (from historical data). Accepting a
  * suggestion creates an Open risk in the register; dismissing excludes it from
  * future suggestions for this project.
+ *
+ * Only the information a PMO manager needs to review a suggestion is shown:
+ * description, rating and actions. Technical retrieval metadata (risk id,
+ * match type, source file, similarity) stays internal.
  */
 export function SuggestionsPanel({ projectId, onAccepted }: SuggestionsPanelProps) {
   const [suggestions, setSuggestions] = useState<SuggestedRisk[]>([]);
@@ -55,7 +55,7 @@ export function SuggestionsPanel({ projectId, onAccepted }: SuggestionsPanelProp
   }
 
   async function dismiss(s: SuggestedRisk) {
-    const reason = window.prompt(`Reason for dismissing ${s.risk_id} (optional):`);
+    const reason = window.prompt('Reason for dismissing this suggested risk (optional):');
     if (reason === null) return;
     setBusyId(s.risk_id);
     setError(null);
@@ -75,6 +75,7 @@ export function SuggestionsPanel({ projectId, onAccepted }: SuggestionsPanelProp
   return (
     <SectionCard
       title={`Suggested risks (${suggestions.length})`}
+      collapsible
       actions={
         <button className="btn btn-sm" onClick={() => void load()} disabled={loading}>
           Refresh
@@ -90,41 +91,52 @@ export function SuggestionsPanel({ projectId, onAccepted }: SuggestionsPanelProp
           historical matches are found.
         </div>
       ) : (
-        <div className="sla-list">
-          {suggestions.map((s) => (
-            <div key={s.risk_id} className="sla-row" style={{ cursor: 'default' }}>
-              <span className="mono">{s.risk_id}</span>
-              {s.risk_rating ? <RatingBadge rating={s.risk_rating} /> : null}
-              <span className="cell-ellipsis" title={s.description}>
-                {s.description}
-              </span>
-              <span
-                className="badge"
-                style={{ color: '#8fa3bf', backgroundColor: '#172236', borderColor: '#31415f' }}
-              >
-                {matchLabel(s.match_type)}
-              </span>
-              <span className="muted cell-ellipsis" style={{ maxWidth: 160 }} title={s.source_file}>
-                {s.source_file}
-              </span>
-              <span className="btn-group">
-                <button
-                  className="btn btn-primary btn-sm"
-                  disabled={busyId === s.risk_id}
-                  onClick={() => void accept(s)}
-                >
-                  Accept
-                </button>
-                <button
-                  className="btn btn-danger btn-sm"
-                  disabled={busyId === s.risk_id}
-                  onClick={() => void dismiss(s)}
-                >
-                  Dismiss
-                </button>
-              </span>
-            </div>
-          ))}
+        <div className="table-wrap">
+          <table className="suggested-table">
+            <thead>
+              <tr>
+                <th className="suggested-desc-col">Risk Description</th>
+                <th className="suggested-rating-col">Risk Rating</th>
+                <th className="suggested-actions-col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {suggestions.map((s) => (
+                <tr key={s.risk_id}>
+                  <td className="suggested-desc-cell">
+                    <span className="suggested-desc" title={s.description}>
+                      {s.description}
+                    </span>
+                  </td>
+                  <td className="suggested-rating-cell">
+                    {s.risk_rating ? (
+                      <RatingBadge rating={s.risk_rating} />
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                  <td className="suggested-actions-cell">
+                    <div className="btn-group suggested-actions">
+                      <button
+                        className="btn btn-primary btn-sm"
+                        disabled={busyId === s.risk_id}
+                        onClick={() => void accept(s)}
+                      >
+                        Accept
+                      </button>
+                      <button
+                        className="btn btn-danger btn-sm"
+                        disabled={busyId === s.risk_id}
+                        onClick={() => void dismiss(s)}
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </SectionCard>

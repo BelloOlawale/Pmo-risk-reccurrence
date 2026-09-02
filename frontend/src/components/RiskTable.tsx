@@ -2,10 +2,10 @@ import { useMemo, useState } from 'react';
 
 import type { Risk } from '../api/types';
 import { ratingRank, statusRank } from '../utils/colors';
-import { countdownState, formatDate, formatDateTime } from '../utils/format';
+import { formatDate } from '../utils/format';
 import { RatingBadge, StatusBadge } from './Badges';
 
-type SortKey = 'code' | 'rating' | 'status' | 'owner' | 'sla';
+type SortKey = 'code' | 'rating' | 'status' | 'owner';
 
 interface RiskTableProps {
   risks: Risk[];
@@ -27,10 +27,6 @@ function compare(a: Risk, b: Risk, key: SortKey, dir: 'asc' | 'desc'): number {
     case 'owner':
       va = a.owner_user_id ?? 999_999;
       vb = b.owner_user_id ?? 999_999;
-      break;
-    case 'sla':
-      va = a.sla_deadline ?? '9999-12-31';
-      vb = b.sla_deadline ?? '9999-12-31';
       break;
     default:
       va = a.risk_code;
@@ -137,9 +133,6 @@ export function RiskTable({ risks, onSelect }: RiskTableProps) {
               <th className="sortable" onClick={() => toggleSort('owner')}>
                 Owner{sortIndicator('owner')}
               </th>
-              <th className="sortable" onClick={() => toggleSort('sla')}>
-                SLA deadline{sortIndicator('sla')}
-              </th>
               <th>Risk start</th>
               <th>Risk end</th>
               <th>Project life cycle</th>
@@ -150,7 +143,6 @@ export function RiskTable({ risks, onSelect }: RiskTableProps) {
           </thead>
           <tbody>
             {rows.map((risk) => {
-              const cd = countdownState(risk);
               return (
                 <tr key={risk.id} onClick={() => onSelect(risk)}>
                   <td className="mono">{risk.risk_code}</td>
@@ -167,11 +159,6 @@ export function RiskTable({ risks, onSelect }: RiskTableProps) {
                     <StatusBadge status={risk.status} />
                   </td>
                   <td>{risk.owner_user_id !== null ? `User #${risk.owner_user_id}` : '—'}</td>
-                  <td>
-                    <span className={`tone-${cd.tone}`} title={cd.label}>
-                      {formatDateTime(risk.sla_deadline)}
-                    </span>
-                  </td>
                   <td>{formatDate(risk.risk_start_date)}</td>
                   <td>{formatDate(risk.risk_end_date)}</td>
                   <td>{risk.identified_during ?? '—'}</td>
@@ -185,7 +172,7 @@ export function RiskTable({ risks, onSelect }: RiskTableProps) {
             })}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={15} className="empty-state">
+                <td colSpan={14} className="empty-state">
                   No risks match the current filters.
                 </td>
               </tr>

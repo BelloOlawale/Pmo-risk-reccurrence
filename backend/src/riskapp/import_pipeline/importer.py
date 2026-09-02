@@ -43,6 +43,10 @@ from riskapp.services import get_or_create_department, get_or_create_project_typ
 # Historical rows are seeded as Closed — they are past learnings, not active.
 HISTORICAL_RISK_STATUS = "Closed"
 HISTORICAL_RISK_SOURCE = "Historical"
+# Historical projects are seeded, not user-created, and must not appear in the
+# Active Risk Register.
+HISTORICAL_PROJECT_STATUS = "Closed"
+HISTORICAL_PROJECT_SOURCE = "Historical"
 
 # Source risk IDs are short identifiers ("R1", "BA-001"). Anything sentence-long
 # means the header detection mis-aligned a stray row (e.g. section headers or
@@ -224,7 +228,8 @@ def _get_or_create_project(
     project = models.Project(
         project_code=next_project_code(),
         name=f"{department_name} — {project_type_name}",
-        status="Active",
+        status=HISTORICAL_PROJECT_STATUS,
+        created_source=HISTORICAL_PROJECT_SOURCE,
     )
     project.department = department
     project.project_type = project_type

@@ -78,15 +78,18 @@ export function ProjectDashboardPage() {
             <SectionCard title="Status (stacked by rating)">
               <StackedBarChart data={statusStack(riskList)} />
             </SectionCard>
+          </div>
+
+          <div className="chart-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
             <SectionCard title="Risk by category">
               <TreemapChart data={categoryTreemap(riskList)} />
             </SectionCard>
-          </div>
-
-          <div className="chart-grid" style={{ gridTemplateColumns: '1fr 2fr' }}>
             <SectionCard title="SLA countdown">
               <SlaCountdownList risks={riskList} onSelect={(r) => navigate(`/risks/${r.id}`)} />
             </SectionCard>
+          </div>
+
+          <div className="chart-grid" style={{ gridTemplateColumns: '1fr' }}>
             <SectionCard title={`Risk Register (${riskList.length})`}>
               <RiskTable risks={riskList} onSelect={(r) => navigate(`/risks/${r.id}`)} />
             </SectionCard>

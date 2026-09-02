@@ -77,10 +77,20 @@ class Project(TimestampMixin, Base):
     end_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     stage_gate: Mapped[str | None] = mapped_column(String(100), nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="Active", nullable=False)
+    # Internal provenance: how the project entered the system.
+    # "User" = created through the app; "Historical" = seeded/imported.
+    created_source: Mapped[str] = mapped_column(String(30), default="User", nullable=False)
+    closed_date: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    closed_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
 
     department: Mapped[Department] = relationship(back_populates="projects")
     project_type: Mapped[ProjectType] = relationship(back_populates="projects")
     pm_user: Mapped[User | None] = relationship(foreign_keys=[pm_user_id])
+    closed_by_user: Mapped[User | None] = relationship(foreign_keys=[closed_by_user_id])
     risks: Mapped[list[Risk]] = relationship(back_populates="project")
 
     @property

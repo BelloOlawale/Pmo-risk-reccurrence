@@ -169,6 +169,15 @@ def can_access_project(principal: Principal, project: Any) -> bool:
     )
 
 
+def can_close_project(principal: Principal, project: Any) -> bool:
+    """True only for the Project Manager explicitly assigned to the project."""
+    return (
+        principal.has_role(Role.PROJECT_MANAGER)
+        and principal.user_id is not None
+        and project.pm_user_id == principal.user_id
+    )
+
+
 def can_access_risk(principal: Principal, risk: Any) -> bool:
     """PMO Lead / Admin see everything; owners and project PMs see their risks."""
     if principal.is_pmo_or_admin:

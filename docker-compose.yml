@@ -1,0 +1,106 @@
+# Full local stack for the PMO Risk Recurrence Predictor.
+#
+#   docker compose up --build
+#
+# Services:
+#   postgres   pgvector-enabled PostgreSQL (localhost:5433)
+#   redis      broker/result backend for Celery (localhost:6379)
+#   web        FastAPI API (localhost:8000) — runs Alembic then uvicorn
+#   worker     Celery worker (SLA monitor, start-date checks, summaries)
+#   beat       Celery beat scheduler
+#   frontend   React SPA served by nginx (localhost:8080)
+#
+# Backend secrets/credentials are read from backend/.env. Only the database and
+# broker URLs are overridden here so the app talks to the Compose services.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: riskapp
+      POSTGRES_PASSWORD: riskapp
+      POSTGRES_DB: riskapp
+    ports:
+      - "5433:5432"
+    volumes:
+      - riskapp_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U riskapp -d riskapp"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  web:
+    build:
+      context: ./backend
+    env_file:
+      - ./backend/.env
+    environment:
+      RISKAPP_DATABASE_URL: postgresql+psycopg://riskapp:riskapp@postgres:5432/riskapp
+      RISKAPP_REDIS_URL: redis://redis:6379/0
+      RISKAPP_CORS_ORIGINS: http://localhost:8080,http://localhost:5173
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn riskapp.main:app --host 0.0.0.0 --port 8000"
+
+  worker:
+    build:
+      context: ./backend
+    env_file:
+      - ./backend/.env
+    environment:
+      RISKAPP_DATABASE_URL: postgresql+psycopg://riskapp:riskapp@postgres:5432/riskapp
+      RISKAPP_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "riskapp.celery_app:celery_app", "worker", "--loglevel=INFO"]
+
+  beat:
+    build:
+      context: ./backend
+    env_file:
+      - ./backend/.env
+    environment:
+      RISKAPP_DATABASE_URL: postgresql+psycopg://riskapp:riskapp@postgres:5432/riskapp
+      RISKAPP_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "riskapp.celery_app:celery_app", "beat", "--loglevel=INFO"]
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "8080:80"
+    volumes:
+      - ./frontend/nginx.compose.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - web
+
+volumes:
+  riskapp_pgdata:
+    external: true
+    name: backend_riskapp_pgdata
