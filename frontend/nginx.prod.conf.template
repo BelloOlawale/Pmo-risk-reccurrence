@@ -1,0 +1,32 @@
+# Production nginx config template for Azure Container Apps.
+#
+# Rendered by /start-nginx.sh at container start only when $API_UPSTREAM is
+# set (injected as an env var by Container Apps).
+#
+#   API_UPSTREAM = https://<web-container-app-fqdn>
+#   (no trailing slash; nginx preserves the original /api/... path)
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # React Router fallback: let the SPA handle client-side routes.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Same-origin API proxy. The browser only talks to this origin, so there is
+    # no CORS between the SPA and the API.
+    location /api/ {
+        proxy_pass ${API_UPSTREAM};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript image/svg+xml;
+}

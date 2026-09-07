@@ -1,0 +1,85 @@
+# Deploy the PMO Risk Recurrence Predictor to Azure Container Apps.
+#
+# Manual trigger (workflow_dispatch). See infra/README.md for the required
+# GitHub secrets (AZURE_CREDENTIALS service principal + RISKAPP_* values) and
+# the subscription/RBAC prerequisites.
+#
+# If Entra SSO is wanted in the SPA, also add VITE_ENTRA_CLIENT_ID and
+# VITE_ENTRA_TENANT_ID secrets (and set RISKAPP_ENTRA_* above).
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment environment
+        type: choice
+        required: true
+        default: dev
+        options:
+          - dev
+          - prod
+      stage:
+        description: Deployment stage
+        type: choice
+        required: true
+        default: all
+        options:
+          - all
+          - infra
+          - images
+          - apps
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Install Bicep
+        run: az bicep install
+
+      - name: Deploy (${{ inputs.environment }} / ${{ inputs.stage }})
+        run: |
+          bash infra/deploy.sh "${{ inputs.environment }}" \
+            --stage "${{ inputs.stage }}" \
+            --image-tag "${{ github.sha }}"
+        env:
+          AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'eastus' }}
+          # --- Runtime configuration (source of truth for the deployed app) ---
+          RISKAPP_DATABASE_URL: ${{ secrets.RISKAPP_DATABASE_URL }}
+          RISKAPP_REDIS_URL: ${{ secrets.RISKAPP_REDIS_URL }}
+          RISKAPP_AZURE_OPENAI_ENDPOINT: ${{ secrets.RISKAPP_AZURE_OPENAI_ENDPOINT }}
+          RISKAPP_AZURE_OPENAI_API_KEY: ${{ secrets.RISKAPP_AZURE_OPENAI_API_KEY }}
+          RISKAPP_AZURE_OPENAI_EMBEDDING_DEPLOYMENT: ${{ secrets.RISKAPP_AZURE_OPENAI_EMBEDDING_DEPLOYMENT }}
+          RISKAPP_AZURE_OPENAI_CHAT_DEPLOYMENT: ${{ secrets.RISKAPP_AZURE_OPENAI_CHAT_DEPLOYMENT }}
+          RISKAPP_AZURE_OPENAI_API_VERSION: ${{ secrets.RISKAPP_AZURE_OPENAI_API_VERSION }}
+          RISKAPP_ACS_ENDPOINT: ${{ secrets.RISKAPP_ACS_ENDPOINT }}
+          RISKAPP_ACS_ACCESS_KEY: ${{ secrets.RISKAPP_ACS_ACCESS_KEY }}
+          RISKAPP_ACS_SENDER_EMAIL: ${{ secrets.RISKAPP_ACS_SENDER_EMAIL }}
+          RISKAPP_BLOB_ACCOUNT_NAME: ${{ secrets.RISKAPP_BLOB_ACCOUNT_NAME }}
+          RISKAPP_BLOB_ACCOUNT_KEY: ${{ secrets.RISKAPP_BLOB_ACCOUNT_KEY }}
+          RISKAPP_BLOB_CONTAINER: ${{ secrets.RISKAPP_BLOB_CONTAINER }}
+          RISKAPP_ENTRA_TENANT_ID: ${{ secrets.RISKAPP_ENTRA_TENANT_ID }}
+          RISKAPP_ENTRA_CLIENT_ID: ${{ secrets.RISKAPP_ENTRA_CLIENT_ID }}
+          RISKAPP_ENTRA_CLIENT_SECRET: ${{ secrets.RISKAPP_ENTRA_CLIENT_SECRET }}
+          RISKAPP_ENTRA_ROLE_GROUP_IDS: ${{ secrets.RISKAPP_ENTRA_ROLE_GROUP_IDS }}
+          RISKAPP_APP_BASE_URL: ${{ vars.RISKAPP_APP_BASE_URL }}
+          RISKAPP_CORS_ORIGINS: ${{ vars.RISKAPP_CORS_ORIGINS }}
+          # --- Optional SPA build args (Entra SSO in the browser) ---
+          VITE_ENTRA_CLIENT_ID: ${{ secrets.VITE_ENTRA_CLIENT_ID }}
+          VITE_ENTRA_TENANT_ID: ${{ secrets.VITE_ENTRA_TENANT_ID }}

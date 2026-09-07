@@ -6,8 +6,12 @@ PMO Risk Recurrence Predictor. It corresponds to `Issues/13-deployment-cicd.md`.
 > Status:
 > - **Dockerfiles + local Docker Compose implemented.**
 > - **GitHub Actions PR CI implemented** (`.github/workflows/ci.yml`).
-> - Azure provisioning and build/deploy pipelines are still pending (see
->   [Next steps](#next-steps)).
+> - **Azure provisioning drafted** — Bicep templates + deploy scripts under
+>   `infra/` (ACR, Container Apps environment, web/worker/beat/frontend apps)
+>   and a `workflow_dispatch` deploy workflow (`.github/workflows/deploy.yml`).
+>   See [`infra/README.md`](infra/README.md) for usage.
+> - Azure provisioning is still pending execution (needs an Azure login with
+>   Contributor on the target subscription — see [Next steps](#next-steps)).
 
 ---
 
@@ -26,7 +30,17 @@ app/
 │   ├── Dockerfile                 # Node build → nginx serve
 │   ├── nginx.conf                 # standalone SPA config (proxy commented out)
 │   ├── nginx.compose.conf         # Compose config (proxy enabled)
+│   ├── nginx.prod.conf.template   # Container Apps config (rendered from $API_UPSTREAM)
+│   ├── start-nginx.sh            # renders template when API_UPSTREAM is set
 │   └── .dockerignore
+├── infra/                         # Azure Container Apps IaC (issue #13)
+│   ├── main.bicep + modules/      # ACR, environment, container apps
+│   ├── deploy.sh / deploy.ps1     # staged deploy: infra → images → apps
+│   ├── make_params.py             # builds deployment parameters from env / .env
+│   └── README.md
+├── .github/workflows/
+│   ├── ci.yml                     # PR CI (pytest/ruff/mypy, typecheck/build)
+│   └── deploy.yml                 # manual Container Apps deploy (workflow_dispatch)
 └── docker-compose.yml             # full local stack
 ```
 
@@ -185,21 +199,25 @@ Both jobs run in parallel on `ubuntu-latest` using Python 3.11 and Node 20.
 
 ## 7. What is still pending
 
-- Azure resource provisioning (Container Apps, ACR, PostgreSQL Flexible Server,
-  Redis, Blob Storage, Key Vault, ACS, Azure OpenAI, Entra app registration)
-- GitHub Actions build → ACR → Container Apps deploy
-- `dev` + `prod` environments
+- **Execution** of the drafted Azure deployment (needs an Azure login with
+  Contributor on the target subscription/resource group):
+  1. Provision ACR + Container Apps environment — `bash infra/deploy.sh dev --stage infra`
+  2. Build & push images — `bash infra/deploy.sh dev --stage images`
+  3. Deploy the four container apps — `bash infra/deploy.sh dev --stage apps`
+- Key Vault-backed secrets + managed-identity image pulls (hardening).
+- Dev + prod environments, custom domains/TLS if required.
 
 ---
 
 ## 8. Next steps
 
-1. **Azure provisioning** — Bicep or `az` CLI scripts for the resources listed
-   in §7.
-2. **Build/deploy workflow** — build Docker images, push to ACR, deploy to
-   Container Apps with `dev` and `prod` environments.
-3. **Secrets** — store all `RISKAPP_*` values in Key Vault and inject them into
-   the Container Apps.
+1. **Azure provisioning** — `infra/main.bicep` + `infra/deploy.{sh,ps1}`
+   provision ACR, the Container Apps environment, and the web/worker/beat/
+   frontend apps (see [`infra/README.md`](infra/README.md)).
+2. **Build/deploy workflow** — `.github/workflows/deploy.yml` runs the staged
+   deploy from CI (`workflow_dispatch`, dev/prod).
+3. **Secrets** — store all `RISKAPP_*` values as GitHub secrets for the deploy
+   workflow; move them into Key Vault references once hardened.
 
 ---
 
