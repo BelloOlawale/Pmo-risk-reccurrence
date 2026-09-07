@@ -38,6 +38,13 @@ const ICONS: Record<string, ReactNode> = {
 export function Layout() {
   const auth = useAuth();
 
+  // Remount the active page whenever the dev identity changes so every page
+  // refetches with the new role/user (otherwise lists fetched under the old
+  // identity stay on screen and the Close/visible actions look wrong).
+  const outletKey = auth.isDevMode
+    ? `dev:${auth.role}:${auth.userId ?? 'none'}`
+    : 'sso';
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -123,7 +130,7 @@ export function Layout() {
               </button>
             </div>
           ) : (
-            <Outlet />
+            <Outlet key={outletKey} />
           )}
         </main>
       </div>
