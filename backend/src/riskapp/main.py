@@ -17,12 +17,13 @@ from riskapp.auth import (
     can_access_project,
     can_access_risk,
     can_close_project,
+    can_close_risk,
     require_roles,
 )
 from riskapp.blob import AzureBlobStorage, BlobStorageProvider, register_blob_name
 from riskapp.config import settings
 from riskapp.db import get_db
-from riskapp.domain.status import InvalidTransitionError
+from riskapp.domain.status import InvalidTransitionError, RiskStatus
 from riskapp.embeddings import AzureOpenAIEmbeddings, EmbeddingProvider
 from riskapp.import_api import (
     create_import_job,
@@ -92,6 +93,16 @@ AdminDep = Annotated[
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/me")
+def me(principal: PrincipalDep) -> dict[str, object]:
+    """The current caller's identity and roles (used by the UI for role-aware controls)."""
+    return {
+        "user_id": principal.user_id,
+        "upn": principal.upn,
+        "roles": sorted(role.value for role in principal.roles),
+    }
 
 
 @app.post(
@@ -278,6 +289,14 @@ def patch_risk(
         raise HTTPException(status_code=404, detail="Risk not found")
     if not can_access_risk(principal, risk):
         raise HTTPException(status_code=403, detail="Forbidden")
+    # Closing a risk (status -> Closed) is reserved for the PMO Lead (final
+    # closure authority). System Admin may also close as the app's superuser.
+    # Enforced here, not just hidden in the UI.
+    if payload.status == RiskStatus.CLOSED.value and not can_close_risk(principal):
+        raise HTTPException(
+            status_code=403,
+            detail="You are not authorized to close risks. Only a PMO Lead can close a risk.",
+        )
     try:
         updated = update_risk(db, risk, payload, actor_user_id=payload.actor_user_id)
     except InvalidTransitionError as exc:

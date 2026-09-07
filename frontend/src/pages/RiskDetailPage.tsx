@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 
 import { api } from '../api/client';
-import type { ResponseStrategy, Risk, RiskAuditLog, RiskSource } from '../api/types';
+import type { Me, ResponseStrategy, Risk, RiskAuditLog, RiskSource } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { RatingBadge, SectionCard, StatusBadge } from '../components/Badges';
 import { useApi } from '../hooks/useApi';
@@ -101,12 +101,14 @@ export function RiskDetailPage() {
     () => api.get<RiskAuditLog[]>(`/api/risks/${id}/history`),
     [id],
   );
+  const { data: me } = useApi(() => api.get<Me>('/api/me'), []);
 
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<EditForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [statusTarget, setStatusTarget] = useState('');
+  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
 
   const today = todayISO();
   const editRating = computeRiskRating(form.likelihood, form.impact);
@@ -171,6 +173,16 @@ export function RiskDetailPage() {
     await runAction(() => api.patch<Risk>(`/api/risks/${id}`, { status: target, actor_user_id: auth.userId }));
   }
 
+  /** Apply the selected status; transitions to Closed need explicit confirmation. */
+  async function handleApplyStatus() {
+    if (!statusTarget) return;
+    if (statusTarget === 'Closed') {
+      setConfirmCloseOpen(true);
+      return;
+    }
+    await applyStatus(statusTarget);
+  }
+
   function dismiss() {
     void runAction(() =>
       api.post<Risk>(`/api/risks/${id}/dismiss`, { reason: null, actor_user_id: auth.userId }),
@@ -191,6 +203,17 @@ export function RiskDetailPage() {
 
   const readOnly = risk?.status === 'Closed' || risk?.status === 'Dismissed';
   const transitions = risk ? allowedTransitions(risk.status) : [];
+  // PMO Lead has the final authority to close a risk; System Admin is the app
+  // superuser. Everyone else sees the lifecycle without the Closed transition
+  // (the backend enforces the same rule regardless of what the UI shows).
+  const canCloseRisk = (me?.roles ?? []).some(
+    (role) => role === 'PMO Lead' || role === 'System Admin',
+  );
+  const statusOptions = canCloseRisk
+    ? transitions
+    : transitions.filter((t) => t !== 'Closed');
+  const awaitingPmoClosure =
+    risk?.status === 'Resolved' && statusOptions.length === 0;
 
   return (
     <div>
@@ -504,28 +527,42 @@ export function RiskDetailPage() {
                 </SectionCard>
               ) : null}
 
-              {transitions.length > 0 ? (
+              {statusOptions.length > 0 || awaitingPmoClosure ? (
                 <SectionCard title="Change status">
-                  <div className="field">
-                    <select
-                      value={statusTarget}
-                      onChange={(e) => setStatusTarget(e.target.value)}
-                    >
-                      <option value="">Select next status…</option>
-                      {transitions.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <button
-                    className="btn"
-                    disabled={!statusTarget}
-                    onClick={() => void applyStatus(statusTarget)}
-                  >
-                    Apply
-                  </button>
+                  {statusOptions.length > 0 ? (
+                    <>
+                      <div className="field">
+                        <select
+                          value={statusTarget}
+                          onChange={(e) => setStatusTarget(e.target.value)}
+                        >
+                          <option value="">Select next status…</option>
+                          {statusOptions.map((t) => (
+                            <option key={t} value={t}>
+                              {t}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      {statusTarget === 'Closed' ? (
+                        <p className="muted">
+                          Closing a risk is final — you will be asked to confirm.
+                        </p>
+                      ) : null}
+                      <button
+                        className="btn"
+                        disabled={!statusTarget}
+                        onClick={() => void handleApplyStatus()}
+                      >
+                        Apply
+                      </button>
+                    </>
+                  ) : (
+                    <p className="muted">
+                      This risk is Resolved and ready to close. Only a PMO Lead can perform the
+                      final closure to Closed.
+                    </p>
+                  )}
                 </SectionCard>
               ) : null}
 
@@ -562,6 +599,42 @@ export function RiskDetailPage() {
       ) : (
         !error && <div className="loading">Loading risk…</div>
       )}
+
+      {confirmCloseOpen ? (
+        <div className="modal-overlay" onClick={() => setConfirmCloseOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Close Risk?</h2>
+              <button
+                className="btn btn-sm"
+                onClick={() => setConfirmCloseOpen(false)}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+            <p>
+              Are you sure you want to close this risk? Closing the risk indicates that the risk
+              has been formally closed.
+            </p>
+            {actionError ? <div className="error-banner">{actionError}</div> : null}
+            <div className="btn-group">
+              <button className="btn" onClick={() => setConfirmCloseOpen(false)}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-danger"
+                onClick={() => {
+                  setConfirmCloseOpen(false);
+                  void applyStatus('Closed');
+                }}
+              >
+                Close Risk
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

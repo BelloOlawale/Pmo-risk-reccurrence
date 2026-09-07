@@ -93,6 +93,13 @@ export interface Notification {
   created_at: string;
 }
 
+/** GET /api/me — the current caller's identity and roles. */
+export interface Me {
+  user_id: number | null;
+  upn: string;
+  roles: string[];
+}
+
 export interface SuggestedRisk {
   risk_id: string;
   source_file: string;

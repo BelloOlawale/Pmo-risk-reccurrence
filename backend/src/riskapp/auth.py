@@ -178,6 +178,16 @@ def can_close_project(principal: Principal, project: Any) -> bool:
     )
 
 
+def can_close_risk(principal: Principal) -> bool:
+    """True for the PMO Lead (final risk-closure authority).
+
+    System Admin is the application's superuser and may also close a risk, but
+    Project Managers and ordinary users cannot — enforced server-side on any
+    transition to ``Closed``.
+    """
+    return principal.has_role(Role.PMO_LEAD, Role.SYSTEM_ADMIN)
+
+
 def can_access_risk(principal: Principal, risk: Any) -> bool:
     """PMO Lead / Admin see everything; owners and project PMs see their risks."""
     if principal.is_pmo_or_admin:
