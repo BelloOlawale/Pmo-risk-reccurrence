@@ -25,6 +25,28 @@ function emptyOption(message: string): EChartsOption {
   };
 }
 
+/**
+ * Consistent legend styling for rating legends (High/Medium/Low).
+ *
+ * Legends are anchored to the top or bottom edge of the chart and the chart
+ * grid reserves space for them, so a legend never shares the strip used by
+ * x-axis/category labels.
+ */
+function ratingLegend(position: 'top' | 'bottom' = 'bottom') {
+  const anchor =
+    position === 'top' ? { top: 0 } : { bottom: 0 };
+  return {
+    ...anchor,
+    left: 'center',
+    itemGap: 18,
+    itemWidth: 14,
+    itemHeight: 10,
+    icon: 'roundRect',
+    textStyle: { color: AXIS_LABEL, fontSize: 12 },
+    inactiveColor: '#cbd5e1',
+  };
+}
+
 interface BarClickParams {
   name?: string;
   value?: unknown;
@@ -49,7 +71,7 @@ export function DonutChart({ data }: { data: RatingSlice[] }) {
   const total = data.reduce((sum, d) => sum + d.value, 0);
   const option: EChartsOption = {
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { bottom: 0, textStyle: { color: AXIS_LABEL } },
+    legend: ratingLegend('bottom'),
     series: [
       {
         type: 'pie',
@@ -87,7 +109,7 @@ export function StatusDonutChart({ data }: { data: NameValue[] }) {
   }
   const option: EChartsOption = {
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { bottom: 0, textStyle: { color: AXIS_LABEL } },
+    legend: ratingLegend('bottom'),
     series: [
       {
         type: 'pie',
@@ -126,7 +148,7 @@ export function EscalatedDonutChart({ data }: { data: NameValue[] }) {
   const escalated = data.find((d) => d.name === 'Escalated')?.value ?? 0;
   const option: EChartsOption = {
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { bottom: 0, textStyle: { color: AXIS_LABEL } },
+    legend: ratingLegend('bottom'),
     series: [
       {
         type: 'pie',
@@ -238,8 +260,8 @@ export function ProjectStackedBarChart({
         return `<b>${items[0].name}</b><br/>Total risks: ${total}<br/>${breakdown}`;
       },
     },
-    legend: { top: 0, textStyle: { color: AXIS_LABEL } },
-    grid: { left: 8, right: 32, top: 34, bottom: 8, containLabel: true },
+    legend: ratingLegend('top'),
+    grid: { left: 8, right: 32, top: 40, bottom: 8, containLabel: true },
     xAxis: {
       type: 'value',
       minInterval: 1,
@@ -297,7 +319,7 @@ export function HeatmapChart({
         return `<b>${proj}</b><br/>${cat}: ${p.value[2]} risk${p.value[2] === 1 ? '' : 's'}`;
       },
     },
-    grid: { left: 8, right: 24, top: 16, bottom: 64, containLabel: true },
+    grid: { left: 8, right: 24, top: 16, bottom: 92, containLabel: true },
     xAxis: {
       type: 'category',
       data: data.categories,
@@ -306,6 +328,10 @@ export function HeatmapChart({
         interval: 0,
         rotate: data.categories.length > 6 ? 32 : 0,
         fontSize: 11,
+        // Truncate long category names so rotated labels stay compact and can
+        // never reach the colour scale below them.
+        formatter: (value: string) =>
+          value.length > 16 ? `${value.slice(0, 15)}…` : value,
       },
       axisLine: { lineStyle: { color: GRID_LINE } },
     },
@@ -325,9 +351,10 @@ export function HeatmapChart({
       calculable: true,
       orient: 'horizontal',
       left: 'center',
-      bottom: 8,
-      itemWidth: 12,
-      itemHeight: 120,
+      bottom: 0,
+      itemWidth: 140,
+      itemHeight: 12,
+      textGap: 10,
       inRange: { color: ['#e8eef9', '#14418c', '#ee1f2f'] },
       textStyle: { color: AXIS_LABEL, fontSize: 11 },
     },
@@ -346,7 +373,7 @@ export function HeatmapChart({
   const height =
     data.projects.length > 12
       ? 520
-      : Math.max(300, data.projects.length * 28 + 110);
+      : Math.max(300, data.projects.length * 28 + 130);
   return (
     <EChart
       option={option}
@@ -411,14 +438,29 @@ export function StackedBarChart({ data }: { data: StackData }) {
   if (data.categories.length === 0) {
     return <EChart option={emptyOption('No risks yet')} height={300} />;
   }
+  const hasMany = data.categories.length >= 5;
   const option: EChartsOption = {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    legend: { bottom: 0, textStyle: { color: AXIS_LABEL } },
-    grid: { left: 40, right: 16, top: 20, bottom: 44 },
+    // Legend above the plot; x-axis/category labels get the whole bottom strip
+    // (grid.bottom) so they can never collide with the legend.
+    legend: ratingLegend('top'),
+    grid: {
+      left: 44,
+      right: 16,
+      top: 40,
+      bottom: hasMany ? 62 : 48,
+    },
     xAxis: {
       type: 'category',
       data: data.categories,
-      axisLabel: { color: AXIS_LABEL, interval: 0, rotate: 30 },
+      axisLabel: {
+        color: AXIS_LABEL,
+        interval: 0,
+        // Long status names (e.g. "Suggested", "In Progress") are rotated only
+        // when there are enough categories to need it; the extra bottom margin
+        // keeps the rotated labels clear of the chart edge.
+        rotate: hasMany ? 30 : 0,
+      },
       axisLine: { lineStyle: { color: GRID_LINE } },
     },
     yAxis: {

@@ -2,10 +2,9 @@
 // badges and the ECharts visualisations so they never drift apart.
 
 export const RATING_COLORS: Record<string, string> = {
-  Critical: '#dc2626',
-  High: '#f97316',
-  Medium: '#f59e0b',
-  Low: '#16a34a',
+  High: '#dc2626', // red
+  Medium: '#f97316', // orange
+  Low: '#16a34a', // green
 };
 
 /** Semantic colours for the portfolio status-group donut. */
