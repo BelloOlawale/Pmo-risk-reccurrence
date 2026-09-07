@@ -128,6 +128,31 @@ class TestAcceptSuggestion:
         with pytest.raises(ValueError):
             accept_suggestion(db_session, target, "RSK-NOPE")
 
+    def test_accept_does_not_reuse_risk_code_when_sequence_has_gaps(
+        self, db_session: Session
+    ) -> None:
+        """Accepting a suggestion must not collide with an existing risk code.
+
+        Regression: the dev DB has deleted rows, so the highest code (RSK-308)
+        exceeds the risk count (299). Count-based allocation produced a
+        duplicate code and the accept endpoint failed with a 500.
+        """
+        historical, target = _make_projects(db_session, department="SAP", project_type="ERP")
+        # RSK-002 is missing, as if that row was deleted — the DB now has a gap.
+        _historical_risk(
+            db_session, code="RSK-001", project=historical, description="Data migration delay"
+        )
+        _historical_risk(
+            db_session, code="RSK-003", project=historical, description="Vendor lock-in"
+        )
+
+        accepted = accept_suggestion(db_session, target, "RSK-001")
+
+        assert accepted.status == RiskStatus.OPEN.value
+        # Must be one past the highest existing code, not count+1 (which would
+        # return RSK-003 and violate the unique risk_code constraint).
+        assert accepted.risk_code == "RSK-004"
+
 
 class TestDismissSuggestion:
     def test_dismiss_excludes_candidate(self, db_session: Session) -> None:

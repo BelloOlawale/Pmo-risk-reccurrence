@@ -38,7 +38,11 @@ from riskapp.import_pipeline.field_mapper import (
     map_wacl_row,
     normalize_level,
 )
-from riskapp.services import get_or_create_department, get_or_create_project_type
+from riskapp.services import (
+    get_or_create_department,
+    get_or_create_project_type,
+    max_risk_code_number,
+)
 
 # Historical rows are seeded as Closed — they are past learnings, not active.
 HISTORICAL_RISK_STATUS = "Closed"
@@ -139,7 +143,9 @@ def import_directory(db: Session, root_path: str) -> ImportResult:
 
     year = dt.date.today().year
     project_codes = count(start=_count_project_codes(db, year) + 1)
-    risk_codes = count(start=_count_risk_codes(db) + 1)
+    # Start after the highest existing code (not the row count) so gaps left by
+    # deleted risks are never reused — mirrors services.next_risk_code.
+    risk_codes = count(start=max_risk_code_number(db) + 1)
 
     def next_project_code() -> str:
         return f"PRJ-{year}-{next(project_codes):03d}"
@@ -321,17 +327,6 @@ def _count_project_codes(db: Session, year: int) -> int:
             select(func.count())
             .select_from(models.Project)
             .where(models.Project.project_code.like(f"PRJ-{year}-%"))
-        )
-        or 0
-    )
-
-
-def _count_risk_codes(db: Session) -> int:
-    return (
-        db.scalar(
-            select(func.count())
-            .select_from(models.Risk)
-            .where(models.Risk.risk_code.like("RSK-%"))
         )
         or 0
     )

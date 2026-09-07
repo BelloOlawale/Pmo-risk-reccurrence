@@ -34,16 +34,29 @@ def _next_project_code(db: Session) -> str:
     return f"{prefix}{count + 1:03d}"
 
 
+def max_risk_code_number(db: Session) -> int:
+    """Return the highest numeric suffix among existing ``RSK-<n>`` codes.
+
+    Returns 0 when no code of that shape exists. Codes whose suffix is not a
+    plain number (e.g. ``RSK-H1`` used in fixtures) are ignored.
+    """
+    highest = 0
+    for code in db.scalars(select(models.Risk.risk_code)).all():
+        suffix = code[len("RSK-") :] if code.startswith("RSK-") else ""
+        if suffix.isdigit():
+            highest = max(highest, int(suffix))
+    return highest
+
+
 def next_risk_code(db: Session) -> str:
-    count = (
-        db.scalar(
-            select(func.count())
-            .select_from(models.Risk)
-            .where(models.Risk.risk_code.like("RSK-%"))
-        )
-        or 0
-    )
-    return f"RSK-{count + 1:03d}"
+    """Return the next free risk code (``RSK-<n>``), one past the highest in use.
+
+    Allocation is based on the highest existing code rather than a row count, so
+    gaps left by deleted or rolled-back rows never reuse a code. Count-based
+    allocation previously surfaced as an uncaught IntegrityError (HTTP 500) when
+    accepting a suggestion after any risk row had been removed.
+    """
+    return f"RSK-{max_risk_code_number(db) + 1:03d}"
 
 
 def get_or_create_department(db: Session, name: str) -> models.Department:

@@ -88,3 +88,55 @@ def test_suggest_endpoint_returns_grounded_risks(
 def test_suggest_endpoint_404_for_missing_project(client: TestClient) -> None:
     resp = client.post("/api/projects/99999/suggest")
     assert resp.status_code == 404
+
+
+def test_accept_suggestion_returns_201_when_risk_codes_have_gaps(
+    client: TestClient, db_session: Session
+) -> None:
+    """Accepting a suggestion as a PM must not 500 on a duplicate risk code.
+
+    Regression: the live DB had deleted rows, so the highest risk code
+    exceeded the risk count; count-based allocation reused an existing code
+    and the accept endpoint raised an uncaught IntegrityError (HTTP 500).
+    """
+    dept = models.Department(name="SAP")
+    ptype = models.ProjectType(name="ERP")
+    db_session.add_all([dept, ptype])
+    db_session.flush()
+
+    def make(code: str) -> models.Project:
+        p = models.Project(name=f"Project {code}", project_code=code, status="Active")
+        p.department = dept
+        p.project_type = ptype
+        db_session.add(p)
+        db_session.flush()
+        return p
+
+    historical = make("PRJ-GAP-H")
+    target = make("PRJ-GAP-T")
+    for code, description in (
+        ("RSK-001", "Data migration delay"),
+        ("RSK-003", "Vendor lock-in"),  # RSK-002 absent -> gap
+    ):
+        db_session.add(
+            models.Risk(
+                project_id=historical.id,
+                risk_code=code,
+                description=description,
+                likelihood="Medium",
+                impact="High",
+                risk_rating="High",
+                source="Historical",
+                status="Closed",
+                source_file_name="a.xlsx",
+                source_risk_id="1",
+            )
+        )
+    db_session.commit()
+
+    resp = client.post(
+        f"/api/projects/{target.id}/suggestions/accept",
+        json={"risk_id": "RSK-001"},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["risk_code"] == "RSK-004"
