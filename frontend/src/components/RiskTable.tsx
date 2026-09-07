@@ -69,7 +69,7 @@ export function RiskTable({ risks, onSelect, showToolbar = true }: RiskTableProp
     const q = query.trim().toLowerCase();
     const filtered = risks.filter((r) => {
       if (q) {
-        const hay = [r.risk_code, r.description, r.category, r.subcategory, r.source]
+        const hay = [r.risk_code, r.description, r.category, r.source]
           .filter(Boolean)
           .join(' ')
           .toLowerCase();
@@ -202,7 +202,6 @@ function RiskRow({
 }) {
   const secondary: { label: string; value: string }[] = [
     { label: 'Category', value: risk.category ?? '—' },
-    { label: 'Subcategory', value: risk.subcategory ?? '—' },
     { label: 'Likelihood', value: risk.likelihood },
     { label: 'Impact', value: risk.impact },
     { label: 'Project life cycle', value: risk.identified_during ?? '—' },

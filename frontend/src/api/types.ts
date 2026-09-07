@@ -40,7 +40,6 @@ export interface Risk {
   project_id: number;
   description: string;
   category: string | null;
-  subcategory: string | null;
   risk_source: string | null;
   likelihood: string;
   impact: string;
@@ -132,7 +131,6 @@ export interface RiskCreatePayload {
   project_id: number;
   description: string;
   category?: string | null;
-  subcategory?: string | null;
   risk_source?: RiskSource | null;
   likelihood: Likelihood;
   impact: Impact;
@@ -143,4 +141,12 @@ export interface RiskCreatePayload {
   risk_end_date?: string | null;
   source?: 'Historical' | 'Custom' | 'Kickoff' | null;
   identified_during?: string | null;
+}
+
+/** GET /api/risk-meta — controlled option sets for the risk forms. */
+export interface RiskMeta {
+  categories: string[];
+  lifecycle: string[];
+  risk_sources: string[];
+  response_strategies: string[];
 }

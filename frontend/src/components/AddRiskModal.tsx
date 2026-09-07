@@ -2,8 +2,10 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 
 import { api, ApiError } from '../api/client';
-import type { Project, ResponseStrategy, Risk, RiskSource } from '../api/types';
+import type { Project, ResponseStrategy, Risk, RiskMeta, RiskSource } from '../api/types';
+import { useApi } from '../hooks/useApi';
 import { computeRiskEndDate, computeRiskRating, todayISO } from '../utils/format';
+import { PickOrTypeField } from './PickOrTypeField';
 
 interface AddRiskModalProps {
   projects: Project[];
@@ -17,7 +19,6 @@ interface FormState {
   project_id: string;
   description: string;
   category: string;
-  subcategory: string;
   risk_source: string;
   likelihood: string;
   impact: string;
@@ -31,7 +32,6 @@ const EMPTY: FormState = {
   project_id: '',
   description: '',
   category: '',
-  subcategory: '',
   risk_source: '',
   likelihood: 'Medium',
   impact: 'Medium',
@@ -48,6 +48,9 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { data: meta } = useApi(() => api.get<RiskMeta>('/api/risk-meta'), []);
+  const categoryOptions = meta?.categories ?? [];
+  const lifecycleOptions = meta?.lifecycle ?? [];
   const today = todayISO();
   const rating = computeRiskRating(form.likelihood, form.impact);
   const riskEndDate = computeRiskEndDate(form.risk_start_date, rating);
@@ -80,7 +83,6 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
         project_id: projectId,
         description: form.description.trim(),
         category: form.category.trim() || null,
-        subcategory: form.subcategory.trim() || null,
         risk_source: (form.risk_source || null) as RiskSource | null,
         likelihood: form.likelihood,
         impact: form.impact,
@@ -136,14 +138,12 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
               />
             </div>
 
-            <div className="field">
-              <label>Category</label>
-              <input value={form.category} onChange={(e) => set('category', e.target.value)} />
-            </div>
-            <div className="field">
-              <label>Subcategory</label>
-              <input value={form.subcategory} onChange={(e) => set('subcategory', e.target.value)} />
-            </div>
+            <PickOrTypeField
+              label="Category"
+              value={form.category}
+              onChange={(v) => set('category', v)}
+              options={categoryOptions}
+            />
             <div className="field">
               <label>Risk source</label>
               <select value={form.risk_source} onChange={(e) => set('risk_source', e.target.value)}>
@@ -202,14 +202,13 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
               />
               <span className="field-hint">Automatically calculated based on risk rating and SLA.</span>
             </div>
-            <div className="field">
-              <label>Project life cycle</label>
-              <input
-                value={form.identified_during}
-                onChange={(e) => set('identified_during', e.target.value)}
-                placeholder="e.g. Execution, Discovery…"
-              />
-            </div>
+            <PickOrTypeField
+              label="Project life cycle"
+              value={form.identified_during}
+              onChange={(v) => set('identified_during', v)}
+              options={lifecycleOptions}
+              placeholder="e.g. Execution, Discovery…"
+            />
             <div className="field" style={{ gridColumn: '1 / -1' }}>
               <label>Response plan</label>
               <textarea

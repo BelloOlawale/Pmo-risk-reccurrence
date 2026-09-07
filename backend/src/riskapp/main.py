@@ -105,6 +105,53 @@ def me(principal: PrincipalDep) -> dict[str, object]:
     }
 
 
+@app.get("/api/risk-meta")
+def risk_meta(db: DbDep) -> dict[str, object]:
+    """Controlled option sets for the risk forms, derived from existing data.
+
+    Categories and project-life-cycle values come from the values already used
+    in the database (no invented taxonomy). Risk sources and response
+    strategies are the application's existing literals.
+    """
+    categories = sorted(
+        {str(category) for category in db.scalars(
+            select(models.Risk.category).where(
+                models.Risk.category.is_not(None), models.Risk.category != ""
+            )
+        ).all() if category},
+        key=str.lower,
+    )
+
+    # Life cycle: the values recorded on risks (identified_during) plus the
+    # stage-gate values used on projects, normalised to title case.
+    raw_lifecycle = set(
+        db.scalars(
+            select(models.Risk.identified_during).where(
+                models.Risk.identified_during.is_not(None),
+                models.Risk.identified_during != "",
+            )
+        ).all()
+    ) | set(
+        db.scalars(
+            select(models.Project.stage_gate).where(
+                models.Project.stage_gate.is_not(None), models.Project.stage_gate != ""
+            )
+        ).all()
+    )
+    titled = {str(value).strip().title() for value in raw_lifecycle if str(value).strip()}
+    lifecycle_order = ["Discovery", "Initiation", "Planning", "Execution", "Closure"]
+    lifecycle = [phase for phase in lifecycle_order if phase in titled] + sorted(
+        titled - set(lifecycle_order)
+    )
+
+    return {
+        "categories": categories,
+        "lifecycle": lifecycle,
+        "risk_sources": ["Human", "Environmental", "Technical"],
+        "response_strategies": ["Mitigate", "Transfer", "Avoid", "Accept"],
+    }
+
+
 @app.post(
     "/api/departments",
     response_model=schemas.DepartmentRead,

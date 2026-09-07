@@ -3,9 +3,10 @@ import type { FormEvent } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 
 import { api } from '../api/client';
-import type { Me, ResponseStrategy, Risk, RiskAuditLog, RiskSource } from '../api/types';
+import type { Me, ResponseStrategy, Risk, RiskAuditLog, RiskMeta, RiskSource } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { RatingBadge, SectionCard, StatusBadge } from '../components/Badges';
+import { PickOrTypeField } from '../components/PickOrTypeField';
 import { useApi } from '../hooks/useApi';
 import { allowedTransitions } from '../utils/status';
 import {
@@ -20,7 +21,6 @@ import {
 interface EditForm {
   description: string;
   category: string;
-  subcategory: string;
   risk_source: string;
   likelihood: string;
   impact: string;
@@ -34,7 +34,6 @@ interface EditForm {
 const EMPTY_FORM: EditForm = {
   description: '',
   category: '',
-  subcategory: '',
   risk_source: '',
   likelihood: 'Medium',
   impact: 'Medium',
@@ -49,7 +48,6 @@ function toForm(risk: Risk): EditForm {
   return {
     description: risk.description,
     category: risk.category ?? '',
-    subcategory: risk.subcategory ?? '',
     risk_source: risk.risk_source ?? '',
     likelihood: risk.likelihood,
     impact: risk.impact,
@@ -102,6 +100,9 @@ export function RiskDetailPage() {
     [id],
   );
   const { data: me } = useApi(() => api.get<Me>('/api/me'), []);
+  const { data: meta } = useApi(() => api.get<RiskMeta>('/api/risk-meta'), []);
+  const categoryOptions = meta?.categories ?? [];
+  const lifecycleOptions = meta?.lifecycle ?? [];
 
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<EditForm>(EMPTY_FORM);
@@ -148,7 +149,6 @@ export function RiskDetailPage() {
       await api.patch<Risk>(`/api/risks/${id}`, {
         description: form.description,
         category: form.category || null,
-        subcategory: form.subcategory || null,
         risk_source: (form.risk_source || null) as RiskSource | null,
         likelihood: form.likelihood,
         impact: form.impact,
@@ -300,20 +300,12 @@ export function RiskDetailPage() {
                           onChange={(e) => setForm({ ...form, description: e.target.value })}
                         />
                       </div>
-                      <div className="field">
-                        <label>Category</label>
-                        <input
-                          value={form.category}
-                          onChange={(e) => setForm({ ...form, category: e.target.value })}
-                        />
-                      </div>
-                      <div className="field">
-                        <label>Subcategory</label>
-                        <input
-                          value={form.subcategory}
-                          onChange={(e) => setForm({ ...form, subcategory: e.target.value })}
-                        />
-                      </div>
+                      <PickOrTypeField
+                        label="Category"
+                        value={form.category}
+                        onChange={(v) => setForm({ ...form, category: v })}
+                        options={categoryOptions}
+                      />
                       <div className="field">
                         <label>Risk source</label>
                         <select
@@ -398,14 +390,13 @@ export function RiskDetailPage() {
                           Automatically calculated based on risk rating and SLA.
                         </span>
                       </div>
-                      <div className="field">
-                        <label>Project life cycle</label>
-                        <input
-                          value={form.identified_during}
-                          onChange={(e) => setForm({ ...form, identified_during: e.target.value })}
-                          placeholder="e.g. Execution, Discovery…"
-                        />
-                      </div>
+                      <PickOrTypeField
+                        label="Project life cycle"
+                        value={form.identified_during}
+                        onChange={(v) => setForm({ ...form, identified_during: v })}
+                        options={lifecycleOptions}
+                        placeholder="e.g. Execution, Discovery…"
+                      />
                     </div>
                     <div className="btn-group">
                       <button className="btn btn-primary" type="submit" disabled={saving}>
@@ -420,10 +411,6 @@ export function RiskDetailPage() {
                     <div>
                       <div className="kv-label">Category</div>
                       <div className="kv-value">{risk.category ?? '—'}</div>
-                    </div>
-                    <div>
-                      <div className="kv-label">Subcategory</div>
-                      <div className="kv-value">{risk.subcategory ?? '—'}</div>
                     </div>
                     <div>
                       <div className="kv-label">Risk source</div>

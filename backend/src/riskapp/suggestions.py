@@ -25,6 +25,7 @@ from riskapp.domain.retrieval import (
     merge_candidates,
 )
 from riskapp.domain.scoring import compute_risk_rating
+from riskapp.domain.sla import compute_end_date
 from riskapp.domain.status import RiskStatus
 from riskapp.embeddings import EmbeddingProvider
 from riskapp.llm.chat import ChatProvider
@@ -393,6 +394,14 @@ def accept_suggestion(
     now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
     final_likelihood = likelihood or source.likelihood
     final_impact = impact or source.impact
+    final_rating = compute_risk_rating(final_likelihood, final_impact)
+
+    # Enrich the accepted risk from the matched historical record. Dates follow
+    # the existing business rules: a start date is only copied when it is not in
+    # the past, and the end date stays SLA-calculated (never invented).
+    source_start = None
+    if source.risk_start_date is not None and source.risk_start_date >= dt.date.today():
+        source_start = source.risk_start_date
 
     risk = models.Risk(
         project_id=project.id,
@@ -403,8 +412,15 @@ def accept_suggestion(
         risk_source=source.risk_source,
         likelihood=final_likelihood,
         impact=final_impact,
-        risk_rating=compute_risk_rating(final_likelihood, final_impact),
+        risk_rating=final_rating,
         response_strategy=source.response_strategy,
+        response_plan=source.response_plan,
+        owner_user_id=source.owner_user_id,
+        identified_during=source.identified_during,
+        risk_start_date=source_start,
+        risk_end_date=(
+            compute_end_date(source_start, final_rating) if source_start else None
+        ),
         status=RiskStatus.SUGGESTED.value,
         source=HISTORICAL_SOURCE,
         source_file_name=source.source_file_name,
