@@ -1,0 +1,10 @@
+PROJECT — one row per project. Everything project-level lives here once: project_id, project_name, project_type, customer_name, department, start/end dates, project_status.
+RISK — a reusable risk catalog, not tied to any one project: risk_id, risk_name, risk_description, risk_category. This is what lets your system "suggest" risks — e.g. pull every risk in the catalog tagged category = "vendor" when a new procurement project is created.
+PROJECT_RISK — the actual tracked instance, linked by project_id and risk_id. Everything that's specific to this risk on this project goes here: likelihood, impact, risk_rating, risk_strategy, response_plan, risk_owner, risk_status, lifecycle_phase, risk_start_date, risk_end_date. This is the row you update as the risk moves toward closed.
+A few things worth deciding as you build this out:
+risk_rating is usually derived, not typed in — a small lookup matrix of likelihood × impact → rating (e.g. Low/Medium/High or a 1–25 score) keeps it consistent instead of relying on manual entry.
+risk_owner will scale better as a foreign key to a people/team table rather than a free-text name, especially once you want to filter "all open risks owned by X."
+Enum-like fields — risk_category, risk_strategy, risk_status, lifecycle_phase, project_status — are fine as plain strings early on, but if you'll ever need dropdowns in a UI or want to prevent typos, break them into small lookup tables (id + label) that PROJECT_RISK and RISK reference.
+Tracking "until closed" over time: PROJECT_RISK as designed only holds the current state. If you want history — when did likelihood change from Medium to High, who changed the status and when — add a PROJECT_RISK_HISTORY table that logs each change with a timestamp, keyed by project_risk_id. Worth adding once you need audit trails or trend reporting, not necessarily on day one.
+ 
+ 
