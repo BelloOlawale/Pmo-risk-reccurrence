@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import func, or_, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from riskapp import models, schemas
@@ -14,6 +14,7 @@ from riskapp.auth import (
     Principal,
     PrincipalDep,
     Role,
+    can_access_issue,
     can_access_project,
     can_access_risk,
     can_close_project,
@@ -325,6 +326,88 @@ def read_risk(risk_id: int, principal: PrincipalDep, db: DbDep) -> schemas.RiskR
     if not can_access_risk(principal, risk):
         raise HTTPException(status_code=403, detail="Forbidden")
     return schemas.RiskRead.model_validate(risk)
+
+
+_ISSUE_LOADS = (
+    selectinload(models.Issue.source_risk),
+    selectinload(models.Issue.project),
+    selectinload(models.Issue.owner),
+)
+
+
+def _issue_status(issue: models.Issue) -> str:
+    """Effective Issue status, tracked on the originating materialized risk.
+
+    Issues are born ``Open`` when a risk materializes (Event). The materialized
+    event stays open until the risk itself is resolved (``Event -> Resolved``)
+    and finally closed by the PMO Lead (``-> Closed``), so the Issue's effective
+    status follows that lifecycle rather than a frozen ``Open`` column value.
+    """
+    src_status = issue.source_risk.status
+    if src_status in (RiskStatus.RESOLVED.value, RiskStatus.CLOSED.value):
+        return src_status
+    return "Open"
+
+
+def _serialize_issue(issue: models.Issue) -> schemas.IssueRead:
+    """Build the read schema, denormalising the source risk + project info."""
+    item = schemas.IssueRead.model_validate(issue)
+    item.source_risk_code = issue.source_risk.risk_code
+    item.source_risk_status = issue.source_risk.status
+    item.project_name = issue.project.name
+    item.status = _issue_status(issue)
+    return item
+
+
+def _issue_stmt() -> Select[tuple[models.Issue]]:
+    """Issue query with the relationships the read schema needs eagerly loaded."""
+    return select(models.Issue).options(*_ISSUE_LOADS)
+
+
+@app.get("/api/projects/{project_id}/issues", response_model=list[schemas.IssueRead])
+def list_project_issues(
+    project_id: int, principal: PrincipalDep, db: DbDep
+) -> list[schemas.IssueRead]:
+    """Issues raised from materialized risks within one project's Risk Register."""
+    project = get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not can_access_project(principal, project):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    issues = db.scalars(
+        _issue_stmt()
+        .where(models.Issue.project_id == project_id)
+        .order_by(models.Issue.created_at.desc(), models.Issue.id.desc())
+    ).all()
+    return [_serialize_issue(issue) for issue in issues]
+
+
+@app.get("/api/issues/{issue_id}", response_model=schemas.IssueRead)
+def read_issue(issue_id: int, principal: PrincipalDep, db: DbDep) -> schemas.IssueRead:
+    issue = db.scalar(
+        _issue_stmt().where(models.Issue.id == issue_id)
+    )
+    if issue is None:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    if not can_access_issue(principal, issue):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return _serialize_issue(issue)
+
+
+@app.get("/api/risks/{risk_id}/issue", response_model=schemas.IssueRead)
+def read_risk_issue(risk_id: int, principal: PrincipalDep, db: DbDep) -> schemas.IssueRead:
+    """The single Issue raised from a materialized risk (404 when not materialized)."""
+    risk = get_risk(db, risk_id)
+    if risk is None:
+        raise HTTPException(status_code=404, detail="Risk not found")
+    if not can_access_risk(principal, risk):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    issue = db.scalar(
+        _issue_stmt().where(models.Issue.source_risk_id == risk_id)
+    )
+    if issue is None:
+        raise HTTPException(status_code=404, detail="Risk has not materialized into an Issue")
+    return _serialize_issue(issue)
 
 
 @app.patch("/api/risks/{risk_id}", response_model=schemas.RiskRead)

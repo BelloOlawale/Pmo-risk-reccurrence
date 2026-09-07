@@ -30,6 +30,10 @@ celery_app.conf.update(
             "task": "riskapp.tasks.monitor_sla",
             "schedule": crontab(minute=0),
         },
+        "materialize-overdue-risks-hourly": {
+            "task": "riskapp.tasks.materialize_overdue_risks",
+            "schedule": crontab(minute=30),
+        },
         "check-start-dates-daily": {
             "task": "riskapp.tasks.check_start_dates",
             "schedule": crontab(hour=0, minute=10),

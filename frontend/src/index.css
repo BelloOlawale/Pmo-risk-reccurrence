@@ -1617,6 +1617,25 @@ input:disabled {
   margin-bottom: 16px;
 }
 
+.materialized-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #7c2d12;
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
+.materialized-banner-main {
+  min-width: 0;
+}
+
 /* ---------- Suggested risks: selection + icon actions ---------- */
 
 .suggested-mass-bar {

@@ -201,6 +201,46 @@ class RiskAuditLogRead(BaseModel):
     created_at: dt.datetime
 
 
+class IssueRead(BaseModel):
+    """An Issue raised from a materialized (Event) risk.
+
+    ``source_risk_code`` / ``project_name`` / ``source_risk_status`` are
+    denormalised for display and populated by the API from the relationships
+    (the source of truth stays the ``source_risk_id`` foreign key).
+
+    ``status`` is the Issue's *effective* status: Issues are born ``Open`` when
+    a risk materializes, and resolution/closure of the materialized event is
+    tracked on the originating risk (``Event -> Resolved -> Closed`` by the PMO
+    Lead), so the API reports ``Resolved``/``Closed`` once the source risk
+    reaches those statuses.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    issue_code: str
+    project_id: int
+    project_name: str = ""
+    source_risk_id: int
+    source_risk_code: str = ""
+    source_risk_status: str = ""
+    description: str
+    category: str | None
+    subcategory: str | None
+    risk_source: str | None
+    likelihood: str
+    impact: str
+    risk_rating: str
+    response_strategy: str | None
+    response_plan: str | None
+    owner_user_id: int | None
+    identified_during: str | None
+    risk_start_date: dt.date | None
+    risk_end_date: dt.date | None
+    status: str
+    created_at: dt.datetime
+
+
 class SuggestedRiskRead(BaseModel):
     """A single suggested historical risk, ready for accept/edit/dismiss."""
 

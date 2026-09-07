@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from riskapp import models
 from riskapp.notifications import (
     EVENT_BREACH,
+    EVENT_MATERIALIZED,
     EVENT_OWNER_ASSIGNMENT,
     EVENT_RISK_START,
     EVENT_SLA_WARNING,
@@ -54,6 +55,12 @@ class TestResolveRecipients:
     def test_breach_includes_owner_pm_pmo(self) -> None:
         r = resolve_recipients(EVENT_BREACH, _ctx())
         assert r.to_emails == ("owner@example.com", "pm@example.com", "pmo@example.com")
+
+    def test_materialized_includes_owner_pm_pmo(self) -> None:
+        r = resolve_recipients(EVENT_MATERIALIZED, _ctx())
+        assert r.to_user_ids == (1, 2)
+        assert r.to_emails == ("owner@example.com", "pm@example.com", "pmo@example.com")
+        assert r.cc_emails == ()
 
     def test_risk_start_owner_only(self) -> None:
         r = resolve_recipients(EVENT_RISK_START, _ctx())

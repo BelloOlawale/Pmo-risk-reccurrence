@@ -277,6 +277,18 @@ flowchart TD
   recorded in the append-only audit log.
 - De-escalation returns the risk to `In Progress` and re-enters monitoring.
 
+> **Automatic materialization (Risk End Date).** Materialization is a separate,
+> backend-driven trigger from SLA escalation. The hourly end-date monitor
+> transitions any *unresolved* risk (`Open` / `In Progress` / `Escalated`) whose
+> **Risk End Date** (`risk_start_date` + the rating's SLA window) has fully
+> passed to `Event`, marks it Materialized, and automatically creates exactly
+> one **Issue** populated from the originating risk (idempotent per risk).
+> Acknowledgement satisfies the SLA *acknowledgement* requirement only — an
+> acknowledged but unresolved risk still materializes once its Risk End Date
+> passes. `Resolved` / `Closed` risks never materialize, the original risk is
+> always retained for audit, and a materialized risk is never automatically
+> closed (the PMO Lead keeps sole closure authority).
+
 ---
 
 ## 11. Phase 7 — Resolution & closure
@@ -359,6 +371,7 @@ timestamp / JSONB snapshot).
 | Owner assignment | Owner + PM + PMO Lead + Practice Lead (CC) | Email + in-app |
 | SLA warning | Owner | Email |
 | Breach / escalation | Owner + PM + PMO Lead | Email |
+| **Materialization (Event + Issue created)** | **Owner + PM** | **Email + in-app** |
 | Risk start date | Owner | Email + in-app |
 | Weekly summary (Mon 8 AM) | PM + PMO Lead | Email |
 | Closure confirmation | PM + PMO Lead | Email |
@@ -415,6 +428,7 @@ sequenceDiagram
 | Case | Behaviour |
 |---|---|
 | **Invalid status transition** | Rejected (`InvalidTransitionError`); no override without an audit-log entry. |
+| **Risk End Date passes, risk unresolved** | Hourly job sets status → `Event` (Materialized) and creates exactly one Issue (idempotent). `Resolved`/`Closed` risks excluded; comparison is timezone-safe against the business date. |
 | **LLM cites a risk not retrieved** | Citation audit rejects it before display (groundedness check). |
 | **Risk has no `risk_start_date`** | SLA anchor falls back to `created_at`. |
 | **Suggestion dismissed** | Per-project exclusion; never reappears for that project. |

@@ -143,6 +143,7 @@ department ──< project_type ──< project ──< risk ──< risk_audit_
 | `project` | A client engagement (code, name, customer, dept, type, PM, dates, stage, status). |
 | `risk` | Current-state record (all fields below). |
 | `risk_audit_log` | **Append-only, immutable.** Every mutation writes a row. Source of truth for history. |
+| `issue` | Raised automatically when an unresolved risk passes its **Risk End Date** (status → `Event`, displayed as "Materialized"). Inherits the originating risk's business fields and links back through `source_risk_id`, which is **unique** — exactly one Issue per materialized risk (idempotency guard). |
 | `user` | Entra identity (upn, display_name) + local id. |
 | `practice_lead` | department → person (notification CC). |
 | `setting` | key/value config (PMO Lead email, thresholds). |
@@ -156,6 +157,15 @@ department ──< project_type ──< project ──< risk ──< risk_audit_
 `sla_acknowledged` / `sla_manual_override`, `risk_start_date` / `risk_end_date`,
 `owner_user_id`, closure fields (`root_cause`, `what_worked`,
 `resolution_category`), and lifecycle timestamps.
+
+**Risk materialization (Event).** The `Event` status is the application's
+representation of a *materialized* risk and displays as "Materialized". The
+hourly end-date monitor (see §9) transitions overdue **unresolved** risks
+(`Open` / `In Progress` / `Escalated` whose `risk_end_date < today` in the
+business timezone) to `Event` and creates exactly one `Issue` from each.
+`Resolved` / `Closed` / `Dismissed` / `Suggested` risks never materialize, a
+materialized risk is never automatically set to `Closed` (PMO Lead closure
+authority is unchanged), and the original risk is always retained for audit.
 
 ---
 
@@ -302,6 +312,10 @@ There are two suggestion surfaces:
 ## 9. Background jobs (Celery + Beat)
 
 - Hourly SLA monitor (remind / escalate on breach).
+- Hourly **end-date monitor** (at :30): materialize overdue unresolved risks —
+  `risk_end_date` passed and status still `Open` / `In Progress` / `Escalated` —
+  to `Event` and auto-create one Issue per risk (idempotent; resolves against
+  the source-risk timezone-safe business date).
 - Daily start-date check (email owner when `risk_start_date` is today).
 - Weekly summary (Mon 8 AM) to PM + PMO Lead.
 - Async email sending.
@@ -332,6 +346,9 @@ There are two suggestion surfaces:
 - `projects` — create/list/get; `projects/{id}/risks`.
 - `risks` — create (Quick Add), get, patch, `acknowledge`, `accept`, `dismiss`,
   `de-escalate`, `history`.
+- `projects/{id}/issues` / `issues/{id}` — Issues raised from materialized risks
+  under a Risk Register; `risks/{id}/issue` — the single Issue for a
+  materialized risk.
 - `projects/{id}/suggest`, `projects/{id}/suggestions`,
   `.../suggestions/accept`, `.../suggestions/dismiss`.
 - `notifications` — list, mark-read.

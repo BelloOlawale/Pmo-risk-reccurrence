@@ -23,6 +23,7 @@ EVENT_SLA_WARNING = "sla_warning"
 EVENT_BREACH = "breach"
 EVENT_RISK_START = "risk_start"
 EVENT_WEEKLY_SUMMARY = "weekly_summary"
+EVENT_MATERIALIZED = "materialized"
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,14 @@ def resolve_recipients(event: str, ctx: RecipientContext) -> Recipients:
             cc_emails=(),
         )
     if event == EVENT_BREACH:
+        return Recipients(
+            to_user_ids=_unique_ids(ctx.owner_user_id, ctx.pm_user_id),
+            to_emails=_unique(ctx.owner_email, ctx.pm_email, ctx.pmo_lead_email),
+            cc_emails=(),
+        )
+    if event == EVENT_MATERIALIZED:
+        # Risk owner + project manager are notified that the risk became an
+        # Event and an Issue was raised; the PMO Lead is emailed.
         return Recipients(
             to_user_ids=_unique_ids(ctx.owner_user_id, ctx.pm_user_id),
             to_emails=_unique(ctx.owner_email, ctx.pm_email, ctx.pmo_lead_email),

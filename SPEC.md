@@ -64,6 +64,12 @@ Core entities:
 - **risk_audit_log** — **append-only, immutable**. Every mutation writes a row
   (field, old_value, new_value, user, timestamp; JSONB before/after snapshot).
   Source of truth for change history, activity detection, and the audit trail.
+- **issue** — raised automatically when an unresolved risk passes its **Risk End
+  Date** (status → `Event`, displayed as "Materialized"). Inherits the originating
+  risk's business fields (description, category, source, likelihood/impact/
+  rating, response, owner, dates) and keeps a foreign key back to it;
+  `source_risk_id` is **unique**, so a materialized risk generates **exactly one**
+  Issue (idempotent by construction).
 - **user / role** — Entra ID identity + role mapping.
 - **practice_lead** — department → person mapping (auto-CC on notifications).
 - **settings** — key/value config (PMO Lead email, Head of PM email, SLA thresholds).
@@ -91,7 +97,7 @@ Core entities:
 | source_file_name, source_file_url, source_risk_id | traceability to original register |
 | llm_analysis | text |
 | sla_deadline, sla_acknowledged | |
-| risk_start_date, risk_end_date | active window; `risk_start_date` is the SLA anchor and triggers an owner email |
+| risk_start_date, risk_end_date | active window; `risk_start_date` is the SLA anchor and triggers an owner email; **`risk_end_date` is the materialization deadline** (start date + SLA window) |
 | accepted_date, resolved_date, closed_date | |
 | root_cause, what_worked, resolution_category | closure fields |
 | created_at, updated_at | |
@@ -125,13 +131,36 @@ Suggested ──► Open ──► In Progress ──► Escalated ──► Eve
 | Open | Accepted and live; owner + SLA assigned; awaiting first action |
 | In Progress | Owner acknowledged / working |
 | Escalated | SLA breached (no activity before deadline) |
-| Event | Risk materialised (displays as "Materialized") |
+| Event | Risk materialised (displays as "Materialized"); set **automatically** when the Risk End Date passes with the risk still unresolved |
 | Resolved | Issue resolved; residual acceptable |
 | Closed | Formally closed with root cause / lessons learned; read-only |
 
 Special cases:
 - **Dismissed** — a Suggested risk the PM rejects (tracked separately, never reappears for that project).
 - Enforced valid transitions; no override without an audit-log entry.
+
+### Acknowledgement vs resolution vs materialization
+
+These are three distinct concepts:
+
+- **Acknowledged** — the owner has responded; the SLA acknowledgement
+  requirement is permanently satisfied. The risk stays active.
+- **Resolved** — the owner dealt with the risk before the Risk End Date;
+  status `Resolved`. No materialization, no Issue.
+- **Materialized** — the risk was **not** resolved by its Risk End Date;
+  status → `Event` (displays as "Materialized"), one Issue is auto-created.
+
+Materialization is a **backend** automation (hourly job) — never a frontend
+client-side date check. It fires when:
+
+```text
+risk_end_date has fully passed (business timezone)
+AND status is still Open / In Progress / Escalated
+```
+
+`Resolved` / `Closed` / `Dismissed` / `Suggested` risks never materialize, the
+original risk is never deleted, and `Event` is **not** `Closed` — only the PMO
+Lead may perform the final closure (unchanged).
 
 ---
 
@@ -159,6 +188,19 @@ Special cases:
   Owner + PM + PMO Lead.
 - **Escalation is SLA-driven only** (no Critical flag, no score-change triggers).
 - De-escalation: PM or PMO Lead only, with written rationale (audit-logged).
+
+### Risk End Date = resolution deadline
+
+**Risk End Date** = `risk_start_date` + the rating's SLA window (High 24h → 1
+business day, Medium 48h → 2 days, Low 120h → 5 days) — the same `SLA_HOURS`
+duration that drives the response deadline, so the two never drift apart.
+
+It is the **deadline for resolution**: an hourly backend job (Celery Beat, at
+:30) transitions any risk that is still `Open` / `In Progress` / `Escalated`
+after `risk_end_date < today` (business timezone) to `Event` (Materialized) and
+auto-creates one Issue populated from the risk. The comparison is date-only in
+the business timezone, so risks are never materialized early because of a
+timezone or midnight-boundary skew.
 
 ---
 
@@ -197,6 +239,7 @@ existing `evaluation.py` groundedness check is ported).
   - Owner assignment → owner + PM + PMO Lead + Practice Lead (CC)
   - SLA warning → owner
   - Breach / escalation → owner + PM + PMO Lead
+  - **Materialization (Event → Issue created) → owner + PM + PMO Lead** (email + in-app)
   - Risk start date → owner (email + in-app, sent on `risk_start_date`)
   - Weekly summary (Mon 8 AM) → PM + PMO Lead
   - Closure confirmation → PM + PMO Lead
@@ -228,7 +271,10 @@ Dropped from MVP: PMO Analyst, Data Scientist, Information Security Manager.
 
 - **Project dashboard** (per project): KPI cards, donut (rating), bar (status),
   treemap (category), SLA countdown list, Risk Register table (conditional
-  formatting, filters, sort) → drill-through to risk detail page.
+  formatting, filters, sort) → drill-through to risk detail page, and an
+  **Issues table** beneath the register listing Issues created from materialized
+  risks (issue code, description, source risk, rating, status, owner, created)
+  → drill-through to an issue detail page.
 - **Portfolio dashboard** (PMO Lead): project × category heatmap, risk-by-project
   bar, escalation trend line, portfolio KPIs.
 - **Weekly summary email** (Celery, Mon 8 AM).
@@ -239,6 +285,10 @@ Dropped from MVP: PMO Analyst, Data Scientist, Information Security Manager.
 ## 12. Background Jobs (Celery)
 
 - Hourly SLA monitor (remind / escalate).
+- Hourly **end-date monitor** (at :30): materialize overdue unresolved risks —
+  `risk_end_date` passed and status still `Open` / `In Progress` / `Escalated`
+  — to `Event` and auto-create one Issue per risk (idempotent; also backfills an
+  Issue for any Event risk that lacks one).
 - Daily start-date check — email the owner when `risk_start_date` is today.
 - Weekly summary (Monday 8 AM).
 - Async email sending.
@@ -280,3 +330,10 @@ treatment workflow (residual risk scoring, management sign-off).
 10. Email (Azure Communication Services) + in-app; deep links; Entra ID SSO.
 11. Roles: System Admin, PMO Lead, Project Manager (via Entra groups).
 12. Dashboards in React (ECharts) + weekly email; defer PDF export.
+13. Acknowledgement satisfies the SLA acknowledgement requirement only; it does
+    not resolve the risk (acknowledged risks still materialize if unresolved at
+    the Risk End Date).
+14. Materialization = `risk_end_date` passed (business timezone) + risk
+    unresolved → status `Event` ("Materialized") + exactly one auto-created
+    Issue; backend-only and idempotent; resolved/closed risks never materialize;
+    the PMO Lead keeps sole closure authority.

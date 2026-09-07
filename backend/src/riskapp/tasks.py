@@ -14,6 +14,7 @@ from riskapp.config import settings
 from riskapp.db import SessionLocal
 from riskapp.notifications import NotificationService
 from riskapp.scheduler import (
+    run_end_date_monitor,
     run_sla_monitor,
     run_start_date_check,
     run_weekly_summary,
@@ -34,6 +35,18 @@ def check_start_dates() -> int:
     today = dt.datetime.now(settings.tz).date()
     with SessionLocal() as db:
         return run_start_date_check(db, NotificationService(), today)
+
+
+@celery_app.task(name="riskapp.tasks.materialize_overdue_risks")  # type: ignore[untyped-decorator]
+def materialize_overdue_risks() -> int:
+    """Hourly: materialize unresolved risks past their Risk End Date.
+
+    Overdue risks become Event ("Materialized") and each generates exactly one
+    Issue, populated from the originating risk.
+    """
+    today = dt.datetime.now(settings.tz).date()
+    with SessionLocal() as db:
+        return run_end_date_monitor(db, NotificationService(), today)
 
 
 @celery_app.task(name="riskapp.tasks.weekly_summary")  # type: ignore[untyped-decorator]

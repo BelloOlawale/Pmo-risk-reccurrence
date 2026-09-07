@@ -20,6 +20,7 @@ from riskapp.domain.sla import as_naive_utc, warning_hours
 from riskapp.domain.status import RiskStatus
 from riskapp.notifications import (
     EVENT_BREACH,
+    EVENT_MATERIALIZED,
     EVENT_RISK_START,
     EVENT_SLA_WARNING,
     EVENT_WEEKLY_SUMMARY,
@@ -27,9 +28,18 @@ from riskapp.notifications import (
     Recipients,
     _unique,
 )
-from riskapp.services import transition_risk
+from riskapp.services import ensure_issue_for_risk, transition_risk
 
 _ACTIVE_STATUSES = (RiskStatus.OPEN.value, RiskStatus.IN_PROGRESS.value)
+
+# Statuses from which the end-date monitor may transition a risk to Event.
+# Suggested / Resolved / Closed / Dismissed are excluded: Suggested risks have
+# not started, and resolved/closed/dismissed risks are finished business.
+_MATERIALIZABLE_STATUSES = (
+    RiskStatus.OPEN.value,
+    RiskStatus.IN_PROGRESS.value,
+    RiskStatus.ESCALATED.value,
+)
 
 
 def sla_state(
@@ -218,6 +228,98 @@ def run_weekly_summary(
     )
     db.commit()
     return summary
+
+
+def find_overdue_risks(db: Session, today: dt.date) -> list[models.Risk]:
+    """Active risks whose Risk End Date has already passed (``end < today``).
+
+    ``today`` is the current date in the business timezone. A risk is overdue
+    only after its end-date day has fully elapsed in that timezone, so risks are
+    never materialized early because of a timezone/midnight skew. Suggested
+    risks are excluded because the status machine forbids Suggested -> Event.
+    """
+    return list(
+        db.scalars(
+            select(models.Risk)
+            .where(
+                models.Risk.status.in_(_MATERIALIZABLE_STATUSES),
+                models.Risk.risk_end_date.is_not(None),
+                models.Risk.risk_end_date < today,
+            )
+            .order_by(models.Risk.id)
+        ).all()
+    )
+
+
+def find_event_risks_without_issue(db: Session) -> list[models.Risk]:
+    """Event (materialized) risks that do not yet have an Issue.
+
+    Kept as a separate sweep so the invariant "one Issue per materialized risk"
+    holds even for risks that reached Event through a path other than this
+    monitor (e.g. a manual transition or rows created before Issues existed).
+    """
+    with_issue = select(models.Issue.source_risk_id)
+    return list(
+        db.scalars(
+            select(models.Risk)
+            .where(
+                models.Risk.status == RiskStatus.EVENT.value,
+                ~models.Risk.id.in_(with_issue),
+            )
+            .order_by(models.Risk.id)
+        ).all()
+    )
+
+
+def run_end_date_monitor(db: Session, notifier: NotificationService, today: dt.date) -> int:
+    """Materialize overdue unresolved risks: Event status + automatic Issue.
+
+    Business rule: once the Risk End Date has passed and the risk is still not
+    resolved, the risk becomes an Event (displayed as "Materialized") and a
+    single Issue is created from it. Resolved / Closed / Dismissed risks never
+    materialize. The operation is idempotent: a second run finds no overdue
+    risks (they are Event already) and no Event risk is issued twice (the
+    existence check + unique ``source_risk_id``).
+
+    Returns the number of risks materialized in this run.
+    """
+    materialized = 0
+    for risk in find_overdue_risks(db, today):
+        # Audit log records the Open/In Progress/Escalated -> Event transition.
+        transition_risk(db, risk, RiskStatus.EVENT.value)
+        issue = ensure_issue_for_risk(db, risk)
+        notifier.notify(
+            db,
+            event=EVENT_MATERIALIZED,
+            title=f"Risk materialized: {risk.risk_code}",
+            body=(
+                f"Risk {risk.risk_code} passed its risk end date "
+                f"({risk.risk_end_date.isoformat() if risk.risk_end_date else '—'}) "
+                f"without being resolved and became an Event. "
+                f"Issue {issue.issue_code} has been created from the materialized risk."
+            ),
+            risk=risk,
+        )
+        materialized += 1
+
+    # Backfill any Event risk that somehow has no Issue yet (manual Event, or
+    # rows created before this workflow existed). This is what keeps Issue
+    # creation idempotent across repeated scheduler runs.
+    for risk in find_event_risks_without_issue(db):
+        issue = ensure_issue_for_risk(db, risk)
+        notifier.notify(
+            db,
+            event=EVENT_MATERIALIZED,
+            title=f"Issue created: {issue.issue_code}",
+            body=(
+                f"Issue {issue.issue_code} has been created from materialized "
+                f"risk {risk.risk_code}."
+            ),
+            risk=risk,
+        )
+
+    db.commit()
+    return materialized
 
 
 def _get_setting(db: Session, key: str) -> str | None:

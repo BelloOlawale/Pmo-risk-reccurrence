@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ActiveRiskRegisterPage } from './pages/ActiveRiskRegisterPage';
 import { CreateRiskPage } from './pages/CreateRiskPage';
+import { IssueDetailPage } from './pages/IssueDetailPage';
 import { PortfolioDashboardPage } from './pages/PortfolioDashboardPage';
 import { ProjectDashboardPage } from './pages/ProjectDashboardPage';
 import { ProjectsPage } from './pages/ProjectsPage';
@@ -25,6 +26,7 @@ export default function App() {
         <Route path="/risk-history" element={<ProjectsPage />} />
         <Route path="/risk-history/:projectId" element={<ProjectDashboardPage />} />
         <Route path="/risks/:riskId" element={<RiskDetailPage />} />
+        <Route path="/issues/:issueId" element={<IssueDetailPage />} />
         <Route path="/report" element={<PortfolioDashboardPage />} />
 
         {/* Internal utility route (not in the sidebar navigation). */}

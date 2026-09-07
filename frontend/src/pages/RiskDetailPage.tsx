@@ -2,8 +2,16 @@ import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 
-import { api } from '../api/client';
-import type { Me, ResponseStrategy, Risk, RiskAuditLog, RiskMeta, RiskSource } from '../api/types';
+import { api, ApiError } from '../api/client';
+import type {
+  Issue,
+  Me,
+  ResponseStrategy,
+  Risk,
+  RiskAuditLog,
+  RiskMeta,
+  RiskSource,
+} from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { RatingBadge, SectionCard, StatusBadge } from '../components/Badges';
 import { PickOrTypeField } from '../components/PickOrTypeField';
@@ -67,6 +75,8 @@ function actionLabel(action: string, field: string | null): string {
       return 'Acknowledged';
     case 'de_escalate':
       return 'De-escalated';
+    case 'issue_created':
+      return 'Issue created';
     case 'field_edit':
       return field ? `Edited ${humanizeField(field)}` : 'Edited';
     default:
@@ -82,6 +92,60 @@ function fmtValue(value: unknown): string {
   if (value === null || value === undefined) return '—';
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
+}
+
+/** Banner shown on a materialized (Event) risk, linking to its single Issue. */
+function MaterializedIssueCard({ riskId, from }: { riskId: number; from: string }) {
+  const [issue, setIssue] = useState<Issue | null>(null);
+  const [state, setState] = useState<'loading' | 'ready' | 'pending'>('loading');
+
+  useEffect(() => {
+    let cancelled = false;
+    setState('loading');
+    api
+      .get<Issue>(`/api/risks/${riskId}/issue`)
+      .then((data) => {
+        if (!cancelled) {
+          setIssue(data);
+          setState('ready');
+        }
+      })
+      .catch((err: unknown) => {
+        // 404 = Event risk whose Issue the automation has not generated yet
+        // (e.g. just transitioned manually before the next scheduler run).
+        if (!cancelled && !(err instanceof ApiError && err.status === 404)) {
+          setIssue(null);
+        }
+        if (!cancelled) setState('pending');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [riskId]);
+
+  if (state === 'loading') return null;
+  if (issue) {
+    return (
+      <div className="materialized-banner">
+        <div className="materialized-banner-main">
+          <strong>This risk has materialized.</strong>{' '}
+          <span>
+            It passed its Risk End Date without being resolved. Issue{' '}
+            <span className="mono">{issue.issue_code}</span> was created from this risk.
+          </span>
+        </div>
+        <Link className="btn btn-sm btn-primary" to={`/issues/${issue.id}?from=${from}`}>
+          View Issue {issue.issue_code}
+        </Link>
+      </div>
+    );
+  }
+  return (
+    <div className="materialized-banner">
+      <strong>This risk has materialized.</strong>{' '}
+      <span>An Issue will be generated automatically on the next scheduler run.</span>
+    </div>
+  );
 }
 
 export function RiskDetailPage() {
@@ -239,6 +303,13 @@ export function RiskDetailPage() {
 
       {error ? <div className="error-banner">{error}</div> : null}
       {actionError ? <div className="error-banner">{actionError}</div> : null}
+
+      {risk?.status === 'Event' ? (
+        <MaterializedIssueCard
+          riskId={risk.id}
+          from={fromRiskHistory ? 'risk-history' : 'active-risk'}
+        />
+      ) : null}
 
       {risk ? (
         <>
@@ -569,7 +640,10 @@ export function RiskDetailPage() {
                             {entry.user_id !== null ? `User #${entry.user_id} · ` : ''}
                             {formatDateTime(entry.created_at)}
                           </div>
-                          {entry.field && (entry.action === 'field_edit' || entry.action === 'status_change') ? (
+                          {entry.field &&
+                          (entry.action === 'field_edit' ||
+                            entry.action === 'status_change' ||
+                            entry.action === 'issue_created') ? (
                             <div className="timeline-change">
                               {humanizeField(entry.field)}: {fmtValue(entry.old_value)} →{' '}
                               {fmtValue(entry.new_value)}

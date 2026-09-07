@@ -92,6 +92,7 @@ class Project(TimestampMixin, Base):
     pm_user: Mapped[User | None] = relationship(foreign_keys=[pm_user_id])
     closed_by_user: Mapped[User | None] = relationship(foreign_keys=[closed_by_user_id])
     risks: Mapped[list[Risk]] = relationship(back_populates="project")
+    issues: Mapped[list[Issue]] = relationship(back_populates="project")
 
     @property
     def department_name(self) -> str:
@@ -165,6 +166,9 @@ class Risk(TimestampMixin, Base):
     owner: Mapped[User | None] = relationship(foreign_keys=[owner_user_id])
     practice_lead: Mapped[User | None] = relationship(foreign_keys=[practice_lead_user_id])
     audit_log: Mapped[list[RiskAuditLog]] = relationship(back_populates="risk")
+    # At most one Issue is ever created for a risk (unique on source_risk_id):
+    # a materialized (Event) risk generates exactly one Issue.
+    issue: Mapped[Issue | None] = relationship(back_populates="source_risk", uselist=False)
 
 
 class RiskAuditLog(Base):
@@ -222,6 +226,54 @@ class SuggestionDismissal(Base):
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class Issue(TimestampMixin, Base):
+    """An Issue raised when a risk materializes (Event) past its Risk End Date.
+
+    Each Issue is created automatically from a materialized risk and inherits the
+    risk's business information. The unique ``source_risk_id`` constraint makes
+    issue creation idempotent: a risk can never generate a second Issue.
+    """
+
+    __tablename__ = "issues"
+    __table_args__ = (UniqueConstraint("source_risk_id", name="uq_issues_source_risk_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    issue_code: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    source_risk_id: Mapped[int] = mapped_column(ForeignKey("risks.id"), index=True)
+
+    # Fields inherited from the originating risk at materialization time.
+    description: Mapped[str] = mapped_column(Text)
+    category: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    subcategory: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    risk_source: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    likelihood: Mapped[str] = mapped_column(String(10), nullable=False)
+    impact: Mapped[str] = mapped_column(String(10), nullable=False)
+    risk_rating: Mapped[str] = mapped_column(String(10), nullable=False)
+    response_strategy: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    response_plan: Mapped[str | None] = mapped_column(Text, nullable=True)
+    owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    identified_during: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    risk_start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    risk_end_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+
+    # Issue-level state. Issues are born Open; resolution/closure is tracked on
+    # the linked materialized risk (Event -> Resolved -> Closed by the PMO Lead).
+    status: Mapped[str] = mapped_column(String(30), default="Open", nullable=False, index=True)
+
+    project: Mapped[Project] = relationship(back_populates="issues")
+    source_risk: Mapped[Risk] = relationship(back_populates="issue")
+    owner: Mapped[User | None] = relationship(foreign_keys=[owner_user_id])
+
+    @property
+    def source_risk_code(self) -> str:
+        return self.source_risk.risk_code
+
+    @property
+    def project_name(self) -> str:
+        return self.project.name
 
 
 class Notification(TimestampMixin, Base):

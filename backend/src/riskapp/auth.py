@@ -199,3 +199,17 @@ def can_access_risk(principal: Principal, risk: Any) -> bool:
         and principal.user_id is not None
         and risk.project.pm_user_id == principal.user_id
     )
+
+
+def can_access_issue(principal: Principal, issue: Any) -> bool:
+    """PMO Lead / Admin see everything; project PMs and risk owners see their Issues."""
+    if principal.is_pmo_or_admin:
+        return True
+    if principal.user_id is None:
+        return False
+    if issue.owner_user_id is not None and issue.owner_user_id == principal.user_id:
+        return True
+    return (
+        principal.has_role(Role.PROJECT_MANAGER)
+        and issue.project.pm_user_id == principal.user_id
+    )

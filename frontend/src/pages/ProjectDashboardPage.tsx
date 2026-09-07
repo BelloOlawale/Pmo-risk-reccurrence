@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { api } from '../api/client';
-import type { Project, Risk } from '../api/types';
+import type { Issue, Project, Risk } from '../api/types';
 import { AddRiskModal } from '../components/AddRiskModal';
 import { SectionCard, StatusBadge } from '../components/Badges';
 import { DonutChart, StackedBarChart, TreemapChart } from '../components/charts';
+import { IssueTable } from '../components/IssueTable';
 import { KpiCard } from '../components/KpiCard';
 import { RiskTable } from '../components/RiskTable';
 import { SlaCountdownList } from '../components/SlaCountdownList';
@@ -27,6 +28,10 @@ export function ProjectDashboardPage() {
     () => api.get<Risk[]>(`/api/projects/${id}/risks`),
     [id],
   );
+  const { data: issues, error: issuesError, reload: reloadIssues } = useApi(
+    () => api.get<Issue[]>(`/api/projects/${id}/issues`),
+    [id],
+  );
 
   if (!Number.isFinite(id) || id <= 0) {
     return <div className="error-banner">Invalid project id.</div>;
@@ -41,6 +46,7 @@ export function ProjectDashboardPage() {
   function handleRiskCreated() {
     setAdding(false);
     reloadRisks();
+    reloadIssues();
     reloadProject();
     // Adding a risk to a closed register reopens it (Active). Move the user
     // to Active Risk where the reopened register now lives.
@@ -81,6 +87,7 @@ export function ProjectDashboardPage() {
 
       {projectError ? <div className="error-banner">{projectError}</div> : null}
       {risksError ? <div className="error-banner">{risksError}</div> : null}
+      {issuesError ? <div className="error-banner">{issuesError}</div> : null}
 
       {isClosed ? (
         <div className="closed-banner">
@@ -128,6 +135,17 @@ export function ProjectDashboardPage() {
                 risks={riskList}
                 onSelect={(r) =>
                   navigate(`/risks/${r.id}?from=${isClosed ? 'risk-history' : 'active-risk'}`)
+                }
+              />
+            </SectionCard>
+          </div>
+
+          <div className="chart-grid" style={{ gridTemplateColumns: '1fr' }}>
+            <SectionCard title={`Issues (${(issues ?? []).length})`}>
+              <IssueTable
+                issues={issues ?? []}
+                onSelect={(issue) =>
+                  navigate(`/issues/${issue.id}?from=${isClosed ? 'risk-history' : 'active-risk'}`)
                 }
               />
             </SectionCard>

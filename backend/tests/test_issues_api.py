@@ -1,0 +1,275 @@
+"""API tests for Issues raised from materialized risks.
+
+The materialization itself is a backend job (``run_end_date_monitor``), so these
+tests drive it through the session and then assert the HTTP surface: listing
+issues under a Risk Register, reading an issue, the risk -> issue link, and the
+row-level access rules (PMO Lead / PM / risk owner).
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+
+from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from riskapp import models
+from riskapp.notifications import NotificationService
+from riskapp.scheduler import run_end_date_monitor
+
+PAST = dt.date(2026, 8, 20)
+TODAY = dt.date(2026, 8, 24)
+
+
+def _headers(user_id: int | None, role: str) -> dict[str, str]:
+    headers = {"X-User-Role": role}
+    if user_id is not None:
+        headers["X-User-Id"] = str(user_id)
+    return headers
+
+
+def _create_project(client: TestClient, *, user_id: int, name: str) -> dict:
+    resp = client.post(
+        "/api/projects",
+        json={
+            "name": name,
+            "department": "Digital Advisory",
+            "project_type": "Cloud Migration",
+            "customer": "Customer",
+        },
+        headers=_headers(user_id, "Project Manager"),
+    )
+    assert resp.status_code == 201
+    return resp.json()
+
+
+def _open_risk(client: TestClient, project: dict, *, user_id: int) -> dict:
+    risk = client.post(
+        "/api/risks",
+        json={
+            "project_id": project["id"],
+            "description": "Unavailability of key project stakeholders",
+            "category": "Project Management",
+            "risk_source": "Human",
+            "likelihood": "High",
+            "impact": "High",
+            "response_strategy": "Mitigate",
+            "response_plan": "Assign a named deputy to every decision forum.",
+            "identified_during": "Execution",
+        },
+        headers=_headers(user_id, "Project Manager"),
+    ).json()
+    accepted = client.post(f"/api/risks/{risk['id']}/accept").json()
+    assert accepted["status"] == "Open"
+    return accepted
+
+
+def _materialize(client: TestClient, db: Session, risk_id: int) -> dict:
+    """Force the Risk End Date into the past and run the backend monitor."""
+    risk = db.get(models.Risk, risk_id)
+    assert risk is not None
+    risk.risk_end_date = PAST
+    db.commit()
+
+    run_end_date_monitor(db, NotificationService(), TODAY)
+
+    issue = db.scalar(
+        select(models.Issue).where(models.Issue.source_risk_id == risk_id)
+    )
+    assert issue is not None
+    return issue
+
+
+class TestProjectIssues:
+    def test_lists_empty_before_materialization(self, client: TestClient) -> None:
+        project = _create_project(client, user_id=7, name="No issues yet")
+        resp = client.get(
+            f"/api/projects/{project['id']}/issues",
+            headers=_headers(7, "Project Manager"),
+        )
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_issues_are_fully_populated(self, client: TestClient, db_session: Session) -> None:
+        project = _create_project(client, user_id=7, name="PMO Automation")
+        risk = _open_risk(client, project, user_id=7)
+        issue = _materialize(client, db_session, risk["id"])
+
+        resp = client.get(
+            f"/api/projects/{project['id']}/issues",
+            headers=_headers(7, "Project Manager"),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body) == 1
+        row = body[0]
+        assert row["issue_code"] == issue.issue_code
+        assert row["source_risk_id"] == risk["id"]
+        assert row["source_risk_code"] == risk["risk_code"]
+        assert row["project_id"] == project["id"]
+        assert row["project_name"] == "PMO Automation"
+        assert row["description"] == risk["description"]
+        assert row["category"] == "Project Management"
+        assert row["likelihood"] == "High"
+        assert row["impact"] == "High"
+        assert row["risk_rating"] == risk["risk_rating"]
+        assert row["response_strategy"] == "Mitigate"
+        assert row["identified_during"] == "Execution"
+        assert row["owner_user_id"] == risk["owner_user_id"]
+        assert row["risk_start_date"] == risk["risk_start_date"]
+        assert row["risk_end_date"] == "2026-08-20"
+        assert row["status"] == "Open"
+        assert row["source_risk_status"] == "Event"
+        assert row["created_at"]
+
+    def test_issues_are_scoped_per_project(self, client: TestClient, db_session: Session) -> None:
+        project_a = _create_project(client, user_id=7, name="Register A")
+        project_b = _create_project(client, user_id=7, name="Register B")
+        risk = _open_risk(client, project_a, user_id=7)
+        _materialize(client, db_session, risk["id"])
+
+        resp = client.get(
+            f"/api/projects/{project_b['id']}/issues",
+            headers=_headers(7, "Project Manager"),
+        )
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_other_pm_is_forbidden(self, client: TestClient, db_session: Session) -> None:
+        project = _create_project(client, user_id=7, name="PM A project")
+        risk = _open_risk(client, project, user_id=7)
+        _materialize(client, db_session, risk["id"])
+
+        resp = client.get(
+            f"/api/projects/{project['id']}/issues",
+            headers=_headers(8, "Project Manager"),
+        )
+        assert resp.status_code == 403
+
+
+class TestReadIssue:
+    def test_pmo_lead_pm_and_owner_can_read(self, client: TestClient, db_session: Session) -> None:
+        project = _create_project(client, user_id=7, name="Shared register")
+        risk = _open_risk(client, project, user_id=7)
+        # Assign a distinct risk owner (user 9).
+        risk_row = db_session.get(models.Risk, risk["id"])
+        assert risk_row is not None
+        risk_row.owner_user_id = 9
+        db_session.commit()
+        issue = _materialize(client, db_session, risk["id"])
+
+        for headers in (
+            _headers(7, "Project Manager"),  # project PM
+            _headers(None, "PMO Lead"),  # PMO Lead (no user id)
+            _headers(9, "Project Manager"),  # risk owner
+        ):
+            resp = client.get(f"/api/issues/{issue.id}", headers=headers)
+            assert resp.status_code == 200, headers
+            assert resp.json()["id"] == issue.id
+
+    def test_other_pm_is_forbidden(self, client: TestClient, db_session: Session) -> None:
+        project = _create_project(client, user_id=7, name="Another register")
+        risk = _open_risk(client, project, user_id=7)
+        issue = _materialize(client, db_session, risk["id"])
+
+        resp = client.get(f"/api/issues/{issue.id}", headers=_headers(8, "Project Manager"))
+        assert resp.status_code == 403
+
+    def test_missing_issue_returns_404(self, client: TestClient) -> None:
+        resp = client.get("/api/issues/999999", headers=_headers(None, "PMO Lead"))
+        assert resp.status_code == 404
+
+
+class TestRiskIssueLink:
+    def test_materialized_risk_exposes_issue(self, client: TestClient, db_session: Session) -> None:
+        project = _create_project(client, user_id=7, name="Linked register")
+        risk = _open_risk(client, project, user_id=7)
+        issue = _materialize(client, db_session, risk["id"])
+
+        resp = client.get(
+            f"/api/risks/{risk['id']}/issue",
+            headers=_headers(7, "Project Manager"),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["id"] == issue.id
+        assert resp.json()["issue_code"] == issue.issue_code
+        assert resp.json()["source_risk_code"] == risk["risk_code"]
+
+    def test_plain_risk_has_no_issue(self, client: TestClient, db_session: Session) -> None:
+        project = _create_project(client, user_id=7, name="No link register")
+        risk = _open_risk(client, project, user_id=7)
+
+        resp = client.get(
+            f"/api/risks/{risk['id']}/issue",
+            headers=_headers(7, "Project Manager"),
+        )
+        assert resp.status_code == 404
+
+    def test_owner_can_read_issue_link(self, client: TestClient, db_session: Session) -> None:
+        project = _create_project(client, user_id=7, name="Owner link register")
+        risk = _open_risk(client, project, user_id=7)
+        issue = _materialize(client, db_session, risk["id"])
+
+        resp = client.get(
+            f"/api/risks/{risk['id']}/issue",
+            headers=_headers(9, "Project Manager"),
+        )
+        # User 9 is not the owner or the project PM -> forbidden.
+        assert resp.status_code == 403
+
+        risk_row = db_session.get(models.Risk, risk["id"])
+        assert risk_row is not None
+        risk_row.owner_user_id = 9
+        db_session.commit()
+
+        resp = client.get(
+            f"/api/risks/{risk['id']}/issue",
+            headers=_headers(9, "Project Manager"),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["id"] == issue.id
+
+
+class TestEffectiveIssueStatus:
+    """The Issue's effective status follows the materialized risk's lifecycle."""
+
+    def test_open_while_risk_event(self, client: TestClient, db_session: Session) -> None:
+        project = _create_project(client, user_id=7, name="Status register")
+        risk = _open_risk(client, project, user_id=7)
+        issue = _materialize(client, db_session, risk["id"])
+
+        resp = client.get(f"/api/issues/{issue.id}", headers=_headers(7, "Project Manager"))
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "Open"
+        assert resp.json()["source_risk_status"] == "Event"
+
+    def test_resolved_when_risk_resolved(self, client: TestClient, db_session: Session) -> None:
+        project = _create_project(client, user_id=7, name="Resolves register")
+        risk = _open_risk(client, project, user_id=7)
+        issue = _materialize(client, db_session, risk["id"])
+
+        risk_row = db_session.get(models.Risk, risk["id"])
+        assert risk_row is not None
+        risk_row.status = "Resolved"
+        db_session.commit()
+
+        resp = client.get(f"/api/issues/{issue.id}", headers=_headers(None, "PMO Lead"))
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "Resolved"
+        assert resp.json()["source_risk_status"] == "Resolved"
+
+    def test_closed_when_risk_closed(self, client: TestClient, db_session: Session) -> None:
+        project = _create_project(client, user_id=7, name="Closed register")
+        risk = _open_risk(client, project, user_id=7)
+        issue = _materialize(client, db_session, risk["id"])
+
+        risk_row = db_session.get(models.Risk, risk["id"])
+        assert risk_row is not None
+        risk_row.status = "Closed"
+        db_session.commit()
+
+        resp = client.get(f"/api/issues/{issue.id}", headers=_headers(None, "PMO Lead"))
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "Closed"
+        assert resp.json()["source_risk_status"] == "Closed"

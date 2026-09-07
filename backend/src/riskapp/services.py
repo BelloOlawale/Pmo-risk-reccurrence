@@ -59,6 +59,25 @@ def next_risk_code(db: Session) -> str:
     return f"RSK-{max_risk_code_number(db) + 1:03d}"
 
 
+def max_issue_code_number(db: Session) -> int:
+    """Return the highest numeric suffix among existing ``ISS-<n>`` codes.
+
+    Returns 0 when no code of that shape exists. Mirrors ``max_risk_code_number``
+    so issue codes never collide with rows that were rolled back.
+    """
+    highest = 0
+    for code in db.scalars(select(models.Issue.issue_code)).all():
+        suffix = code[len("ISS-") :] if code.startswith("ISS-") else ""
+        if suffix.isdigit():
+            highest = max(highest, int(suffix))
+    return highest
+
+
+def next_issue_code(db: Session) -> str:
+    """Return the next free issue code (``ISS-<n>``), one past the highest in use."""
+    return f"ISS-{max_issue_code_number(db) + 1:03d}"
+
+
 def get_or_create_department(db: Session, name: str) -> models.Department:
     department = db.scalar(select(models.Department).where(models.Department.name == name))
     if department is None:
@@ -246,7 +265,11 @@ def transition_risk(
 def acknowledge_risk(
     db: Session, risk: models.Risk, actor_user_id: int | None = None
 ) -> models.Risk:
-    """Mark a risk as acknowledged (idempotent) and audit the event."""
+    """Mark a risk as acknowledged (idempotent) and audit the event.
+
+    Acknowledgement satisfies the SLA acknowledgement requirement only. It does
+    NOT resolve the risk: the risk stays active until the owner resolves it.
+    """
     if not risk.sla_acknowledged:
         risk.sla_acknowledged = True
         record_change(
@@ -261,6 +284,64 @@ def acknowledge_risk(
         db.commit()
         db.refresh(risk)
     return risk
+
+
+def ensure_issue_for_risk(
+    db: Session, risk: models.Risk, *, actor_user_id: int | None = None
+) -> models.Issue:
+    """Return the single Issue for a materialized (Event) risk, creating it when missing.
+
+    Issue creation is idempotent: the unique constraint on ``source_risk_id`` and
+    the existence check here guarantee exactly one Issue per materialized risk,
+    no matter how many times the automation runs.
+
+    Raises:
+        ValueError: if ``risk`` is not in the ``Event`` (materialized) status.
+    """
+    if risk.status != RiskStatus.EVENT.value:
+        raise ValueError(
+            f"Issues are only created for materialized (Event) risks; "
+            f"{risk.risk_code} is {risk.status!r}."
+        )
+    existing = db.scalar(
+        select(models.Issue).where(models.Issue.source_risk_id == risk.id)
+    )
+    if existing is not None:
+        return existing
+
+    issue = models.Issue(
+        issue_code=next_issue_code(db),
+        project_id=risk.project_id,
+        source_risk_id=risk.id,
+        description=risk.description,
+        category=risk.category,
+        subcategory=risk.subcategory,
+        risk_source=risk.risk_source,
+        likelihood=risk.likelihood,
+        impact=risk.impact,
+        risk_rating=risk.risk_rating,
+        response_strategy=risk.response_strategy,
+        response_plan=risk.response_plan,
+        owner_user_id=risk.owner_user_id,
+        identified_during=risk.identified_during,
+        risk_start_date=risk.risk_start_date,
+        risk_end_date=risk.risk_end_date,
+        status="Open",
+    )
+    db.add(issue)
+    db.flush()
+    # Record the automatic Issue creation on the originating risk's audit trail.
+    record_change(
+        db,
+        risk,
+        action="issue_created",
+        field="issue_code",
+        old_value=None,
+        new_value=issue.issue_code,
+        actor_user_id=actor_user_id,
+    )
+    db.flush()
+    return issue
 
 
 def accept_risk(

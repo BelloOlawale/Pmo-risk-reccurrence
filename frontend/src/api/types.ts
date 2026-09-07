@@ -92,6 +92,35 @@ export interface Notification {
   created_at: string;
 }
 
+/** An Issue raised automatically from a materialized (Event) risk. */
+export interface Issue {
+  id: number;
+  issue_code: string;
+  project_id: number;
+  project_name: string;
+  /** Originating risk (foreign key — the source of truth). */
+  source_risk_id: number;
+  source_risk_code: string;
+  /** The originating risk's live status ("Event" = materialized). */
+  source_risk_status: string;
+  description: string;
+  category: string | null;
+  subcategory: string | null;
+  risk_source: string | null;
+  likelihood: string;
+  impact: string;
+  risk_rating: string;
+  response_strategy: string | null;
+  response_plan: string | null;
+  owner_user_id: number | null;
+  identified_during: string | null;
+  risk_start_date: string | null;
+  risk_end_date: string | null;
+  /** Effective status: follows the originating risk (Event->Resolved->Closed). */
+  status: string;
+  created_at: string;
+}
+
 /** GET /api/me — the current caller's identity and roles. */
 export interface Me {
   user_id: number | null;
