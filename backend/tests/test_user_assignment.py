@@ -29,7 +29,7 @@ class TestCreateProjectPm:
         pm = get_or_create_user(db_session, "pm@example.com", "PM")
         project = create_project(
             db_session,
-            schemas.ProjectCreate(name="P", department="D", project_type="T"),
+            schemas.ProjectCreate(name="P", department="D", project_type="T", customer="C"),
             pm_user_id=pm.id,
         )
         assert project.pm_user_id == pm.id
@@ -42,7 +42,7 @@ class TestAddProjectEndpoint:
             json={
                 "name": "P",
                 "department": "D",
-                "project_type": "T",
+                "project_type": "T", "customer": "C",
                 "pm_upn": "pm@example.com",
             },
             headers={"X-User-Role": "Project Manager"},

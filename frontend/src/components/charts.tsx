@@ -1,7 +1,7 @@
 import type { EChartsOption } from 'echarts';
 
 import { EChart } from './EChart';
-import { RATING_COLORS } from '../utils/colors';
+import { RATING_COLORS, STATUS_GROUP_COLORS } from '../utils/colors';
 import type {
   EscalationTrend,
   HeatmapData,
@@ -12,7 +12,7 @@ import type {
 
 const AXIS_LABEL = '#64748b';
 const GRID_LINE = '#e5e9f0';
-const ACCENT = '#1d4ed8';
+const ACCENT = '#14418c';
 
 function emptyOption(message: string): EChartsOption {
   return {
@@ -77,12 +77,50 @@ export function DonutChart({ data }: { data: RatingSlice[] }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Status-group donut (portfolio Risk Overview)                        */
+/* ------------------------------------------------------------------ */
+
+export function StatusDonutChart({ data }: { data: NameValue[] }) {
+  const total = data.reduce((sum, d) => sum + d.value, 0);
+  if (total === 0) {
+    return <EChart option={emptyOption('No risks yet')} height={260} />;
+  }
+  const option: EChartsOption = {
+    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+    legend: { bottom: 0, textStyle: { color: AXIS_LABEL } },
+    series: [
+      {
+        type: 'pie',
+        radius: ['52%', '76%'],
+        center: ['50%', '45%'],
+        data: data.map((d) => ({
+          name: d.name,
+          value: d.value,
+          itemStyle: { color: STATUS_GROUP_COLORS[d.name] ?? '#94a3b8' },
+        })),
+        label: { show: false },
+        emphasis: { label: { show: true, fontWeight: 'bold' } },
+      },
+    ],
+    title: {
+      text: String(total),
+      subtext: 'total risks',
+      left: 'center',
+      top: '36%',
+      textStyle: { fontSize: 26, fontWeight: 700, color: '#1e293b' },
+      subtextStyle: { fontSize: 11, color: AXIS_LABEL },
+    },
+  };
+  return <EChart option={option} height={260} />;
+}
+
+/* ------------------------------------------------------------------ */
 /* Escalated vs non-escalated donut                                    */
 /* ------------------------------------------------------------------ */
 
 export function EscalatedDonutChart({ data }: { data: NameValue[] }) {
   const colors: Record<string, string> = {
-    Escalated: '#dc2626',
+    Escalated: '#ee1f2f',
     'Not escalated': '#e2e8f0',
   };
   const escalated = data.find((d) => d.name === 'Escalated')?.value ?? 0;
@@ -108,7 +146,7 @@ export function EscalatedDonutChart({ data }: { data: NameValue[] }) {
       subtext: 'escalated',
       left: 'center',
       top: '36%',
-      textStyle: { fontSize: 26, fontWeight: 700, color: '#dc2626' },
+      textStyle: { fontSize: 26, fontWeight: 700, color: '#ee1f2f' },
       subtextStyle: { fontSize: 11, color: AXIS_LABEL },
     },
   };
@@ -290,7 +328,7 @@ export function HeatmapChart({
       bottom: 8,
       itemWidth: 12,
       itemHeight: 120,
-      inRange: { color: ['#eef2ff', '#6366f1', '#dc2626'] },
+      inRange: { color: ['#e8eef9', '#14418c', '#ee1f2f'] },
       textStyle: { color: AXIS_LABEL, fontSize: 11 },
     },
     series: [
@@ -356,9 +394,9 @@ export function EscalationTrendChart({ data }: { data: EscalationTrend }) {
         smooth: true,
         symbol: 'circle',
         symbolSize: 8,
-        itemStyle: { color: '#dc2626', borderColor: '#ffffff', borderWidth: 2 },
-        lineStyle: { color: '#dc2626', width: 2.5 },
-        areaStyle: { color: 'rgba(220,38,38,0.10)' },
+        itemStyle: { color: '#ee1f2f', borderColor: '#ffffff', borderWidth: 2 },
+        lineStyle: { color: '#ee1f2f', width: 2.5 },
+        areaStyle: { color: 'rgba(238,31,47,0.10)' },
       },
     ],
   };
@@ -417,7 +455,7 @@ export function TreemapChart({ data }: { data: NameValue[] }) {
         itemStyle: { borderColor: '#ffffff', borderWidth: 2, gapWidth: 2 },
         levels: [
           {
-            color: ['#312e81', '#6366f1', '#818cf8', '#a5b4fc'],
+            color: ['#0e3168', '#14418c', '#4a76b8', '#8aa8d6'],
           },
         ],
       },

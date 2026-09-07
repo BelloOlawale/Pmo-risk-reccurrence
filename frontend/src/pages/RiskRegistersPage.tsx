@@ -36,7 +36,7 @@ export function RiskRegistersPage() {
 
       <div className="mb-20 muted">
         {riskList.length} risk{riskList.length === 1 ? '' : 's'} in the system ·{' '}
-        <Link to="/projects">Browse projects</Link>
+        <Link to="/risk-history">Browse risk history</Link>
       </div>
 
       {loading ? (
@@ -48,7 +48,7 @@ export function RiskRegistersPage() {
             <button className="link-btn" onClick={() => setAdding(true)}>
               Add your first risk
             </button>{' '}
-            or <Link to="/onboard">onboard a project</Link>.
+            or <Link to="/create-risk">create a risk register</Link>.
           </div>
         </div>
       ) : (

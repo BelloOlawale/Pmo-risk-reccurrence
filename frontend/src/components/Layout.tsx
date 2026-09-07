@@ -9,10 +9,10 @@ function NavIcon({ children }: { children: ReactNode }) {
 }
 
 const ICONS: Record<string, ReactNode> = {
-  registers: (
+  create: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="4" width="18" height="16" rx="2" />
-      <path d="M3 10h18M9 10v10" />
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 8v8M8 12h8" />
     </svg>
   ),
   active: (
@@ -20,19 +20,14 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
     </svg>
   ),
-  projects: (
+  history: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="7" width="20" height="14" rx="2" />
-      <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M12 7v5l4 2" />
     </svg>
   ),
-  onboard: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" />
-      <path d="M12 8v8M8 12h8" />
-    </svg>
-  ),
-  portfolio: (
+  report: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 3v18h18" />
       <path d="M7 16v-5M12 16V8M17 16v-3" />
@@ -47,29 +42,24 @@ export function Layout() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark">R</span>
-          <span className="brand-text">Risk Recurrence</span>
+          <img className="brand-logo" src="/wragby-logo.png" alt="Wragby" />
         </div>
         <nav className="nav">
-          <NavLink to="/" end className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-            <NavIcon>{ICONS.registers}</NavIcon>
-            Risk Registers
+          <NavLink to="/create-risk" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+            <NavIcon>{ICONS.create}</NavIcon>
+            Create Risk
           </NavLink>
-          <NavLink to="/active-register" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+          <NavLink to="/active-risk" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
             <NavIcon>{ICONS.active}</NavIcon>
-            Active Register
+            Active Risk
           </NavLink>
-          <NavLink to="/projects" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-            <NavIcon>{ICONS.projects}</NavIcon>
-            Projects
+          <NavLink to="/risk-history" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+            <NavIcon>{ICONS.history}</NavIcon>
+            Risk History
           </NavLink>
-          <NavLink to="/onboard" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-            <NavIcon>{ICONS.onboard}</NavIcon>
-            Onboard Project
-          </NavLink>
-          <NavLink to="/portfolio" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-            <NavIcon>{ICONS.portfolio}</NavIcon>
-            Portfolio
+          <NavLink to="/report" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+            <NavIcon>{ICONS.report}</NavIcon>
+            Report
           </NavLink>
         </nav>
         <div className="sidebar-footer">
@@ -115,7 +105,10 @@ export function Layout() {
       </aside>
       <div className="main">
         <header className="topbar">
-          <div className="topbar-title">PMO Risk Management</div>
+          <div className="topbar-title">
+            <span className="topbar-mark" aria-hidden="true">W</span>
+            <span>PMO Risk Management</span>
+          </div>
           <div className="topbar-actions">
             <NotificationBell />
           </div>

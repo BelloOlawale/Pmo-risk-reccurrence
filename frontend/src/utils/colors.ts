@@ -2,21 +2,29 @@
 // badges and the ECharts visualisations so they never drift apart.
 
 export const RATING_COLORS: Record<string, string> = {
-  High: '#ef4444',
+  Critical: '#dc2626',
+  High: '#f97316',
   Medium: '#f59e0b',
-  Low: '#22c55e',
+  Low: '#16a34a',
+};
+
+/** Semantic colours for the portfolio status-group donut. */
+export const STATUS_GROUP_COLORS: Record<string, string> = {
+  Open: '#14418c',
+  'In Progress': '#f59e0b',
+  'Resolved/Closed': '#22c55e',
 };
 
 export const RATING_ORDER = ['High', 'Medium', 'Low'] as const;
 
 export const STATUS_COLORS: Record<string, string> = {
-  Active: '#3b82f6',
+  Active: '#14418c',
   Suggested: '#94a3b8',
-  Open: '#3b82f6',
-  'In Progress': '#8b5cf6',
-  Escalated: '#ef4444',
+  Open: '#14418c',
+  'In Progress': '#0e7490',
+  Escalated: '#ee1f2f',
   Event: '#f59e0b',
-  Resolved: '#22c55e',
+  Resolved: '#16a34a',
   Closed: '#64748b',
   Dismissed: '#64748b',
 };

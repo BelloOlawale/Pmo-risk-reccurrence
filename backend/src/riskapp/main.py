@@ -223,7 +223,16 @@ def add_risk(
         raise HTTPException(status_code=404, detail="Project not found")
     if not can_access_project(principal, project):
         raise HTTPException(status_code=403, detail="Forbidden")
-    return schemas.RiskRead.model_validate(create_risk(db, payload))
+    risk = create_risk(db, payload)
+    # Reopen a closed register when a new risk is added to it: the register
+    # becomes Active again and reappears under Active Risk.
+    if project.status == "Closed":
+        project.status = "Active"
+        project.closed_date = None
+        project.closed_by_user_id = None
+        db.commit()
+        db.refresh(project)
+    return schemas.RiskRead.model_validate(risk)
 
 
 @app.get("/api/risks", response_model=list[schemas.RiskRead])
@@ -242,7 +251,11 @@ def list_risks(principal: PrincipalDep, db: DbDep) -> list[schemas.RiskRead]:
                 models.Risk.project.has(models.Project.pm_user_id == principal.user_id),
             )
         )
-    risks = db.scalars(stmt.order_by(models.Risk.id)).all()
+    # Newest risks first (created_at desc, id desc as a stable tiebreaker for
+    # rows that share a timestamp, e.g. a batch import committed in one txn).
+    risks = db.scalars(
+        stmt.order_by(models.Risk.created_at.desc(), models.Risk.id.desc())
+    ).all()
     return [schemas.RiskRead.model_validate(r) for r in risks]
 
 
@@ -334,7 +347,7 @@ def list_project_risks(
     risks = db.scalars(
         select(models.Risk)
         .where(models.Risk.project_id == project_id)
-        .order_by(models.Risk.id)
+        .order_by(models.Risk.created_at.desc(), models.Risk.id.desc())
     ).all()
     return [schemas.RiskRead.model_validate(r) for r in risks]
 

@@ -5,16 +5,15 @@ import { api, ApiError } from '../api/client';
 import type { Project, Risk } from '../api/types';
 import { SectionCard } from '../components/Badges';
 import {
-  CategoryBarChart,
   DonutChart,
   EscalatedDonutChart,
   EscalationTrendChart,
   HeatmapChart,
   ProjectStackedBarChart,
+  StatusDonutChart,
 } from '../components/charts';
 import { KpiCard } from '../components/KpiCard';
 import {
-  categoryDistribution,
   computePortfolioKpis,
   escalationTrend,
   escalatedSplit,
@@ -22,6 +21,8 @@ import {
   portfolioInsights,
   ratingDistribution,
   riskByProject,
+  statusGroup,
+  statusSplit,
 } from '../utils/aggregates';
 import { formatPercent } from '../utils/format';
 
@@ -33,11 +34,6 @@ const PERIODS: { value: string; label: string }[] = [
 ];
 
 const RATINGS = ['High', 'Medium', 'Low'];
-
-function percent(part: number, total: number): string {
-  if (total === 0) return '0% of total';
-  return `${Math.round((part / total) * 100)}% of total`;
-}
 
 export function PortfolioDashboardPage() {
   const navigate = useNavigate();
@@ -112,11 +108,17 @@ export function PortfolioDashboardPage() {
     return projects.filter((p) => p.id === Number(projectId));
   }, [projects, projectId]);
 
-  const kpis = computePortfolioKpis(filteredProjects, filteredRisks);
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = { Open: 0, 'In Progress': 0, 'Resolved/Closed': 0 };
+    for (const r of filteredRisks) {
+      counts[statusGroup(r.status)] += 1;
+    }
+    return counts;
+  }, [filteredRisks]);
 
-  const departmentCount = useMemo(
-    () => new Set(filteredProjects.map((p) => p.department_name)).size,
-    [filteredProjects],
+  const portfolioKpis = useMemo(
+    () => computePortfolioKpis(filteredProjects, filteredRisks),
+    [filteredProjects, filteredRisks],
   );
 
   const trend = escalationTrend(filteredRisks);
@@ -126,9 +128,17 @@ export function PortfolioDashboardPage() {
   const barLimit = showAllBars ? filteredProjects.length : 10;
 
   const navigateToProject = useCallback(
-    (code: string) => {
-      const project = filteredProjects.find((p) => p.project_code === code);
-      if (project) navigate(`/projects/${project.id}`);
+    (name: string) => {
+      const project =
+        filteredProjects.find((p) => p.name === name) ??
+        filteredProjects.find((p) => p.project_code === name);
+      if (project) {
+        navigate(
+          project.status === 'Closed'
+            ? `/risk-history/${project.id}`
+            : `/active-risk/${project.id}`,
+        );
+      }
     },
     [filteredProjects, navigate],
   );
@@ -144,7 +154,7 @@ export function PortfolioDashboardPage() {
       {/* Header */}
       <div className="page-header">
         <div>
-          <h1>Portfolio</h1>
+          <h1>Report</h1>
           <div className="subtitle">Cross-project risk landscape (PMO view)</div>
         </div>
         <div className="page-header-actions">
@@ -223,16 +233,19 @@ export function PortfolioDashboardPage() {
       </div>
 
       {/* KPI cards */}
-      <div className="kpi-grid kpi-grid-5">
-        <KpiCard label="Projects" value={kpis.projects} hint={`${departmentCount} departments`} />
-        <KpiCard label="Total risks" value={kpis.risks} hint={`${kpis.high} rated High`} />
-        <KpiCard label="Open risks" value={kpis.open} tone="info" hint={percent(kpis.open, kpis.risks)} />
-        <KpiCard label="Escalated" value={kpis.escalated} tone="danger" hint={percent(kpis.escalated, kpis.risks)} />
+      <div className="kpi-grid">
+        <KpiCard label="Open Risks" value={statusCounts.Open} tone="info" />
+        <KpiCard label="In Progress Risks" value={statusCounts['In Progress']} tone="warning" />
         <KpiCard
-          label="SLA compliance"
-          value={formatPercent(kpis.slaCompliance)}
+          label="Completed/Resolved Risks"
+          value={statusCounts['Resolved/Closed']}
           tone="success"
-          hint={`${kpis.withDeadline} risks with deadlines`}
+        />
+        <KpiCard label="High Risk" value={portfolioKpis.high} tone="danger" />
+        <KpiCard
+          label="SLA Compliance"
+          value={formatPercent(portfolioKpis.slaCompliance)}
+          tone="success"
         />
       </div>
 
@@ -246,8 +259,8 @@ export function PortfolioDashboardPage() {
             <SectionCard title="Risk rating distribution">
               <DonutChart data={ratingDistribution(filteredRisks)} />
             </SectionCard>
-            <SectionCard title="Risks by category">
-              <CategoryBarChart data={categoryDistribution(filteredRisks)} />
+            <SectionCard title="Risk status">
+              <StatusDonutChart data={statusSplit(filteredRisks)} />
             </SectionCard>
             <SectionCard title="Escalated vs not escalated">
               <EscalatedDonutChart data={escalatedSplit(filteredRisks)} />

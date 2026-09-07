@@ -27,6 +27,33 @@ export interface NameValue {
   value: number;
 }
 
+/** Three-bucket risk status grouping used by the portfolio KPI cards and donut. */
+export type RiskStatusGroup = 'Open' | 'In Progress' | 'Resolved/Closed';
+
+export function statusGroup(status: string): RiskStatusGroup {
+  switch (status) {
+    case 'In Progress':
+    case 'Escalated':
+    case 'Event':
+      return 'In Progress';
+    case 'Resolved':
+    case 'Closed':
+    case 'Dismissed':
+      return 'Resolved/Closed';
+    default:
+      return 'Open';
+  }
+}
+
+/** Counts per status group (always returns all three buckets for a stable legend). */
+export function statusSplit(risks: Risk[]): NameValue[] {
+  const groups: RiskStatusGroup[] = ['Open', 'In Progress', 'Resolved/Closed'];
+  return groups.map((name) => ({
+    name,
+    value: risks.filter((r) => statusGroup(r.status) === name).length,
+  }));
+}
+
 export function isActiveStatus(status: string): boolean {
   return status !== 'Closed' && status !== 'Dismissed' && status !== 'Resolved';
 }
@@ -125,7 +152,7 @@ export function riskByProject(
   maxProjects = 10,
 ): StackData {
   const shown = projectsByRisk(projects, risks).slice(0, maxProjects);
-  const names = shown.map((p) => p.project_code);
+  const names = shown.map((p) => p.name);
   const series = RATING_ORDER.map((name) => ({
     name,
     data: shown.map(
@@ -193,7 +220,7 @@ export function heatmapData(
     data.push([x, y, value]);
   });
 
-  return { categories, projects: shownProjects.map((p) => p.project_code), data };
+  return { categories, projects: shownProjects.map((p) => p.name), data };
 }
 
 /** Risk count per category, top ``topN`` + an "Other" bucket. */

@@ -89,7 +89,7 @@ function fmtValue(value: unknown): string {
 export function RiskDetailPage() {
   const { riskId } = useParams();
   const [searchParams] = useSearchParams();
-  const fromActiveRegister = searchParams.get('from') === 'active-register';
+  const fromRiskHistory = searchParams.get('from') === 'risk-history';
   const auth = useAuth();
   const id = Number(riskId);
 
@@ -172,12 +172,9 @@ export function RiskDetailPage() {
   }
 
   function dismiss() {
-    const reason = window.prompt('Reason for dismissing this suggestion (optional):');
-    if (reason !== null) {
-      void runAction(() =>
-        api.post<Risk>(`/api/risks/${id}/dismiss`, { reason, actor_user_id: auth.userId }),
-      );
-    }
+    void runAction(() =>
+      api.post<Risk>(`/api/risks/${id}/dismiss`, { reason: null, actor_user_id: auth.userId }),
+    );
   }
 
   function deEscalate() {
@@ -200,10 +197,14 @@ export function RiskDetailPage() {
       <div className="page-header">
         <div>
           <Link
-            to={fromActiveRegister ? '/active-register' : `/projects/${risk?.project_id ?? ''}`}
+            to={
+              fromRiskHistory
+                ? `/risk-history/${risk?.project_id ?? ''}`
+                : `/active-risk/${risk?.project_id ?? ''}`
+            }
             className="muted"
           >
-            {fromActiveRegister ? '← Back to active risks' : '← Back to project'}
+            {fromRiskHistory ? '← Back to Risk History' : '← Back to Active Risk'}
           </Link>
           <h1 style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span className="mono">{risk?.risk_code ?? 'Risk'}</span>

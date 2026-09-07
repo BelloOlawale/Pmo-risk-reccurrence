@@ -119,6 +119,18 @@ def get_project(db: Session, project_id: int) -> models.Project | None:
     return db.scalar(stmt)
 
 
+# Risk statuses that count as "resolved/closed" for the purpose of closing a
+# risk register. Suggested / Open / In Progress / Escalated / Event risks are
+# still outstanding and block closure.
+_CLOSED_ELIGIBLE_STATUSES = frozenset(
+    {
+        RiskStatus.RESOLVED.value,
+        RiskStatus.CLOSED.value,
+        RiskStatus.DISMISSED.value,
+    }
+)
+
+
 def close_project(
     db: Session, project: models.Project, *, actor_user_id: int | None = None
 ) -> models.Project:
@@ -128,10 +140,26 @@ def close_project(
     risk statuses and historical data are left untouched.
 
     Raises:
-        ValueError: if the project is already closed.
+        ValueError: if the project is already closed, or if any risk in the
+            register is still unresolved (not Resolved / Closed / Dismissed).
     """
     if project.status == "Closed":
         raise ValueError("Project is already closed")
+
+    unresolved = db.scalar(
+        select(func.count())
+        .select_from(models.Risk)
+        .where(
+            models.Risk.project_id == project.id,
+            ~models.Risk.status.in_(_CLOSED_ELIGIBLE_STATUSES),
+        )
+    ) or 0
+    if unresolved > 0:
+        raise ValueError(
+            "Cannot close risk register: there are unresolved risks. "
+            "Please resolve or close all outstanding risks before closing the risk register."
+        )
+
     now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
     project.status = "Closed"
     project.closed_date = now

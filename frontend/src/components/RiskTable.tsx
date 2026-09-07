@@ -5,11 +5,13 @@ import { ratingRank, statusRank } from '../utils/colors';
 import { formatDate } from '../utils/format';
 import { RatingBadge, StatusBadge } from './Badges';
 
-type SortKey = 'code' | 'rating' | 'status' | 'owner';
+type SortKey = 'code' | 'rating' | 'status' | 'owner' | 'date';
 
 interface RiskTableProps {
   risks: Risk[];
   onSelect: (risk: Risk) => void;
+  /** Show the search/filter toolbar. Hidden when the table is embedded per-register. */
+  showToolbar?: boolean;
 }
 
 function compare(a: Risk, b: Risk, key: SortKey, dir: 'asc' | 'desc'): number {
@@ -28,6 +30,14 @@ function compare(a: Risk, b: Risk, key: SortKey, dir: 'asc' | 'desc'): number {
       va = a.owner_user_id ?? 999_999;
       vb = b.owner_user_id ?? 999_999;
       break;
+    case 'date':
+      va = new Date(a.created_at).getTime();
+      vb = new Date(b.created_at).getTime();
+      if (va === vb) {
+        va = a.id;
+        vb = b.id;
+      }
+      break;
     default:
       va = a.risk_code;
       vb = b.risk_code;
@@ -36,13 +46,18 @@ function compare(a: Risk, b: Risk, key: SortKey, dir: 'asc' | 'desc'): number {
   return dir === 'asc' ? cmp : -cmp;
 }
 
-export function RiskTable({ risks, onSelect }: RiskTableProps) {
+function ownerLabel(ownerUserId: number | null): string {
+  return ownerUserId !== null ? `User #${ownerUserId}` : 'Unassigned';
+}
+
+export function RiskTable({ risks, onSelect, showToolbar = true }: RiskTableProps) {
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [ratingFilter, setRatingFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
-  const [sortKey, setSortKey] = useState<SortKey>('code');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [sortKey, setSortKey] = useState<SortKey>('date');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   const categories = useMemo(
     () =>
@@ -77,102 +92,92 @@ export function RiskTable({ risks, onSelect }: RiskTableProps) {
     }
   }
 
+  function toggleExpand(id: number) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   const sortIndicator = (key: SortKey) => (sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '');
 
   return (
     <div>
-      <div className="toolbar">
-        <input
-          className="search-input"
-          type="search"
-          placeholder="Search code, description, category…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-          <option value="">All statuses</option>
-          {[...new Set(risks.map((r) => r.status))].map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-        <select value={ratingFilter} onChange={(e) => setRatingFilter(e.target.value)}>
-          <option value="">All ratings</option>
-          <option value="High">High</option>
-          <option value="Medium">Medium</option>
-          <option value="Low">Low</option>
-        </select>
-        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
-          <option value="">All categories</option>
-          {categories.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-      </div>
+      {showToolbar ? (
+        <div className="toolbar">
+          <input
+            className="search-input"
+            type="search"
+            placeholder="Search code, description, category…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <option value="">All statuses</option>
+            {[...new Set(risks.map((r) => r.status))].map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <select value={ratingFilter} onChange={(e) => setRatingFilter(e.target.value)}>
+            <option value="">All ratings</option>
+            <option value="High">High</option>
+            <option value="Medium">Medium</option>
+            <option value="Low">Low</option>
+          </select>
+          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+            <option value="">All categories</option>
+            {categories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
 
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
+              <th className="expand-cell" aria-label="Expand" />
               <th className="sortable" onClick={() => toggleSort('code')}>
                 Code{sortIndicator('code')}
               </th>
               <th>Description</th>
-              <th>Category</th>
-              <th>Likelihood</th>
-              <th>Impact</th>
               <th className="sortable" onClick={() => toggleSort('rating')}>
                 Rating{sortIndicator('rating')}
               </th>
               <th className="sortable" onClick={() => toggleSort('status')}>
                 Status{sortIndicator('status')}
               </th>
-              <th className="sortable" onClick={() => toggleSort('owner')}>
+              <th className="sortable col-hide-sm" onClick={() => toggleSort('owner')}>
                 Owner{sortIndicator('owner')}
               </th>
-              <th>Risk start</th>
-              <th>Risk end</th>
-              <th>Project life cycle</th>
-              <th>Response strategy</th>
-              <th>Response plan</th>
-              <th>Source</th>
+              <th className="col-hide-md">Risk start</th>
+              <th className="col-hide-md">Risk end</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((risk) => {
+              const isOpen = expanded.has(risk.id);
               return (
-                <tr key={risk.id} onClick={() => onSelect(risk)}>
-                  <td className="mono">{risk.risk_code}</td>
-                  <td className="cell-ellipsis" title={risk.description}>
-                    {risk.description}
-                  </td>
-                  <td>{risk.category ?? '—'}</td>
-                  <td>{risk.likelihood}</td>
-                  <td>{risk.impact}</td>
-                  <td>
-                    <RatingBadge rating={risk.risk_rating} />
-                  </td>
-                  <td>
-                    <StatusBadge status={risk.status} />
-                  </td>
-                  <td>{risk.owner_user_id !== null ? `User #${risk.owner_user_id}` : '—'}</td>
-                  <td>{formatDate(risk.risk_start_date)}</td>
-                  <td>{formatDate(risk.risk_end_date)}</td>
-                  <td>{risk.identified_during ?? '—'}</td>
-                  <td>{risk.response_strategy ?? '—'}</td>
-                  <td className="cell-ellipsis" title={risk.response_plan ?? ''}>
-                    {risk.response_plan ?? '—'}
-                  </td>
-                  <td>{risk.source ?? '—'}</td>
-                </tr>
+                <RiskRow
+                  key={risk.id}
+                  risk={risk}
+                  isOpen={isOpen}
+                  onSelect={onSelect}
+                  onToggle={() => toggleExpand(risk.id)}
+                />
               );
             })}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={14} className="empty-state">
+                <td colSpan={9} className="empty-state">
                   No risks match the current filters.
                 </td>
               </tr>
@@ -181,5 +186,87 @@ export function RiskTable({ risks, onSelect }: RiskTableProps) {
         </table>
       </div>
     </div>
+  );
+}
+
+function RiskRow({
+  risk,
+  isOpen,
+  onSelect,
+  onToggle,
+}: {
+  risk: Risk;
+  isOpen: boolean;
+  onSelect: (risk: Risk) => void;
+  onToggle: () => void;
+}) {
+  const secondary: { label: string; value: string }[] = [
+    { label: 'Category', value: risk.category ?? '—' },
+    { label: 'Subcategory', value: risk.subcategory ?? '—' },
+    { label: 'Likelihood', value: risk.likelihood },
+    { label: 'Impact', value: risk.impact },
+    { label: 'Project life cycle', value: risk.identified_during ?? '—' },
+    { label: 'Response strategy', value: risk.response_strategy ?? '—' },
+    { label: 'Response plan', value: risk.response_plan ?? '—' },
+    { label: 'Source', value: risk.source ?? '—' },
+  ];
+
+  return (
+    <>
+      <tr className="risk-row" onClick={() => onSelect(risk)}>
+        <td className="expand-cell">
+          <button
+            className="expand-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggle();
+            }}
+            aria-label={isOpen ? 'Hide details' : 'Show details'}
+            aria-expanded={isOpen}
+            title={isOpen ? 'Hide details' : 'Show details'}
+          >
+            {isOpen ? '▾' : '▸'}
+          </button>
+        </td>
+        <td className="mono">{risk.risk_code}</td>
+        <td className="cell-ellipsis risk-desc-cell" title={risk.description}>
+          {risk.description}
+        </td>
+        <td>
+          <RatingBadge rating={risk.risk_rating} />
+        </td>
+        <td>
+          <StatusBadge status={risk.status} />
+        </td>
+        <td className="col-hide-sm">{ownerLabel(risk.owner_user_id)}</td>
+        <td className="col-hide-md">{formatDate(risk.risk_start_date)}</td>
+        <td className="col-hide-md">{formatDate(risk.risk_end_date)}</td>
+        <td>
+          <button
+            className="link-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect(risk);
+            }}
+          >
+            View
+          </button>
+        </td>
+      </tr>
+      {isOpen ? (
+        <tr className="expanded-row">
+          <td colSpan={9}>
+            <div className="risk-detail-panel">
+              {secondary.map((item) => (
+                <div key={item.label}>
+                  <div className="kv-label">{item.label}</div>
+                  <div className="kv-value">{item.value}</div>
+                </div>
+              ))}
+            </div>
+          </td>
+        </tr>
+      ) : null}
+    </>
   );
 }

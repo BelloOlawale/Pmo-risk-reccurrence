@@ -26,7 +26,7 @@ def _create_project(
 ) -> dict:
     resp = client.post(
         "/api/projects",
-        json={"name": name, "department": "D", "project_type": "T"},
+        json={"name": name, "department": "D", "project_type": "T", "customer": "C"},
         headers=_headers(user_id, role),
     )
     assert resp.status_code == 201
@@ -114,8 +114,8 @@ def test_closing_already_closed_project_conflicts(client: TestClient) -> None:
     assert resp.status_code == 409
 
 
-def test_adding_risk_to_closed_project_keeps_it_closed(client: TestClient) -> None:
-    project = _create_project(client, "Closed still closed", user_id=5, role="Project Manager")
+def test_adding_risk_to_closed_project_reopens_it(client: TestClient) -> None:
+    project = _create_project(client, "Closed reopened", user_id=5, role="Project Manager")
     assert (
         client.post(
             f"/api/projects/{project['id']}/close",
@@ -136,11 +136,67 @@ def test_adding_risk_to_closed_project_keeps_it_closed(client: TestClient) -> No
     ).json()
     assert risk["id"] > 0
 
-    assert project["id"] not in _active_project_ids(client)
+    # Adding a new risk to a closed register reopens it back to Active.
+    assert project["id"] in _active_project_ids(client)
     read_back = client.get(
         f"/api/projects/{project['id']}", headers=_headers(None, "System Admin")
     ).json()
-    assert read_back["status"] == "Closed"
+    assert read_back["status"] == "Active"
+
+
+def test_close_blocked_while_unresolved_risks_exist(client: TestClient) -> None:
+    project = _create_project(client, "Unresolved", user_id=8, role="Project Manager")
+    client.post(
+        "/api/risks",
+        json={
+            "project_id": project["id"],
+            "description": "Still open",
+            "likelihood": "High",
+            "impact": "High",
+        },
+        headers=_headers(8, "Project Manager"),
+    )
+
+    resp = client.post(
+        f"/api/projects/{project['id']}/close",
+        headers=_headers(8, "Project Manager"),
+    )
+    assert resp.status_code == 409
+    assert "unresolved" in resp.json()["detail"].lower()
+
+    # The register remains Active.
+    assert project["id"] in _active_project_ids(client)
+
+
+def test_close_allowed_after_all_risks_resolved(client: TestClient) -> None:
+    project = _create_project(client, "All resolved", user_id=9, role="Project Manager")
+    risk = client.post(
+        "/api/risks",
+        json={
+            "project_id": project["id"],
+            "description": "Resolve me",
+            "likelihood": "Low",
+            "impact": "Low",
+        },
+        headers=_headers(9, "Project Manager"),
+    ).json()
+    assert client.post(f"/api/risks/{risk['id']}/accept").status_code == 200
+    assert (
+        client.patch(
+            f"/api/risks/{risk['id']}",
+            json={"status": "Resolved"},
+            headers=_headers(9, "Project Manager"),
+        ).status_code
+        == 200
+    )
+
+    resp = client.post(
+        f"/api/projects/{project['id']}/close",
+        headers=_headers(9, "Project Manager"),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "Closed"
+    assert project["id"] not in _active_project_ids(client)
 
 
 def test_risk_status_does_not_change_project_status(client: TestClient) -> None:

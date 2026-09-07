@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 def _create_project(client: TestClient) -> Any:
     return client.post(
-        "/api/projects", json={"name": "P", "department": "D", "project_type": "T"}
+        "/api/projects", json={"name": "P", "department": "D", "project_type": "T", "customer": "C"}
     ).json()
 
 
@@ -198,6 +198,12 @@ def test_past_risk_start_date_rejected(client: TestClient) -> None:
 def test_past_project_start_date_rejected(client: TestClient) -> None:
     resp = client.post(
         "/api/projects",
-        json={"name": "P", "department": "D", "project_type": "T", "start_date": "2000-01-01"},
+        json={
+            "name": "P",
+            "department": "D",
+            "project_type": "T",
+            "customer": "C",
+            "start_date": "2000-01-01",
+        },
     )
     assert resp.status_code == 422

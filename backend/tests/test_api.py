@@ -32,7 +32,7 @@ def test_create_project(client: TestClient) -> None:
 def test_get_project(client: TestClient) -> None:
     created = client.post(
         "/api/projects",
-        json={"name": "X", "department": "D", "project_type": "T"},
+        json={"name": "X", "department": "D", "project_type": "T", "customer": "C"},
     ).json()
 
     resp = client.get(f"/api/projects/{created['id']}")
@@ -48,7 +48,7 @@ def test_get_missing_project_404(client: TestClient) -> None:
 def test_create_risk_computes_rating(client: TestClient) -> None:
     project = client.post(
         "/api/projects",
-        json={"name": "P", "department": "D", "project_type": "T"},
+        json={"name": "P", "department": "D", "project_type": "T", "customer": "C"},
     ).json()
 
     resp = client.post(
@@ -70,7 +70,7 @@ def test_create_risk_computes_rating(client: TestClient) -> None:
 def test_create_risk_rejects_invalid_rating(client: TestClient) -> None:
     project = client.post(
         "/api/projects",
-        json={"name": "P2", "department": "D", "project_type": "T"},
+        json={"name": "P2", "department": "D", "project_type": "T", "customer": "C"},
     ).json()
 
     resp = client.post(
@@ -88,10 +88,12 @@ def test_create_risk_rejects_invalid_rating(client: TestClient) -> None:
 def test_list_all_risks_across_projects(client: TestClient) -> None:
     """The global register returns risks from every project, regardless of project."""
     p1 = client.post(
-        "/api/projects", json={"name": "Alpha", "department": "D", "project_type": "T"}
+        "/api/projects",
+        json={"name": "Alpha", "department": "D", "project_type": "T", "customer": "C"},
     ).json()
     p2 = client.post(
-        "/api/projects", json={"name": "Beta", "department": "D", "project_type": "T"}
+        "/api/projects",
+        json={"name": "Beta", "department": "D", "project_type": "T", "customer": "C"},
     ).json()
     r1 = client.post(
         "/api/risks",
@@ -112,7 +114,7 @@ def test_list_all_risks_across_projects(client: TestClient) -> None:
 def test_projects_list_includes_risk_count_and_ids(client: TestClient) -> None:
     """The projects table links to the register via risk id and count."""
     p = client.post(
-        "/api/projects", json={"name": "P", "department": "D", "project_type": "T"}
+        "/api/projects", json={"name": "P", "department": "D", "project_type": "T", "customer": "C"}
     ).json()
     r1 = client.post(
         "/api/risks",
@@ -135,3 +137,52 @@ def test_projects_list_includes_risk_count_and_ids(client: TestClient) -> None:
     assert match[0]["risk_count"] == 2
     assert sorted(match[0]["risk_ids"]) == sorted([r1["id"], r2["id"]])
     assert sorted(match[0]["risk_codes"]) == sorted([r1["risk_code"], r2["risk_code"]])
+
+
+def test_project_risks_ordered_newest_first(client: TestClient) -> None:
+    """Risks within a register are returned newest-first (created_at desc)."""
+    p = client.post(
+        "/api/projects",
+        json={"name": "Ordered", "department": "D", "project_type": "T", "customer": "C"},
+    ).json()
+    codes = []
+    for desc in ("first", "second", "third"):
+        r = client.post(
+            "/api/risks",
+            json={
+                "project_id": p["id"],
+                "description": desc,
+                "likelihood": "Low",
+                "impact": "Low",
+            },
+        ).json()
+        codes.append(r["risk_code"])
+
+    resp = client.get(f"/api/projects/{p['id']}/risks")
+    assert resp.status_code == 200
+    assert [r["risk_code"] for r in resp.json()] == list(reversed(codes))
+
+
+def test_global_risks_ordered_newest_first(client: TestClient) -> None:
+    """The global register is also newest-first, matching per-register ordering."""
+    p = client.post(
+        "/api/projects",
+        json={"name": "Global", "department": "D", "project_type": "T", "customer": "C"},
+    ).json()
+    codes = []
+    for desc in ("a", "b", "c"):
+        r = client.post(
+            "/api/risks",
+            json={
+                "project_id": p["id"],
+                "description": desc,
+                "likelihood": "Low",
+                "impact": "Low",
+            },
+        ).json()
+        codes.append(r["risk_code"])
+
+    resp = client.get("/api/risks")
+    assert resp.status_code == 200
+    project_codes = [r["risk_code"] for r in resp.json() if r["project_id"] == p["id"]]
+    assert project_codes == list(reversed(codes))

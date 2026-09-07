@@ -1,13 +1,14 @@
+import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { api } from '../api/client';
 import type { Project, Risk } from '../api/types';
-import { SectionCard } from '../components/Badges';
+import { AddRiskModal } from '../components/AddRiskModal';
+import { SectionCard, StatusBadge } from '../components/Badges';
 import { DonutChart, StackedBarChart, TreemapChart } from '../components/charts';
 import { KpiCard } from '../components/KpiCard';
 import { RiskTable } from '../components/RiskTable';
 import { SlaCountdownList } from '../components/SlaCountdownList';
-import { SuggestionsPanel } from '../components/SuggestionsPanel';
 import { useApi } from '../hooks/useApi';
 import { categoryTreemap, computeKpis, ratingDistribution, statusStack } from '../utils/aggregates';
 import { formatPercent } from '../utils/format';
@@ -16,8 +17,9 @@ export function ProjectDashboardPage() {
   const { projectId } = useParams();
   const navigate = useNavigate();
   const id = Number(projectId);
+  const [adding, setAdding] = useState(false);
 
-  const { data: project, error: projectError } = useApi(
+  const { data: project, error: projectError, reload: reloadProject } = useApi(
     () => api.get<Project>(`/api/projects/${id}`),
     [id],
   );
@@ -32,15 +34,32 @@ export function ProjectDashboardPage() {
 
   const riskList = risks ?? [];
   const kpis = computeKpis(riskList);
+  const isClosed = project?.status === 'Closed';
+  const backTo = isClosed ? '/risk-history' : '/active-risk';
+  const backLabel = isClosed ? '← Risk History' : '← Active Risk';
+
+  function handleRiskCreated() {
+    setAdding(false);
+    reloadRisks();
+    reloadProject();
+    // Adding a risk to a closed register reopens it (Active). Move the user
+    // to Active Risk where the reopened register now lives.
+    if (isClosed) {
+      navigate('/active-risk');
+    }
+  }
 
   return (
     <div>
       <div className="page-header">
         <div>
-          <Link to="/projects" className="muted">
-            ← Projects
+          <Link to={backTo} className="muted">
+            {backLabel}
           </Link>
-          <h1>{project?.name ?? 'Project'}</h1>
+          <h1 style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {project?.name ?? 'Project'}
+            {project ? <StatusBadge status={project.status} /> : null}
+          </h1>
           <div className="subtitle">
             {project ? (
               <>
@@ -53,12 +72,21 @@ export function ProjectDashboardPage() {
             )}
           </div>
         </div>
+        <div className="page-header-actions">
+          <button className="btn btn-primary" onClick={() => setAdding(true)}>
+            + Add New
+          </button>
+        </div>
       </div>
 
       {projectError ? <div className="error-banner">{projectError}</div> : null}
       {risksError ? <div className="error-banner">{risksError}</div> : null}
 
-      <SuggestionsPanel projectId={id} onAccepted={reloadRisks} />
+      {isClosed ? (
+        <div className="closed-banner">
+          This risk register is closed. Add a new risk to reopen it in Active Risk.
+        </div>
+      ) : null}
 
       <div className="kpi-grid">
         <KpiCard label="Total risks" value={kpis.total} />
@@ -85,17 +113,36 @@ export function ProjectDashboardPage() {
               <TreemapChart data={categoryTreemap(riskList)} />
             </SectionCard>
             <SectionCard title="SLA countdown">
-              <SlaCountdownList risks={riskList} onSelect={(r) => navigate(`/risks/${r.id}`)} />
+              <SlaCountdownList
+                risks={riskList}
+                onSelect={(r) =>
+                  navigate(`/risks/${r.id}?from=${isClosed ? 'risk-history' : 'active-risk'}`)
+                }
+              />
             </SectionCard>
           </div>
 
           <div className="chart-grid" style={{ gridTemplateColumns: '1fr' }}>
             <SectionCard title={`Risk Register (${riskList.length})`}>
-              <RiskTable risks={riskList} onSelect={(r) => navigate(`/risks/${r.id}`)} />
+              <RiskTable
+                risks={riskList}
+                onSelect={(r) =>
+                  navigate(`/risks/${r.id}?from=${isClosed ? 'risk-history' : 'active-risk'}`)
+                }
+              />
             </SectionCard>
           </div>
         </>
       )}
+
+      {adding ? (
+        <AddRiskModal
+          projects={project ? [project] : []}
+          initialProjectId={id}
+          onClose={() => setAdding(false)}
+          onCreated={handleRiskCreated}
+        />
+      ) : null}
     </div>
   );
 }

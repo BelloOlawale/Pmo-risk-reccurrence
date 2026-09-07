@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 def _create_project(client: TestClient) -> Any:
     return client.post(
-        "/api/projects", json={"name": "P", "department": "D", "project_type": "T"}
+        "/api/projects", json={"name": "P", "department": "D", "project_type": "T", "customer": "C"}
     ).json()
 
 

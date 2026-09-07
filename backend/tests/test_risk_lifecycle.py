@@ -22,6 +22,7 @@ def _seed_project(
         name=f"Project {code}",
         department="Digital Advisory",
         project_type="Cloud Migration",
+        customer="Customer",
     )
     project = create_project(db, payload)
     if pm_user_id is not None:

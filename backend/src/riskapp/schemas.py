@@ -41,7 +41,7 @@ class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     department: str = Field(min_length=1, max_length=100)
     project_type: str = Field(min_length=1, max_length=100)
-    customer: str | None = None
+    customer: str = Field(min_length=1, max_length=200)
     start_date: dt.date | None = None
     end_date: dt.date | None = None
     stage_gate: str | None = None
@@ -52,6 +52,14 @@ class ProjectCreate(BaseModel):
     def _start_date_not_past(cls, v: dt.date | None) -> dt.date | None:
         if v is not None and v < _today():
             raise ValueError("Project start date cannot be in the past")
+        return v
+
+    @field_validator("customer")
+    @classmethod
+    def _customer_required(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Customer is required.")
         return v
 
 

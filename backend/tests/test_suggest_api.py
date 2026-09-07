@@ -69,6 +69,7 @@ def test_suggest_endpoint_returns_grounded_risks(
                 "name": "AWS Migration",
                 "department": "Digital Advisory",
                 "project_type": "Cloud Migration",
+                "customer": "C",
             },
         ).json()
 
