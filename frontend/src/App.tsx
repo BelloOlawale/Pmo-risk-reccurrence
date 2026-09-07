@@ -6,6 +6,7 @@ import { OnboardProjectPage } from './pages/OnboardProjectPage';
 import { PortfolioDashboardPage } from './pages/PortfolioDashboardPage';
 import { ProjectDashboardPage } from './pages/ProjectDashboardPage';
 import { ProjectsPage } from './pages/ProjectsPage';
+import { RiskCatalogPage } from './pages/RiskCatalogPage';
 import { RiskDetailPage } from './pages/RiskDetailPage';
 import { RiskRegistersPage } from './pages/RiskRegistersPage';
 
@@ -15,6 +16,7 @@ export default function App() {
       <Route element={<Layout />}>
         <Route path="/" element={<RiskRegistersPage />} />
         <Route path="/active-register" element={<ActiveRiskRegisterPage />} />
+        <Route path="/catalog" element={<RiskCatalogPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/projects/:projectId" element={<ProjectDashboardPage />} />
         <Route path="/risks/:riskId" element={<RiskDetailPage />} />

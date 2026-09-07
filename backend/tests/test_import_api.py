@@ -70,7 +70,7 @@ class TestRunImport:
         assert report.imported > 0
         assert report.skipped == 0
 
-        risks = db_session.scalars(select(models.Risk)).all()
+        risks = db_session.scalars(select(models.ProjectRisk)).all()
         assert len(risks) == report.imported
         assert all(r.risk_rating in ("Low", "Medium", "High") for r in risks)
         assert all(r.source_file_name == "punuka_bpa.xlsx" for r in risks)
@@ -102,8 +102,27 @@ class TestRunImport:
         report = run_import(db_session, job, mapping)
         assert report.imported > 0
 
-        risks = db_session.scalars(select(models.Risk)).all()
+        risks = db_session.scalars(select(models.ProjectRisk)).all()
         assert all(r.source_file_url == job.source_file_url for r in risks)
+
+    def test_import_creates_project_risk_with_traceability(
+        self, db_session: Session
+    ) -> None:
+        project = _project(db_session)
+        job = self._job(project.id)
+        job.source_file_url = "https://fake.blob.core.windows.net/risk-registers/x"
+        mapping = suggest_mapping(job.headers)
+
+        report = run_import(db_session, job, mapping)
+        assert report.imported > 0
+
+        instances = db_session.scalars(select(models.ProjectRisk)).all()
+        assert len(instances) == report.imported
+        for instance in instances:
+            assert instance.source_file_name == "punuka_bpa.xlsx"
+            assert instance.source_file_url == job.source_file_url
+            catalog = db_session.get(models.RiskCatalog, instance.risk_id)
+            assert catalog is not None
 
 
 class TestImportApi:
@@ -175,7 +194,7 @@ class TestImportApi:
         finally:
             app.dependency_overrides.pop(get_blob_provider, None)
 
-        risks = db_session.scalars(select(models.Risk)).all()
+        risks = db_session.scalars(select(models.ProjectRisk)).all()
         assert risks
         assert all(
             r.source_file_url and "fake.blob.core.windows.net" in r.source_file_url

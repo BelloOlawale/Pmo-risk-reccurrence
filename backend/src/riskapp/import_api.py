@@ -18,7 +18,6 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from riskapp import models
@@ -30,6 +29,7 @@ from riskapp.import_pipeline.field_mapper import (
     map_hml_to_full,
     map_numeric_to_level,
 )
+from riskapp.services import _get_or_create_catalog_risk
 
 # Canonical field → source header keywords (checked case-insensitively).
 CANONICAL_KEYWORDS: dict[str, list[str]] = {
@@ -154,17 +154,6 @@ def run_import(db: Session, job: ImportJob, mapping: dict[str, str]) -> ImportRe
     now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
     report = ImportReport()
 
-    # Seed the counter once; rows are un-flushed until commit, so counting per
-    # row would collide.
-    code_counter = (
-        db.scalar(
-            select(func.count())
-            .select_from(models.Risk)
-            .where(models.Risk.risk_code.like("RSK-%"))
-        )
-        or 0
-    )
-
     for index, row in enumerate(job.rows, start=1):
         description = _cell(row, mapping, "risk_description")
         if not description:
@@ -178,28 +167,30 @@ def run_import(db: Session, job: ImportJob, mapping: dict[str, str]) -> ImportRe
         impact = _level(_cell(row, mapping, "impact"))
         rating = compute_risk_rating(likelihood, impact)
         strategy, plan = classify_response(_cell(row, mapping, "response_strategy"))
-        code_counter += 1
+        category = _cell(row, mapping, "risk_category") or None
+        source_risk_id = _cell(row, mapping, "source_risk_id") or None
+        owner_user_id = project.pm_user_id if project else None
+        sla_deadline = compute_deadline(rating, deadline_anchor(None, now, settings.tz))
+
+        # Link to a deduplicated catalog Risk and create the Project Risk.
+        catalog = _get_or_create_catalog_risk(db, description, category, None, None)
 
         db.add(
-            models.Risk(
+            models.ProjectRisk(
                 project_id=job.project_id,
-                risk_code=f"RSK-{code_counter:03d}",
-                description=description,
-                category=_cell(row, mapping, "risk_category") or None,
+                risk_id=catalog.id,
                 likelihood=likelihood,
                 impact=impact,
                 risk_rating=rating,
                 response_strategy=strategy or None,
                 response_plan=plan or None,
-                owner_user_id=project.pm_user_id if project else None,
+                owner_user_id=owner_user_id,
                 status="Open",
                 source="Custom",
                 source_file_name=job.file_name,
                 source_file_url=job.source_file_url,
-                source_risk_id=_cell(row, mapping, "source_risk_id") or None,
-                sla_deadline=compute_deadline(
-                    rating, deadline_anchor(None, now, settings.tz)
-                ),
+                source_risk_id=source_risk_id,
+                sla_deadline=sla_deadline,
             )
         )
         report.imported += 1

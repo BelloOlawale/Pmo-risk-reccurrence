@@ -1,14 +1,13 @@
-"""Semantic search over stored risk embeddings.
+"""Semantic search over the shared risk catalog's embeddings.
 
-Replaces the legacy FAISS+Blob index with pgvector in Postgres. Embeddings
-are persisted on ``risks.embedding`` (``vector(1536)``, see migration
-``9f8e7d6c5b4a``) and searched with the native pgvector cosine-distance
-operator (``<=>``) backed by the HNSW index.
+Embeddings live on ``risk_catalog.embedding`` (``vector(1536)``); the catalog is
+the shared, deduplicated library, so semantic search runs over risk concepts
+rather than per-project rows.
 
-On PostgreSQL the search is executed entirely in the database. The pure
-:mod:`riskapp.domain.similarity` path is kept only as a fallback for
-non-Postgres dialects (local SQLite development), where pgvector is
-unavailable — it is never used in production.
+On PostgreSQL the search is executed entirely in the database with the native
+pgvector cosine-distance operator (``<=>``). The pure
+:mod:`riskapp.domain.similarity` path is kept as a fallback for non-Postgres
+dialects (local SQLite development), where pgvector is unavailable.
 """
 
 from __future__ import annotations
@@ -31,62 +30,54 @@ DEFAULT_EMBED_BATCH_SIZE = 100
 _PGVECTOR_SQL = text(
     """
     SELECT * FROM (
-        SELECT risk_code,
-               source_file_name,
-               source_risk_id,
+        SELECT id,
                description,
                1 - (embedding <=> CAST(:query AS vector)) AS similarity
-        FROM risks
+        FROM risk_catalog
         WHERE embedding IS NOT NULL
     ) ranked
     WHERE similarity >= :threshold
-    ORDER BY similarity DESC, risk_code ASC
+    ORDER BY similarity DESC, id ASC
     LIMIT :limit
     """
 )
 
 
-def build_embedding_text(risk: models.Risk) -> str:
-    """Build the text to embed for a risk (description + salient fields)."""
-    category = risk.category or ""
-    subcategory = risk.subcategory or ""
+def build_embedding_text(catalog: models.RiskCatalog) -> str:
+    """Build the text to embed for a catalog concept (description + category)."""
+    category = catalog.category or ""
+    subcategory = catalog.subcategory or ""
     category_text = f"{category} / {subcategory}" if subcategory else category
 
-    parts = [
-        risk.description,
-        f"Category: {category_text}" if category_text else "",
-        f"Likelihood: {risk.likelihood}",
-        f"Impact: {risk.impact}",
-        f"Rating: {risk.risk_rating}",
-    ]
+    parts = [catalog.description, f"Category: {category_text}" if category_text else ""]
     return " | ".join(part for part in parts if part)
 
 
 def embed_all_risks(
     db: Session, client: EmbeddingProvider, *, batch_size: int = DEFAULT_EMBED_BATCH_SIZE
 ) -> int:
-    """Embed every risk without an embedding and persist the vectors.
+    """Embed every catalog entry without an embedding and persist the vectors.
 
-    Idempotent: only risks whose ``embedding`` is NULL are processed. Returns
-    the number of risks embedded.
+    Idempotent: only entries whose ``embedding`` is NULL are processed. Returns
+    the number of entries embedded.
     """
-    risks = db.scalars(
-        select(models.Risk)
-        .where(models.Risk.embedding.is_(None))
-        .order_by(models.Risk.id)
+    catalogs = db.scalars(
+        select(models.RiskCatalog)
+        .where(models.RiskCatalog.embedding.is_(None))
+        .order_by(models.RiskCatalog.id)
     ).all()
 
-    if not risks:
+    if not catalogs:
         return 0
 
-    texts = [build_embedding_text(risk) for risk in risks]
+    texts = [build_embedding_text(catalog) for catalog in catalogs]
     vectors = _embed_in_batches(client, texts, batch_size)
 
-    for risk, vector in zip(risks, vectors, strict=True):
-        risk.embedding = vector
+    for catalog, vector in zip(catalogs, vectors, strict=True):
+        catalog.embedding = vector
 
     db.commit()
-    return len(risks)
+    return len(catalogs)
 
 
 def semantic_search(
@@ -96,10 +87,10 @@ def semantic_search(
     limit: int = DEFAULT_SEARCH_LIMIT,
     threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
 ) -> list[SemanticMatch]:
-    """Return risks ranked by cosine similarity to ``query_vector``.
+    """Return catalog entries ranked by cosine similarity to ``query_vector``.
 
-    Only matches at or above ``threshold`` are returned, ordered by
-    similarity descending (ties broken by ``risk_code``), capped at ``limit``.
+    Only matches at or above ``threshold`` are returned, ordered by similarity
+    descending (ties broken by catalog id), capped at ``limit``.
 
     On PostgreSQL the ranking runs in pgvector (``<=>`` cosine distance,
     HNSW-accelerated). Non-Postgres dialects (SQLite dev) fall back to the
@@ -129,9 +120,9 @@ def _pgvector_search(
 
     return [
         SemanticMatch(
-            risk_id=row["risk_code"],
-            source_file=row["source_file_name"] or "",
-            source_risk_id=row["source_risk_id"],
+            risk_id=str(row["id"]),
+            source_file="",
+            source_risk_id=None,
             description=row["description"],
             similarity=float(row["similarity"]),
         )
@@ -147,28 +138,28 @@ def _python_search(
     threshold: float,
 ) -> list[SemanticMatch]:
     """Deterministic Python ranking (SQLite dev only; never production)."""
-    risks = db.scalars(
-        select(models.Risk)
-        .where(models.Risk.embedding.is_not(None))
-        .order_by(models.Risk.id)
+    catalogs = db.scalars(
+        select(models.RiskCatalog)
+        .where(models.RiskCatalog.embedding.is_not(None))
+        .order_by(models.RiskCatalog.id)
     ).all()
 
-    if not risks:
+    if not catalogs:
         return []
 
-    items = [(risk.risk_code, risk.embedding or []) for risk in risks]
+    items = [(str(catalog.id), catalog.embedding or []) for catalog in catalogs]
     ranked = rank_by_similarity(query_vector, items, threshold=threshold, limit=limit)
 
-    by_code = {risk.risk_code: risk for risk in risks}
+    by_id = {str(catalog.id): catalog for catalog in catalogs}
     results: list[SemanticMatch] = []
     for hit in ranked:
-        risk = by_code[hit.key]
+        catalog = by_id[hit.key]
         results.append(
             SemanticMatch(
-                risk_id=risk.risk_code,
-                source_file=risk.source_file_name or "",
-                source_risk_id=risk.source_risk_id,
-                description=risk.description,
+                risk_id=str(catalog.id),
+                source_file="",
+                source_risk_id=None,
+                description=catalog.description,
                 similarity=hit.similarity,
             )
         )

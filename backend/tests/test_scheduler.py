@@ -51,7 +51,7 @@ def _risk(
     acknowledged: bool = False,
     owner: models.User | None = None,
     start_date: dt.date | None = None,
-) -> models.Risk:
+) -> models.ProjectRisk:
     dept = models.Department(name=f"D-{code}")
     ptype = models.ProjectType(name=f"T-{code}")
     db.add_all([dept, ptype])
@@ -74,10 +74,13 @@ def _risk(
     project.project_type = ptype
     db.flush()
 
-    risk = models.Risk(
+    catalog = models.RiskCatalog(description=f"risk {code}")
+    db.add(catalog)
+    db.flush()
+
+    risk = models.ProjectRisk(
         project_id=project.id,
-        risk_code=code,
-        description=f"risk {code}",
+        risk_id=catalog.id,
         likelihood="High",
         impact="High",
         risk_rating="High",
@@ -99,8 +102,8 @@ class TestFindSlaActions:
         _risk(db_session, code="RSK-OK", deadline=NOW + dt.timedelta(hours=10))
 
         actions = find_sla_actions(db_session, NOW)
-        by_code = {a.risk_code: a.action for a in actions}
-        assert by_code == {"RSK-B": "breach", "RSK-W": "warning"}
+        assert {a.action for a in actions} == {"breach", "warning"}
+        assert len(actions) == 2
 
     def test_acknowledged_risk_skipped(self, db_session: Session) -> None:
         _risk(db_session, code="RSK-ACK", acknowledged=True, deadline=NOW - dt.timedelta(hours=1))

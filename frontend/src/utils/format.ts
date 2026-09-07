@@ -1,5 +1,3 @@
-import type { Risk } from '../api/types';
-
 export type Tone = 'danger' | 'warning' | 'ok' | 'muted';
 
 const DATE_FMT = new Intl.DateTimeFormat(undefined, {
@@ -65,8 +63,14 @@ export interface Countdown {
   tone: Tone;
 }
 
+export interface CountdownRisk {
+  sla_deadline: string | null;
+  sla_acknowledged: boolean;
+  risk_rating: string;
+}
+
 /** Human-friendly SLA countdown state for a risk. */
-export function countdownState(risk: Risk): Countdown {
+export function countdownState(risk: CountdownRisk): Countdown {
   if (!risk.sla_deadline) return { label: 'No deadline', tone: 'muted' };
   if (risk.sla_acknowledged) return { label: 'Satisfied', tone: 'ok' };
 

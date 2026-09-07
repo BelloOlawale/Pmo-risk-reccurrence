@@ -30,7 +30,7 @@ def _seed_project(
     return project
 
 
-def _suggested_risk(db: Session, project: models.Project) -> models.Risk:
+def _suggested_risk(db: Session, project: models.Project) -> models.ProjectRisk:
     return create_risk(
         db,
         schemas.RiskCreate(
@@ -84,7 +84,7 @@ class TestDismiss:
             )
         ).all()
         assert len(exclusions) == 1
-        assert exclusions[0].historical_risk_key == risk.risk_code
+        assert exclusions[0].historical_risk_key == str(risk.id)
 
     def test_dismiss_is_per_project(self, db_session: Session) -> None:
         project_a = _seed_project(db_session, code="PRJ-A")
@@ -125,7 +125,7 @@ class TestQuickAdd:
         assert risk.status == RiskStatus.SUGGESTED.value
         assert risk.risk_rating == "Medium"  # Low x High -> Medium
         assert risk.source == "Kickoff"
-        assert risk.category is None
+        assert risk.catalog_risk.category is None
 
     def test_manual_entry_defaults_to_custom_source(self, db_session: Session) -> None:
         project = _seed_project(db_session)

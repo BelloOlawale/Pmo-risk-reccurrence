@@ -23,7 +23,7 @@ def _json_safe(value: Any) -> Any:
 
 def record_change(
     db: Session,
-    risk: models.Risk,
+    risk: models.ProjectRisk,
     *,
     action: str,
     field: str | None = None,

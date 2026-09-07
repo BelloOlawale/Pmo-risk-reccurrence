@@ -76,12 +76,13 @@ def _risk(
     source_risk_id: str,
     category: str | None = None,
     embedding: list[float] | None = None,
-) -> models.Risk:
-    risk = models.Risk(
+) -> models.ProjectRisk:
+    catalog = models.RiskCatalog(description=description, category=category, embedding=embedding)
+    db.add(catalog)
+    db.flush()
+    risk = models.ProjectRisk(
         project_id=project.id,
-        risk_code=code,
-        description=description,
-        category=category,
+        risk_id=catalog.id,
         likelihood="Medium",
         impact="Medium",
         risk_rating="Medium",
@@ -89,25 +90,24 @@ def _risk(
         status="Closed",
         source_file_name=source_file,
         source_risk_id=source_risk_id,
-        embedding=embedding,
     )
     db.add(risk)
     db.flush()
     return risk
 
 
-def _seed(db: Session) -> models.Project:
+def _seed(db: Session) -> tuple[models.Project, dict[str, str]]:
     """Seed two same-type historical risks and one cross-type risk."""
     historical = _project(
         db, code="PRJ-HIST", name="Old AWS Migration",
         department="Digital Advisory", project_type="Cloud Migration",
     )
-    _risk(
+    r1 = _risk(
         db, historical, code="RSK-1", description="Data loss during cutover",
         source_file="hist-a.xlsx", source_risk_id="R1",
         embedding=[0.0, 1.0, 0.0],
     )
-    _risk(
+    r2 = _risk(
         db, historical, code="RSK-2", description="Vendor lock-in",
         source_file="hist-b.xlsx", source_risk_id="R2",
         embedding=[0.0, 1.0, 0.0],
@@ -117,7 +117,7 @@ def _seed(db: Session) -> models.Project:
         db, code="PRJ-ERP", name="SAP ERP rollout",
         department="SAP", project_type="ERP Implementation",
     )
-    _risk(
+    r3 = _risk(
         db, erp, code="RSK-3", description="AWS data migration failure",
         source_file="erp.xlsx", source_risk_id="R3",
         embedding=[1.0, 0.0, 0.0],
@@ -128,26 +128,27 @@ def _seed(db: Session) -> models.Project:
         department="Digital Advisory", project_type="Cloud Migration",
     )
     db.commit()
-    return new_project
+    ids = {"RSK-1": str(r1.id), "RSK-2": str(r2.id), "RSK-3": str(r3.id)}
+    return new_project, ids
 
 
 class TestRetrieveCandidates:
     def test_merges_exact_keyword_semantic_without_duplicates(
         self, db_session: Session
     ) -> None:
-        project = _seed(db_session)
+        project, ids = _seed(db_session)
         candidates = retrieve_candidates(
             db_session, project, FakeEmbeddings([1.0, 0.0, 0.0])
         )
         # RSK-1, RSK-2 exact; RSK-3 keyword ("aws"/"migration"); RSK-3 semantic deduped.
-        assert [c.risk_id for c in candidates] == ["RSK-1", "RSK-2", "RSK-3"]
+        assert [c.risk_id for c in candidates] == [ids["RSK-1"], ids["RSK-2"], ids["RSK-3"]]
         assert [c.match_type.value for c in candidates] == ["exact", "exact", "keyword"]
 
     def test_dismissed_risks_are_filtered(self, db_session: Session) -> None:
-        project = _seed(db_session)
+        project, ids = _seed(db_session)
         db_session.add(
             models.SuggestionDismissal(
-                project_id=project.id, historical_risk_key="RSK-1", reason="seen"
+                project_id=project.id, historical_risk_key=ids["RSK-1"], reason="seen"
             )
         )
         db_session.commit()
@@ -155,19 +156,19 @@ class TestRetrieveCandidates:
         candidates = retrieve_candidates(
             db_session, project, FakeEmbeddings([1.0, 0.0, 0.0])
         )
-        assert [c.risk_id for c in candidates] == ["RSK-2", "RSK-3"]
+        assert [c.risk_id for c in candidates] == [ids["RSK-2"], ids["RSK-3"]]
 
 
 class TestGenerateSuggestions:
     def test_returns_overview_citations_and_groundedness(
         self, db_session: Session
     ) -> None:
-        project = _seed(db_session)
+        project, ids = _seed(db_session)
         llm_json = json.dumps(
             {
-                "overview": "Watch out for [RSK-3, erp.xlsx] migration issues.",
-                "recommendations": ["Plan a rollback for [RSK-1, hist-a.xlsx]."],
-                "analyses": [{"risk_id": "RSK-1", "analysis": "High cutover risk."}],
+                "overview": f"Watch out for [{ids['RSK-3']}, erp.xlsx] migration issues.",
+                "recommendations": [f"Plan a rollback for [{ids['RSK-1']}, hist-a.xlsx]."],
+                "analyses": [{"risk_id": ids["RSK-1"], "analysis": "High cutover risk."}],
             }
         )
         chat = FakeChat(llm_json)
@@ -176,21 +177,21 @@ class TestGenerateSuggestions:
         )
 
         assert result.project_id == project.id
-        assert "[RSK-3](/files/erp.xlsx)" in result.overview
+        assert f"[{ids['RSK-3']}](/files/erp.xlsx)" in result.overview
         assert len(result.recommendations) == 1
         assert [r["risk_id"] for r in result.suggested_risks] == [
-            "RSK-1", "RSK-2", "RSK-3",
+            ids["RSK-1"], ids["RSK-2"], ids["RSK-3"],
         ]
-        assert result.suggested_risks[0]["citation"] == "[RSK-1, hist-a.xlsx]"
+        assert result.suggested_risks[0]["citation"] == f"[{ids['RSK-1']}, hist-a.xlsx]"
         assert result.suggested_risks[0]["analysis"] == "High cutover risk."
         assert result.evaluation["groundedness"] == 1.0
 
     def test_unverified_citation_lowers_groundedness(self, db_session: Session) -> None:
-        project = _seed(db_session)
+        project, _ = _seed(db_session)
         chat = FakeChat(
             json.dumps(
                 {
-                    "overview": "Concern: [RSK-99, ghost.xlsx] is a real problem.",
+                    "overview": "Concern: [99999, ghost.xlsx] is a real problem.",
                     "recommendations": [],
                     "analyses": [],
                 }
@@ -200,12 +201,12 @@ class TestGenerateSuggestions:
             db_session, project, chat, FakeEmbeddings([1.0, 0.0, 0.0])
         )
         assert result.evaluation["groundedness"] == 0.0
-        assert result.evaluation["unverified_citations"][0]["risk_id"] == "RSK-99"
+        assert result.evaluation["unverified_citations"][0]["risk_id"] == "99999"
 
     def test_llm_failure_falls_back_to_deterministic_summary(
         self, db_session: Session
     ) -> None:
-        project = _seed(db_session)
+        project, _ = _seed(db_session)
 
         class BrokenChat:
             def complete(self, messages, **kwargs) -> str:

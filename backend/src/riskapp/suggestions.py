@@ -8,7 +8,6 @@ text is audited so no citation can reference a risk outside the payload.
 
 from __future__ import annotations
 
-import datetime as dt
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -22,6 +21,7 @@ from riskapp.domain.retrieval import (
     ExactMatch,
     KeywordMatch,
     RetrievedCandidate,
+    SemanticMatch,
     merge_candidates,
 )
 from riskapp.domain.scoring import compute_risk_rating
@@ -30,7 +30,7 @@ from riskapp.embeddings import EmbeddingProvider
 from riskapp.llm.chat import ChatProvider
 from riskapp.llm.citations import audit_citations, linkify
 from riskapp.llm.prompts import SYSTEM_PROMPT, build_user_prompt, parse_llm_response
-from riskapp.services import accept_risk, next_risk_code
+from riskapp.services import accept_risk
 from riskapp.vector_store import semantic_search
 
 HISTORICAL_SOURCE = "Historical"
@@ -74,19 +74,22 @@ def build_query_text(project: models.Project) -> str:
     )
 
 
-def _historical_risks(db: Session) -> list[models.Risk]:
+def _historical_risks(db: Session) -> list[models.ProjectRisk]:
     return list(
         db.scalars(
-            select(models.Risk)
-            .options(selectinload(models.Risk.project))
-            .where(models.Risk.source == HISTORICAL_SOURCE)
-            .order_by(models.Risk.id)
+            select(models.ProjectRisk)
+            .options(
+                selectinload(models.ProjectRisk.catalog_risk),
+                selectinload(models.ProjectRisk.project),
+            )
+            .where(models.ProjectRisk.source == HISTORICAL_SOURCE)
+            .order_by(models.ProjectRisk.id)
         ).all()
     )
 
 
 def exact_candidates(
-    project: models.Project, historical: list[models.Risk]
+    project: models.Project, historical: list[models.ProjectRisk]
 ) -> list[ExactMatch]:
     """Historical risks from the same department and project type."""
     matches: list[ExactMatch] = []
@@ -97,10 +100,10 @@ def exact_candidates(
         ):
             matches.append(
                 ExactMatch(
-                    risk_id=risk.risk_code,
+                    risk_id=str(risk.id),
                     source_file=risk.source_file_name or "",
                     source_risk_id=risk.source_risk_id,
-                    description=risk.description,
+                    description=risk.catalog_risk.description,
                 )
             )
     return matches
@@ -108,7 +111,7 @@ def exact_candidates(
 
 def keyword_candidates(
     project: models.Project,
-    historical: list[models.Risk],
+    historical: list[models.ProjectRisk],
     *,
     tokens: list[str] | None = None,
 ) -> list[KeywordMatch]:
@@ -119,18 +122,22 @@ def keyword_candidates(
 
     matches: list[KeywordMatch] = []
     for risk in historical:
+        catalog = risk.catalog_risk
         haystack = " ".join(
-            filter(None, [risk.category or "", risk.subcategory or "", risk.description])
+            filter(
+                None,
+                [catalog.category or "", catalog.subcategory or "", catalog.description],
+            )
         ).lower()
         match_count = sum(1 for token in query_tokens if token in haystack)
         if match_count > 0:
             matches.append(
                 KeywordMatch(
-                    risk_id=risk.risk_code,
+                    risk_id=str(risk.id),
                     source_file=risk.source_file_name or "",
                     match_count=match_count,
                     source_risk_id=risk.source_risk_id,
-                    description=risk.description,
+                    description=catalog.description,
                 )
             )
     return matches
@@ -146,22 +153,31 @@ def retrieve_candidates(
 ) -> list[RetrievedCandidate]:
     """Run hybrid retrieval and return the deduplicated, ranked candidates."""
     historical = _historical_risks(db)
-    historical_codes = {risk.risk_code for risk in historical}
+    by_catalog_id: dict[str, list[models.ProjectRisk]] = {}
+    for risk in historical:
+        by_catalog_id.setdefault(str(risk.risk_id), []).append(risk)
 
     exact = exact_candidates(project, historical)
     keyword = keyword_candidates(project, historical)
 
     query_vector = embedding_provider.embed_text(build_query_text(project))
-    semantic = [
-        match
-        for match in semantic_search(
-            db,
-            query_vector,
-            limit=DEFAULT_SEMANTIC_LIMIT,
-            threshold=semantic_threshold,
-        )
-        if match.risk_id in historical_codes
-    ]
+    semantic: list[SemanticMatch] = []
+    for match in semantic_search(
+        db,
+        query_vector,
+        limit=DEFAULT_SEMANTIC_LIMIT,
+        threshold=semantic_threshold,
+    ):
+        for risk in by_catalog_id.get(match.risk_id, []):
+            semantic.append(
+                SemanticMatch(
+                    risk_id=str(risk.id),
+                    source_file=risk.source_file_name or "",
+                    similarity=match.similarity,
+                    source_risk_id=risk.source_risk_id,
+                    description=risk.catalog_risk.description,
+                )
+            )
 
     merged = merge_candidates(
         exact, keyword, semantic, semantic_threshold=semantic_threshold
@@ -325,7 +341,7 @@ def list_suggestions(
     onboarding. Already-dismissed or already-accepted candidates are excluded.
     """
     historical = _historical_risks(db)
-    by_code = {risk.risk_code: risk for risk in historical}
+    by_id = {str(risk.id): risk for risk in historical}
 
     exact = exact_candidates(project, historical)
     keyword = keyword_candidates(project, historical)
@@ -344,7 +360,7 @@ def list_suggestions(
     for candidate in candidates:
         if candidate.risk_id in dismissed:
             continue
-        source = by_code.get(candidate.risk_id)
+        source = by_id.get(candidate.risk_id)
         if source is None:
             continue
         suggestions.append(
@@ -362,7 +378,7 @@ def list_suggestions(
                 likelihood=source.likelihood,
                 impact=source.impact,
                 risk_rating=source.risk_rating,
-                category=source.category,
+                category=source.catalog_risk.category,
             )
         )
         if len(suggestions) >= candidate_limit:
@@ -379,46 +395,52 @@ def accept_suggestion(
     likelihood: str | None = None,
     impact: str | None = None,
     actor_user_id: int | None = None,
-) -> models.Risk:
+) -> models.ProjectRisk:
     """Accept a suggested historical risk into ``project`` as an Open risk.
 
-    Copies the source risk's fields (with optional likelihood/impact override),
-    transitions it straight to Open via the normal accept flow, and records an
-    exclusion so the same historical risk is never suggested again.
+    Links the new Project Risk to the source's shared catalog entry (reusing
+    it, never duplicating), transitions it to Open via the normal accept flow,
+    and records an exclusion so the same historical risk is never re-suggested.
     """
-    source = db.scalar(select(models.Risk).where(models.Risk.risk_code == risk_id))
+    try:
+        source_id = int(risk_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Unknown historical risk {risk_id!r}") from exc
+
+    source = db.scalar(
+        select(models.ProjectRisk)
+        .options(selectinload(models.ProjectRisk.catalog_risk))
+        .where(
+            models.ProjectRisk.id == source_id,
+            models.ProjectRisk.source == HISTORICAL_SOURCE,
+        )
+    )
     if source is None:
         raise ValueError(f"Unknown historical risk {risk_id!r}")
 
-    now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
+    catalog = source.catalog_risk
     final_likelihood = likelihood or source.likelihood
     final_impact = impact or source.impact
+    rating = compute_risk_rating(final_likelihood, final_impact)
 
-    risk = models.Risk(
+    instance = models.ProjectRisk(
         project_id=project.id,
-        risk_code=next_risk_code(db),
-        description=source.description,
-        category=source.category,
-        subcategory=source.subcategory,
-        risk_source=source.risk_source,
+        risk_id=catalog.id,
         likelihood=final_likelihood,
         impact=final_impact,
-        risk_rating=compute_risk_rating(final_likelihood, final_impact),
+        risk_rating=rating,
         response_strategy=source.response_strategy,
         status=RiskStatus.SUGGESTED.value,
         source=HISTORICAL_SOURCE,
         source_file_name=source.source_file_name,
         source_file_url=source.source_file_url,
         source_risk_id=source.source_risk_id,
-        created_at=now,
-        updated_at=now,
     )
-    risk.project = project
-    db.add(risk)
+    db.add(instance)
     db.commit()
-    db.refresh(risk)
+    db.refresh(instance)
 
-    accepted = accept_risk(db, risk, actor_user_id=actor_user_id)
+    accepted = accept_risk(db, instance, actor_user_id=actor_user_id)
 
     db.add(
         models.SuggestionDismissal(
@@ -439,7 +461,18 @@ def dismiss_suggestion(
     reason: str | None = None,
 ) -> None:
     """Dismiss a suggested historical risk so it is never suggested again."""
-    if db.scalar(select(models.Risk).where(models.Risk.risk_code == risk_id)) is None:
+    try:
+        source_id = int(risk_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Unknown historical risk {risk_id!r}") from exc
+
+    exists = db.scalar(
+        select(models.ProjectRisk.id).where(
+            models.ProjectRisk.id == source_id,
+            models.ProjectRisk.source == HISTORICAL_SOURCE,
+        )
+    )
+    if exists is None:
         raise ValueError(f"Unknown historical risk {risk_id!r}")
 
     existing = db.scalar(

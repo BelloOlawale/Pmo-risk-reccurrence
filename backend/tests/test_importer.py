@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from riskapp import models
 from riskapp.import_pipeline.importer import (
     SchemaType,
-    _build_risk,
+    _build_project_risk,
     detect_schema,
     import_directory,
 )
@@ -113,7 +113,7 @@ class TestImportDirectory:
         }
 
         # Every risk carries source traceability and a valid matrix rating.
-        risks = db_session.scalars(select(models.Risk)).all()
+        risks = db_session.scalars(select(models.ProjectRisk)).all()
         assert len(risks) == 28
         for risk in risks:
             assert risk.project_id is not None
@@ -148,9 +148,36 @@ class TestImportDirectory:
         project_count = db_session.scalar(
             select(func.count()).select_from(models.Project)
         )
-        risk_count = db_session.scalar(select(func.count()).select_from(models.Risk))
+        project_risk_count = db_session.scalar(
+            select(func.count()).select_from(models.ProjectRisk)
+        )
         assert project_count == 3
-        assert risk_count == 28
+        # Project Risk rows are not duplicated on re-run either.
+        assert project_risk_count == 28
+
+    def test_import_creates_project_risks_and_deduplicated_catalog(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        import_directory(db_session, str(_build_hierarchy(tmp_path)))
+
+        instances = db_session.scalars(select(models.ProjectRisk)).all()
+        assert len(instances) == 28
+
+        # The catalog is deduplicated to one entry per unique concept.
+        catalogs = db_session.scalars(select(models.RiskCatalog)).all()
+        concepts = {
+            (c.description.strip().lower(), (c.category or "").strip().lower())
+            for c in catalogs
+        }
+        assert len(catalogs) == len(concepts)
+
+        # Each Project Risk links to a catalog entry and carries traceability.
+        for instance in instances:
+            catalog = db_session.get(models.RiskCatalog, instance.risk_id)
+            assert catalog is not None
+            assert instance.source_file_name
+            assert instance.source == "Historical"
+            assert instance.status == "Closed"
 
     def test_skips_ole2_and_corrupt_files_without_crashing(
         self, db_session: Session, tmp_path: Path
@@ -186,7 +213,7 @@ class TestImportDirectory:
         assert "BUSINESS SOLUTIONS — ERP Implementation" in names
 
 
-def test_build_risk_persists_project_lifecycle_stage() -> None:
+def test_build_project_risk_persists_project_lifecycle_stage() -> None:
     """The 'Project Lifecycle Stage' / 'PLC' source column lands in identified_during."""
     mapped = {
         "risk_description": "Vendor lock-in",
@@ -198,7 +225,8 @@ def test_build_risk_persists_project_lifecycle_stage() -> None:
         "source_file_name": "x.xlsx",
         "source_risk_id": "R1",
     }
-    risk = _build_risk(1, mapped, lambda: "RSK-999")  # type: ignore[arg-type]
+    risk = _build_project_risk(1, 5, mapped)  # type: ignore[arg-type]
+    assert risk.risk_id == 5
     assert risk.identified_during == "Execution"
     assert risk.response_strategy == "Mitigate"
     assert risk.response_plan == "Adopt multi-cloud"

@@ -33,8 +33,8 @@ function compare(a: Risk, b: Risk, key: SortKey, dir: 'asc' | 'desc'): number {
       vb = b.sla_deadline ?? '9999-12-31';
       break;
     default:
-      va = a.risk_code;
-      vb = b.risk_code;
+      va = a.name ?? '';
+      vb = b.name ?? '';
   }
   const cmp = va < vb ? -1 : va > vb ? 1 : 0;
   return dir === 'asc' ? cmp : -cmp;
@@ -58,7 +58,7 @@ export function RiskTable({ risks, onSelect }: RiskTableProps) {
     const q = query.trim().toLowerCase();
     const filtered = risks.filter((r) => {
       if (q) {
-        const hay = [r.risk_code, r.description, r.category, r.subcategory, r.source]
+        const hay = [r.name, r.description, r.category, r.subcategory, r.source]
           .filter(Boolean)
           .join(' ')
           .toLowerCase();
@@ -153,7 +153,7 @@ export function RiskTable({ risks, onSelect }: RiskTableProps) {
               const cd = countdownState(risk);
               return (
                 <tr key={risk.id} onClick={() => onSelect(risk)}>
-                  <td className="mono">{risk.risk_code}</td>
+                  <td className="mono">{risk.name ?? '—'}</td>
                   <td className="cell-ellipsis" title={risk.description}>
                     {risk.description}
                   </td>

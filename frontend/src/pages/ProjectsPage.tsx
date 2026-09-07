@@ -90,19 +90,15 @@ export function ProjectsPage() {
                       <tr className="expanded-row">
                         <td colSpan={9}>
                           <div className="expanded-panel">
-                            <div className="expanded-title">Risk IDs ({p.risk_codes.length})</div>
-                            {p.risk_codes.length === 0 ? (
+                            <div className="expanded-title">Risks ({p.risk_names.length})</div>
+                            {p.risk_names.length === 0 ? (
                               <span className="muted">No risks yet.</span>
                             ) : (
                               <div className="risk-tags">
-                                {p.risk_codes.map((code, i) => (
-                                  <Link
-                                    key={p.risk_ids[i]}
-                                    to={`/risks/${p.risk_ids[i]}`}
-                                    className="tag"
-                                  >
-                                    {code}
-                                  </Link>
+                                {p.risk_names.map((name, i) => (
+                                  <span key={p.risk_ids[i] ?? i} className="tag">
+                                    {name}
+                                  </span>
                                 ))}
                               </div>
                             )}

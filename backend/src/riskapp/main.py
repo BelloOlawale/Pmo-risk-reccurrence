@@ -34,15 +34,22 @@ from riskapp.llm.chat import AzureOpenAIChat, ChatProvider
 from riskapp.services import (
     accept_risk,
     acknowledge_risk,
+    close_project,
+    create_catalog_risk,
     create_project,
     create_risk,
     de_escalate_risk,
     dismiss_risk,
+    get_catalog_risk,
     get_or_create_department,
     get_or_create_project_type,
     get_or_create_user,
     get_project,
     get_risk,
+    merge_catalog_risks,
+    reopen_project,
+    to_risk_read,
+    update_catalog_risk,
     update_risk,
 )
 from riskapp.suggestions import (
@@ -143,25 +150,29 @@ def list_projects(principal: PrincipalDep, db: DbDep) -> list[schemas.ProjectRea
         stmt = stmt.where(models.Project.pm_user_id == principal.user_id)
     projects = db.scalars(stmt.order_by(models.Project.id)).all()
 
-    # Risk counts + risk ids grouped by project — the link from the projects
-    # table back to the risk register (the FK is risk.project_id -> project.id).
+    # Risk counts + instance ids + catalog short names grouped by project — the
+    # link from the projects table back to the register goes through Project Risk.
     risk_rows = db.execute(
-        select(models.Risk.project_id, models.Risk.id, models.Risk.risk_code)
+        select(
+            models.ProjectRisk.project_id,
+            models.ProjectRisk.id,
+            models.RiskCatalog.name,
+        ).join(models.RiskCatalog, models.ProjectRisk.risk_id == models.RiskCatalog.id)
     ).all()
     counts: dict[int, int] = {}
     risk_ids: dict[int, list[int]] = {}
-    risk_codes: dict[int, list[str]] = {}
-    for project_id, risk_id, risk_code in risk_rows:
+    risk_names: dict[int, list[str]] = {}
+    for project_id, risk_id, risk_name in risk_rows:
         counts[project_id] = counts.get(project_id, 0) + 1
         risk_ids.setdefault(project_id, []).append(risk_id)
-        risk_codes.setdefault(project_id, []).append(risk_code)
+        risk_names.setdefault(project_id, []).append(risk_name or f"#{risk_id}")
 
     result: list[schemas.ProjectRead] = []
     for project in projects:
         item = schemas.ProjectRead.model_validate(project)
         item.risk_count = counts.get(project.id, 0)
         item.risk_ids = risk_ids.get(project.id, [])
-        item.risk_codes = risk_codes.get(project.id, [])
+        item.risk_names = risk_names.get(project.id, [])
         result.append(item)
     return result
 
@@ -176,11 +187,100 @@ def read_project(
     if not can_access_project(principal, project):
         raise HTTPException(status_code=403, detail="Forbidden")
     risk_count = db.scalar(
-        select(func.count(models.Risk.id)).where(models.Risk.project_id == project_id)
+        select(func.count(models.ProjectRisk.id)).where(
+            models.ProjectRisk.project_id == project_id
+        )
     ) or 0
     item = schemas.ProjectRead.model_validate(project)
     item.risk_count = int(risk_count)
     return item
+
+
+@app.post(
+    "/api/projects/{project_id}/close",
+    response_model=schemas.ProjectRead,
+    dependencies=[Depends(require_roles(Role.PROJECT_MANAGER, Role.PMO_LEAD, Role.SYSTEM_ADMIN))],
+)
+def close_project_endpoint(
+    project_id: int, principal: PrincipalDep, db: DbDep
+) -> schemas.ProjectRead:
+    project = get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not can_access_project(principal, project):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        closed = close_project(db, project)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return schemas.ProjectRead.model_validate(closed)
+
+
+@app.post(
+    "/api/projects/{project_id}/reopen",
+    response_model=schemas.ProjectRead,
+    dependencies=[Depends(require_roles(Role.PROJECT_MANAGER, Role.PMO_LEAD, Role.SYSTEM_ADMIN))],
+)
+def reopen_project_endpoint(
+    project_id: int, principal: PrincipalDep, db: DbDep
+) -> schemas.ProjectRead:
+    project = get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not can_access_project(principal, project):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return schemas.ProjectRead.model_validate(reopen_project(db, project))
+
+
+@app.get("/api/catalog", response_model=list[schemas.RiskCatalogRead])
+def list_catalog(principal: PrincipalDep, db: DbDep) -> list[schemas.RiskCatalogRead]:
+    risks = db.scalars(select(models.RiskCatalog).order_by(models.RiskCatalog.id)).all()
+    return [schemas.RiskCatalogRead.model_validate(r) for r in risks]
+
+
+@app.get("/api/catalog/{risk_id}", response_model=schemas.RiskCatalogRead)
+def read_catalog(risk_id: int, principal: PrincipalDep, db: DbDep) -> schemas.RiskCatalogRead:
+    risk = db.get(models.RiskCatalog, risk_id)
+    if risk is None:
+        raise HTTPException(status_code=404, detail="Risk not found")
+    return schemas.RiskCatalogRead.model_validate(risk)
+
+
+@app.post(
+    "/api/catalog",
+    response_model=schemas.RiskCatalogRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_catalog_risk(
+    payload: schemas.RiskCatalogCreate, principal: AdminDep, db: DbDep
+) -> schemas.RiskCatalogRead:
+    return schemas.RiskCatalogRead.model_validate(create_catalog_risk(db, payload))
+
+
+@app.patch("/api/catalog/{risk_id}", response_model=schemas.RiskCatalogRead)
+def patch_catalog_risk(
+    risk_id: int,
+    payload: schemas.RiskCatalogUpdate,
+    principal: AdminDep,
+    db: DbDep,
+) -> schemas.RiskCatalogRead:
+    risk = get_catalog_risk(db, risk_id)
+    if risk is None:
+        raise HTTPException(status_code=404, detail="Risk not found")
+    return schemas.RiskCatalogRead.model_validate(update_catalog_risk(db, risk, payload))
+
+
+@app.post("/api/catalog/merge", response_model=schemas.RiskCatalogRead)
+def merge_catalog(
+    payload: schemas.RiskCatalogMerge, principal: AdminDep, db: DbDep
+) -> schemas.RiskCatalogRead:
+    survivor = get_catalog_risk(db, payload.survivor_id)
+    absorbed = get_catalog_risk(db, payload.absorbed_id)
+    if survivor is None or absorbed is None:
+        raise HTTPException(status_code=404, detail="Risk not found")
+    if survivor.id == absorbed.id:
+        raise HTTPException(status_code=422, detail="Cannot merge a risk into itself")
+    return schemas.RiskCatalogRead.model_validate(merge_catalog_risks(db, survivor, absorbed))
 
 
 @app.post(
@@ -196,7 +296,14 @@ def add_risk(
         raise HTTPException(status_code=404, detail="Project not found")
     if not can_access_project(principal, project):
         raise HTTPException(status_code=403, detail="Forbidden")
-    return schemas.RiskRead.model_validate(create_risk(db, payload))
+    if project.status == "Closed":
+        raise HTTPException(
+            status_code=409, detail="Cannot add a risk to a Closed project"
+        )
+    try:
+        return to_risk_read(create_risk(db, payload))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/api/risks", response_model=list[schemas.RiskRead])
@@ -207,16 +314,19 @@ def list_risks(principal: PrincipalDep, db: DbDep) -> list[schemas.RiskRead]:
     risks; owners see the risks assigned to them; PMs see the risks of their
     own projects.
     """
-    stmt = select(models.Risk)
+    stmt = select(models.ProjectRisk).options(
+        selectinload(models.ProjectRisk.catalog_risk),
+        selectinload(models.ProjectRisk.project),
+    )
     if not principal.is_pmo_or_admin:
         stmt = stmt.where(
             or_(
-                models.Risk.owner_user_id == principal.user_id,
-                models.Risk.project.has(models.Project.pm_user_id == principal.user_id),
+                models.ProjectRisk.owner_user_id == principal.user_id,
+                models.ProjectRisk.project.has(models.Project.pm_user_id == principal.user_id),
             )
         )
-    risks = db.scalars(stmt.order_by(models.Risk.id)).all()
-    return [schemas.RiskRead.model_validate(r) for r in risks]
+    instances = db.scalars(stmt.order_by(models.ProjectRisk.id)).all()
+    return [to_risk_read(i) for i in instances]
 
 
 @app.get("/api/risks/{risk_id}", response_model=schemas.RiskRead)
@@ -226,7 +336,7 @@ def read_risk(risk_id: int, principal: PrincipalDep, db: DbDep) -> schemas.RiskR
         raise HTTPException(status_code=404, detail="Risk not found")
     if not can_access_risk(principal, risk):
         raise HTTPException(status_code=403, detail="Forbidden")
-    return schemas.RiskRead.model_validate(risk)
+    return to_risk_read(risk)
 
 
 @app.patch("/api/risks/{risk_id}", response_model=schemas.RiskRead)
@@ -244,7 +354,7 @@ def patch_risk(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return schemas.RiskRead.model_validate(updated)
+    return to_risk_read(updated)
 
 
 @app.post("/api/risks/{risk_id}/acknowledge", response_model=schemas.RiskRead)
@@ -252,7 +362,7 @@ def acknowledge(risk_id: int, db: DbDep) -> schemas.RiskRead:
     risk = get_risk(db, risk_id)
     if risk is None:
         raise HTTPException(status_code=404, detail="Risk not found")
-    return schemas.RiskRead.model_validate(acknowledge_risk(db, risk))
+    return to_risk_read(acknowledge_risk(db, risk))
 
 
 @app.post("/api/risks/{risk_id}/accept", response_model=schemas.RiskRead)
@@ -264,7 +374,7 @@ def accept(risk_id: int, db: DbDep) -> schemas.RiskRead:
         accepted = accept_risk(db, risk)
     except InvalidTransitionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return schemas.RiskRead.model_validate(accepted)
+    return to_risk_read(accepted)
 
 
 @app.post("/api/risks/{risk_id}/dismiss", response_model=schemas.RiskRead)
@@ -278,7 +388,7 @@ def dismiss(risk_id: int, payload: schemas.RiskDismiss, db: DbDep) -> schemas.Ri
         )
     except InvalidTransitionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return schemas.RiskRead.model_validate(dismissed)
+    return to_risk_read(dismissed)
 
 
 @app.get("/api/risks/{risk_id}/history", response_model=list[schemas.RiskAuditLogRead])
@@ -293,23 +403,121 @@ def risk_history(risk_id: int, db: DbDep) -> list[schemas.RiskAuditLogRead]:
     return [schemas.RiskAuditLogRead.model_validate(e) for e in entries]
 
 
+def _project_risk_read(instance: models.ProjectRisk) -> schemas.ProjectRiskRead:
+    """Flatten a Project Risk + its catalog Risk into the read shape."""
+    catalog = instance.catalog_risk
+    return schemas.ProjectRiskRead(
+        id=instance.id,
+        project_id=instance.project_id,
+        risk_id=instance.risk_id,
+        name=catalog.name,
+        description=catalog.description,
+        category=catalog.category,
+        subcategory=catalog.subcategory,
+        risk_source=catalog.risk_source,
+        likelihood=instance.likelihood,
+        impact=instance.impact,
+        risk_rating=instance.risk_rating,
+        response_strategy=instance.response_strategy,
+        response_plan=instance.response_plan,
+        owner_user_id=instance.owner_user_id,
+        status=instance.status,
+        source=instance.source,
+        raised_by=instance.raised_by,
+        identified_during=instance.identified_during,
+        risk_start_date=instance.risk_start_date,
+        risk_end_date=instance.risk_end_date,
+        sla_deadline=instance.sla_deadline,
+        sla_acknowledged=instance.sla_acknowledged,
+        sla_manual_override=instance.sla_manual_override,
+        created_at=instance.created_at,
+    )
+
+
 @app.get(
-    "/api/projects/{project_id}/risks", response_model=list[schemas.RiskRead]
+    "/api/projects/{project_id}/risks", response_model=list[schemas.ProjectRiskRead]
 )
 def list_project_risks(
     project_id: int, principal: PrincipalDep, db: DbDep
-) -> list[schemas.RiskRead]:
+) -> list[schemas.ProjectRiskRead]:
     project = get_project(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     if not can_access_project(principal, project):
         raise HTTPException(status_code=403, detail="Forbidden")
-    risks = db.scalars(
-        select(models.Risk)
-        .where(models.Risk.project_id == project_id)
-        .order_by(models.Risk.id)
+    instances = db.scalars(
+        select(models.ProjectRisk)
+        .options(selectinload(models.ProjectRisk.catalog_risk))
+        .where(models.ProjectRisk.project_id == project_id)
+        .order_by(models.ProjectRisk.id)
     ).all()
-    return [schemas.RiskRead.model_validate(r) for r in risks]
+    return [_project_risk_read(i) for i in instances]
+
+
+_ACTIVE_EXCLUDED_STATUSES = ("Resolved", "Closed", "Dismissed")
+
+
+def _active_risk_read(instance: models.ProjectRisk) -> schemas.ActiveRiskRead:
+    """Flatten a Project Risk + catalog + project into an Active Register row."""
+    catalog = instance.catalog_risk
+    project = instance.project
+    return schemas.ActiveRiskRead(
+        id=instance.id,
+        project_id=instance.project_id,
+        risk_id=instance.risk_id,
+        name=catalog.name,
+        description=catalog.description,
+        category=catalog.category,
+        subcategory=catalog.subcategory,
+        risk_source=catalog.risk_source,
+        likelihood=instance.likelihood,
+        impact=instance.impact,
+        risk_rating=instance.risk_rating,
+        response_strategy=instance.response_strategy,
+        response_plan=instance.response_plan,
+        owner_user_id=instance.owner_user_id,
+        status=instance.status,
+        source=instance.source,
+        identified_during=instance.identified_during,
+        risk_start_date=instance.risk_start_date,
+        risk_end_date=instance.risk_end_date,
+        sla_deadline=instance.sla_deadline,
+        sla_acknowledged=instance.sla_acknowledged,
+        project_code=project.project_code,
+        project_name=project.name,
+        department_name=project.department.name,
+        project_type_name=project.project_type.name,
+    )
+
+
+@app.get("/api/active-register", response_model=list[schemas.ActiveRiskRead])
+def active_register(
+    principal: PrincipalDep, db: DbDep
+) -> list[schemas.ActiveRiskRead]:
+    """The Active Risk Register: Project Risks on Active projects whose status is
+    not Resolved, Closed, or Dismissed, derived in the backend."""
+    stmt = (
+        select(models.ProjectRisk)
+        .options(
+            selectinload(models.ProjectRisk.catalog_risk),
+            selectinload(models.ProjectRisk.project).selectinload(
+                models.Project.department
+            ),
+            selectinload(models.ProjectRisk.project).selectinload(
+                models.Project.project_type
+            ),
+        )
+        .join(models.Project, models.ProjectRisk.project_id == models.Project.id)
+        .where(
+            models.Project.status == "Active",
+            models.ProjectRisk.status.not_in(_ACTIVE_EXCLUDED_STATUSES),
+        )
+        .order_by(models.ProjectRisk.project_id, models.ProjectRisk.id)
+    )
+    if not principal.is_pmo_or_admin:
+        stmt = stmt.where(models.Project.pm_user_id == principal.user_id)
+    instances = db.scalars(stmt).all()
+    return [_active_risk_read(i) for i in instances]
 
 
 @app.post(
@@ -329,7 +537,7 @@ def de_escalate(
         )
     except InvalidTransitionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return schemas.RiskRead.model_validate(updated)
+    return to_risk_read(updated)
 
 
 @app.post(
@@ -391,7 +599,7 @@ def accept_project_suggestion(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return schemas.RiskRead.model_validate(risk)
+    return to_risk_read(risk)
 
 
 @app.post("/api/projects/{project_id}/suggestions/dismiss")

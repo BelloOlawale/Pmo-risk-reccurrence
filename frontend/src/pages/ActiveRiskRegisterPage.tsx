@@ -2,46 +2,51 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { api } from '../api/client';
-import type { Project, Risk } from '../api/types';
+import type { ActiveRisk, Project } from '../api/types';
 import { AddRiskModal } from '../components/AddRiskModal';
 import { RatingBadge, StatusBadge } from '../components/Badges';
 import { useApi } from '../hooks/useApi';
 import { countdownState, formatDate, formatDateTime } from '../utils/format';
-import { isActiveStatus } from '../utils/status';
+
+interface ActiveProject {
+  id: number;
+  project_code: string;
+  name: string;
+  department_name: string;
+  project_type_name: string;
+  risks: ActiveRisk[];
+}
 
 export function ActiveRiskRegisterPage() {
   const navigate = useNavigate();
   const { data: projects } = useApi(() => api.get<Project[]>('/api/projects'));
-  const { data: risks, error, loading, reload } = useApi(() => api.get<Risk[]>('/api/risks'));
-  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
-  const [addingProject, setAddingProject] = useState<Project | null>(null);
-
-  // Active risks grouped by project id.
-  const activeByProject = useMemo(() => {
-    const map = new Map<number, Risk[]>();
-    for (const r of risks ?? []) {
-      if (isActiveStatus(r.status)) {
-        const list = map.get(r.project_id) ?? [];
-        list.push(r);
-        map.set(r.project_id, list);
-      }
-    }
-    return map;
-  }, [risks]);
-
-  // Projects that actually have at least one active risk, in list order.
-  const projectsWithActive = useMemo(
-    () => (projects ?? []).filter((p) => (activeByProject.get(p.id)?.length ?? 0) > 0),
-    [projects, activeByProject],
+  const { data: rows, error, loading, reload } = useApi(
+    () => api.get<ActiveRisk[]>('/api/active-register'),
   );
+  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
+  const [addingProjectId, setAddingProjectId] = useState<number | null>(null);
+
+  // The backend already derives the register; here we only group for display.
+  const projectsWithActive = useMemo(() => {
+    const map = new Map<number, ActiveRisk[]>();
+    for (const r of rows ?? []) {
+      const list = map.get(r.project_id) ?? [];
+      list.push(r);
+      map.set(r.project_id, list);
+    }
+    return [...map.entries()].map(([id, risks]) => ({
+      id,
+      project_code: risks[0].project_code,
+      name: risks[0].project_name,
+      department_name: risks[0].department_name,
+      project_type_name: risks[0].project_type_name,
+      risks,
+    })) as ActiveProject[];
+  }, [rows]);
 
   const totalActive = useMemo(
-    () =>
-      projectsWithActive.reduce(
-        (n, p) => n + (activeByProject.get(p.id)?.length ?? 0),
-        0,
-      ),
-    [projectsWithActive, activeByProject],
+    () => projectsWithActive.reduce((n, p) => n + p.risks.length, 0),
+    [projectsWithActive],
   );
 
   function toggle(id: number) {
@@ -84,26 +89,22 @@ export function ActiveRiskRegisterPage() {
       ) : (
         <div className="stack">
           {projectsWithActive.map((p) => {
-            const activeRisks = activeByProject.get(p.id) ?? [];
             const isCollapsed = collapsed.has(p.id);
             return (
               <div className="card" key={p.id}>
-                <div
-                  className="register-project-header"
-                  onClick={() => toggle(p.id)}
-                >
+                <div className="register-project-header" onClick={() => toggle(p.id)}>
                   <span className="expand-indicator">{isCollapsed ? '▸' : '▾'}</span>
                   <span className="mono">{p.project_code}</span>
                   <strong>{p.name}</strong>
                   <span className="register-project-meta">
                     {p.department_name} · {p.project_type_name}
                   </span>
-                  <span className="active-count-badge">{activeRisks.length} active</span>
+                  <span className="active-count-badge">{p.risks.length} active</span>
                   <button
                     className="btn btn-sm btn-primary"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setAddingProject(p);
+                      setAddingProjectId(p.id);
                     }}
                   >
                     + Quick add
@@ -115,7 +116,7 @@ export function ActiveRiskRegisterPage() {
                     <table>
                       <thead>
                         <tr>
-                          <th>Code</th>
+                          <th>Name</th>
                           <th>Description</th>
                           <th>Category</th>
                           <th>Likelihood</th>
@@ -133,11 +134,11 @@ export function ActiveRiskRegisterPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {activeRisks.map((risk) => {
+                        {p.risks.map((risk) => {
                           const cd = countdownState(risk);
                           return (
                             <tr key={risk.id} onClick={() => navigate(`/risks/${risk.id}`)}>
-                              <td className="mono">{risk.risk_code}</td>
+                              <td className="mono">{risk.name ?? '—'}</td>
                               <td className="cell-ellipsis" title={risk.description}>
                                 {risk.description}
                               </td>
@@ -180,13 +181,13 @@ export function ActiveRiskRegisterPage() {
         </div>
       )}
 
-      {addingProject ? (
+      {addingProjectId !== null ? (
         <AddRiskModal
           projects={projects ?? []}
-          initialProjectId={addingProject.id}
-          onClose={() => setAddingProject(null)}
+          initialProjectId={addingProjectId}
+          onClose={() => setAddingProjectId(null)}
           onCreated={() => {
-            setAddingProject(null);
+            setAddingProjectId(null);
             reload();
           }}
         />

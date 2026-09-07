@@ -190,7 +190,7 @@ export function RiskDetailPage() {
             ← Back to project
           </Link>
           <h1 style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span className="mono">{risk?.risk_code ?? 'Risk'}</span>
+            <span className="mono">{risk?.name ?? 'Risk'}</span>
             {risk ? <StatusBadge status={risk.status} /> : null}
             {risk ? <RatingBadge rating={risk.risk_rating} /> : null}
           </h1>

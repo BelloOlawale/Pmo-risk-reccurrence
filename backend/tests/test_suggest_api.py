@@ -12,11 +12,14 @@ from riskapp.main import app, get_chat_provider, get_embedding_provider
 
 
 class FakeChat:
+    def __init__(self, risk_id: str) -> None:
+        self.risk_id = risk_id
+
     def complete(self, messages, *, temperature=0.0, max_tokens=1500) -> str:
         return json.dumps(
             {
-                "overview": "Watch [RSK-1, a.xlsx] closely.",
-                "recommendations": ["Mitigate [RSK-1, a.xlsx]."],
+                "overview": f"Watch [{self.risk_id}, a.xlsx] closely.",
+                "recommendations": [f"Mitigate [{self.risk_id}, a.xlsx]."],
                 "analyses": [],
             }
         )
@@ -43,24 +46,24 @@ def test_suggest_endpoint_returns_grounded_risks(
     historical.project_type = ptype
     db_session.add(historical)
     db_session.flush()
-    db_session.add(
-        models.Risk(
-            project_id=historical.id,
-            risk_code="RSK-1",
-            description="Data loss during cutover",
-            likelihood="Medium",
-            impact="High",
-            risk_rating="High",
-            source="Historical",
-            status="Closed",
-            source_file_name="a.xlsx",
-            source_risk_id="R1",
-            embedding=[0.0, 1.0, 0.0],
-        )
+    catalog = models.RiskCatalog(description="Data loss during cutover", embedding=[0.0, 1.0, 0.0])
+    db_session.add(catalog)
+    db_session.flush()
+    risk = models.ProjectRisk(
+        project_id=historical.id,
+        risk_id=catalog.id,
+        likelihood="Medium",
+        impact="High",
+        risk_rating="High",
+        source="Historical",
+        status="Closed",
+        source_file_name="a.xlsx",
+        source_risk_id="R1",
     )
+    db_session.add(risk)
     db_session.commit()
 
-    app.dependency_overrides[get_chat_provider] = lambda: FakeChat()
+    app.dependency_overrides[get_chat_provider] = lambda: FakeChat(str(risk.id))
     app.dependency_overrides[get_embedding_provider] = lambda: FakeEmbeddings()
     try:
         project = client.post(
@@ -76,8 +79,8 @@ def test_suggest_endpoint_returns_grounded_risks(
         assert resp.status_code == 200
         data = resp.json()
         assert data["project_id"] == project["id"]
-        assert data["suggested_risks"][0]["risk_id"] == "RSK-1"
-        assert data["suggested_risks"][0]["citation"] == "[RSK-1, a.xlsx]"
+        assert data["suggested_risks"][0]["risk_id"] == str(risk.id)
+        assert data["suggested_risks"][0]["citation"] == f"[{risk.id}, a.xlsx]"
         assert data["evaluation"]["groundedness"] == 1.0
     finally:
         app.dependency_overrides.pop(get_chat_provider, None)

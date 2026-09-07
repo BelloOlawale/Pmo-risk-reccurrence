@@ -81,7 +81,7 @@ class Project(TimestampMixin, Base):
     department: Mapped[Department] = relationship(back_populates="projects")
     project_type: Mapped[ProjectType] = relationship(back_populates="projects")
     pm_user: Mapped[User | None] = relationship(foreign_keys=[pm_user_id])
-    risks: Mapped[list[Risk]] = relationship(back_populates="project")
+    project_risks: Mapped[list[ProjectRisk]] = relationship(back_populates="project")
 
     @property
     def department_name(self) -> str:
@@ -92,78 +92,13 @@ class Project(TimestampMixin, Base):
         return self.project_type.name
 
 
-class Risk(TimestampMixin, Base):
-    __tablename__ = "risks"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    risk_code: Mapped[str] = mapped_column(String(50), unique=True, index=True)
-    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
-
-    description: Mapped[str] = mapped_column(Text)
-    category: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    subcategory: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    risk_source: Mapped[str | None] = mapped_column(String(30), nullable=True)
-
-    likelihood: Mapped[str] = mapped_column(String(10), nullable=False)
-    impact: Mapped[str] = mapped_column(String(10), nullable=False)
-    risk_rating: Mapped[str] = mapped_column(String(10), nullable=False)
-
-    response_strategy: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    response_plan: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    practice_lead_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-
-    status: Mapped[str] = mapped_column(
-        String(30), default="Suggested", nullable=False, index=True
-    )
-    source: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    raised_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    identified_during: Mapped[str | None] = mapped_column(String(100), nullable=True)
-
-    source_file_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    source_file_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    source_risk_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
-
-    llm_analysis: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    # Semantic embedding of the risk text (text-embedding-3-small, 1536 dims).
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)
-
-    sla_deadline: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    sla_acknowledged: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    sla_manual_override: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-
-    risk_start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
-    risk_end_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
-
-    accepted_date: Mapped[dt.datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    resolved_date: Mapped[dt.datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    closed_date: Mapped[dt.datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-
-    root_cause: Mapped[str | None] = mapped_column(Text, nullable=True)
-    what_worked: Mapped[str | None] = mapped_column(Text, nullable=True)
-    resolution_category: Mapped[str | None] = mapped_column(String(100), nullable=True)
-
-    project: Mapped[Project] = relationship(back_populates="risks")
-    owner: Mapped[User | None] = relationship(foreign_keys=[owner_user_id])
-    practice_lead: Mapped[User | None] = relationship(foreign_keys=[practice_lead_user_id])
-    audit_log: Mapped[list[RiskAuditLog]] = relationship(back_populates="risk")
-
-
 class RiskAuditLog(Base):
     """Append-only audit trail. Rows are never updated or deleted."""
 
     __tablename__ = "risk_audit_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    risk_id: Mapped[int] = mapped_column(ForeignKey("risks.id"), index=True)
+    risk_id: Mapped[int] = mapped_column(ForeignKey("project_risks.id"), index=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     action: Mapped[str] = mapped_column(String(50), nullable=False)
     field: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -175,7 +110,7 @@ class RiskAuditLog(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )
 
-    risk: Mapped[Risk] = relationship(back_populates="audit_log")
+    risk: Mapped[ProjectRisk] = relationship(back_populates="audit_log")
 
 
 class PracticeLead(TimestampMixin, Base):
@@ -226,8 +161,80 @@ class Notification(TimestampMixin, Base):
     type: Mapped[str] = mapped_column(String(50), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
-    risk_id: Mapped[int | None] = mapped_column(ForeignKey("risks.id"), nullable=True, index=True)
+    risk_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project_risks.id"), nullable=True, index=True
+    )
     project_id: Mapped[int | None] = mapped_column(
         ForeignKey("projects.id"), nullable=True, index=True
     )
     read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class RiskCatalog(TimestampMixin, Base):
+    """Shared, project-agnostic risk catalog (one entry per risk concept)."""
+
+    __tablename__ = "risk_catalog"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    subcategory: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    risk_source: Mapped[str | None] = mapped_column(String(30), nullable=True)
+
+    # Semantic embedding of the risk concept (text-embedding-3-small, 1536 dims).
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)
+
+    project_risks: Mapped[list[ProjectRisk]] = relationship(back_populates="catalog_risk")
+
+
+class ProjectRisk(TimestampMixin, Base):
+    """A tracked occurrence of a catalog Risk on a specific Project."""
+
+    __tablename__ = "project_risks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    risk_id: Mapped[int] = mapped_column(ForeignKey("risk_catalog.id"), index=True)
+
+    catalog_risk: Mapped[RiskCatalog] = relationship(back_populates="project_risks")
+    project: Mapped[Project] = relationship(back_populates="project_risks")
+
+    likelihood: Mapped[str] = mapped_column(String(10), nullable=False)
+    impact: Mapped[str] = mapped_column(String(10), nullable=False)
+    risk_rating: Mapped[str] = mapped_column(String(10), nullable=False)
+    response_strategy: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    response_plan: Mapped[str | None] = mapped_column(Text, nullable=True)
+    owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    practice_lead_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(30), default="Suggested", nullable=False, index=True
+    )
+    source: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    raised_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    identified_during: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    source_file_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_file_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    source_risk_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    llm_analysis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sla_deadline: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sla_acknowledged: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    sla_manual_override: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    risk_start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    risk_end_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    accepted_date: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    resolved_date: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    closed_date: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    root_cause: Mapped[str | None] = mapped_column(Text, nullable=True)
+    what_worked: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolution_category: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    owner: Mapped[User | None] = relationship(foreign_keys=[owner_user_id])
+    practice_lead: Mapped[User | None] = relationship(foreign_keys=[practice_lead_user_id])
+    audit_log: Mapped[list[RiskAuditLog]] = relationship(back_populates="risk")

@@ -51,7 +51,7 @@ def sla_state(
     return "ok"
 
 
-def _owner_active(db: Session, risk: models.Risk) -> bool:
+def _owner_active(db: Session, risk: models.ProjectRisk) -> bool:
     """Whether the owner has responded (acknowledged or any audit entry)."""
     if risk.sla_acknowledged:
         return True
@@ -78,7 +78,7 @@ class SlaAction:
 def find_sla_actions(db: Session, now: dt.datetime) -> list[SlaAction]:
     """Return the pending SLA actions for active, non-satisfied risks."""
     risks = db.scalars(
-        select(models.Risk).where(models.Risk.status.in_(_ACTIVE_STATUSES))
+        select(models.ProjectRisk).where(models.ProjectRisk.status.in_(_ACTIVE_STATUSES))
     ).all()
 
     actions: list[SlaAction] = []
@@ -95,7 +95,7 @@ def find_sla_actions(db: Session, now: dt.datetime) -> list[SlaAction]:
             actions.append(
                 SlaAction(
                     risk_id=risk.id,
-                    risk_code=risk.risk_code,
+                    risk_code=f"#{risk.id}",
                     action=state,
                 )
             )
@@ -106,35 +106,36 @@ def run_sla_monitor(db: Session, notifier: NotificationService, now: dt.datetime
     """Apply pending SLA actions: remind on warning, escalate on breach."""
     actions = find_sla_actions(db, now)
     for action in actions:
-        risk = db.get(models.Risk, action.risk_id)
+        risk = db.get(models.ProjectRisk, action.risk_id)
         if risk is None:
             continue
+        label = f"#{risk.id}"
         if action.action == "breach":
             transition_risk(db, risk, RiskStatus.ESCALATED.value)
             notifier.notify(
                 db,
                 event=EVENT_BREACH,
-                title=f"SLA breached: {risk.risk_code}",
-                body=f"Risk {risk.risk_code} exceeded its SLA deadline and was escalated.",
+                title=f"SLA breached: {label}",
+                body=f"Risk {label} exceeded its SLA deadline and was escalated.",
                 risk=risk,
             )
         else:
             notifier.notify(
                 db,
                 event=EVENT_SLA_WARNING,
-                title=f"SLA warning: {risk.risk_code}",
-                body=f"Risk {risk.risk_code} is approaching its SLA deadline.",
+                title=f"SLA warning: {label}",
+                body=f"Risk {label} is approaching its SLA deadline.",
                 risk=risk,
             )
     db.commit()
     return len(actions)
 
 
-def find_start_date_risks(db: Session, today: dt.date) -> list[models.Risk]:
+def find_start_date_risks(db: Session, today: dt.date) -> list[models.ProjectRisk]:
     """Risks whose ``risk_start_date`` is ``today`` (in the app timezone)."""
     return list(
         db.scalars(
-            select(models.Risk).where(models.Risk.risk_start_date == today)
+            select(models.ProjectRisk).where(models.ProjectRisk.risk_start_date == today)
         ).all()
     )
 
@@ -145,11 +146,12 @@ def run_start_date_check(
     """Notify the owner for every risk starting today."""
     risks = find_start_date_risks(db, today)
     for risk in risks:
+        label = f"#{risk.id}"
         notifier.notify(
             db,
             event=EVENT_RISK_START,
-            title=f"Risk starts today: {risk.risk_code}",
-            body=f"Risk {risk.risk_code} is now within its active window.",
+            title=f"Risk starts today: {label}",
+            body=f"Risk {label} is now within its active window.",
             risk=risk,
         )
     db.commit()
@@ -158,20 +160,24 @@ def run_start_date_check(
 
 def weekly_summary_data(db: Session) -> dict[str, int | float]:
     """Aggregate portfolio counts for the Monday summary email."""
-    total = db.scalar(select(func.count()).select_from(models.Risk)) or 0
+    total = db.scalar(select(func.count()).select_from(models.ProjectRisk)) or 0
     escalated = (
         db.scalar(
             select(func.count())
-            .select_from(models.Risk)
-            .where(models.Risk.status == RiskStatus.ESCALATED.value)
+            .select_from(models.ProjectRisk)
+            .where(models.ProjectRisk.status == RiskStatus.ESCALATED.value)
         )
         or 0
     )
     closed = (
         db.scalar(
             select(func.count())
-            .select_from(models.Risk)
-            .where(models.Risk.status.in_((RiskStatus.CLOSED.value, RiskStatus.RESOLVED.value)))
+            .select_from(models.ProjectRisk)
+            .where(
+                models.ProjectRisk.status.in_(
+                    (RiskStatus.CLOSED.value, RiskStatus.RESOLVED.value)
+                )
+            )
         )
         or 0
     )

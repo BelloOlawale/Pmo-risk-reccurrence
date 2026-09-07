@@ -54,11 +54,13 @@ def _risk(
     owner: models.User | None,
     *,
     status: str = "Open",
-) -> models.Risk:
-    risk = models.Risk(
+) -> models.ProjectRisk:
+    catalog = models.RiskCatalog(description=f"risk {code}")
+    db.add(catalog)
+    db.flush()
+    risk = models.ProjectRisk(
         project_id=project.id,
-        risk_code=code,
-        description=f"risk {code}",
+        risk_id=catalog.id,
         likelihood="Medium",
         impact="Medium",
         risk_rating="Medium",
@@ -85,13 +87,13 @@ class TestPureScoping:
 
     def test_owner_can_access_their_risk(self) -> None:
         owner = Principal(user_id=7, upn="o", roles=frozenset({Role.PROJECT_MANAGER}))
-        risk = models.Risk(owner_user_id=7)
+        risk = models.ProjectRisk(owner_user_id=7)
         risk.project = models.Project(pm_user_id=99)
         assert can_access_risk(owner, risk) is True
 
     def test_pm_can_access_their_projects_risks(self) -> None:
         pm = Principal(user_id=1, upn="p", roles=frozenset({Role.PROJECT_MANAGER}))
-        risk = models.Risk(owner_user_id=None)
+        risk = models.ProjectRisk(owner_user_id=None)
         risk.project = models.Project(pm_user_id=1)
         assert can_access_risk(pm, risk) is True
 

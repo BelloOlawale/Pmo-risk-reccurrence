@@ -73,7 +73,7 @@ class TestResolveRecipients:
 
 
 class TestNotificationService:
-    def _risk_with_owner(self, db: Session) -> models.Risk:
+    def _risk_with_owner(self, db: Session) -> models.ProjectRisk:
         owner = models.User(upn="owner@example.com", display_name="Owner")
         pm = models.User(upn="pm@example.com", display_name="PM")
         db.add_all([owner, pm])
@@ -93,10 +93,13 @@ class TestNotificationService:
         db.add(project)
         db.flush()
 
-        risk = models.Risk(
+        catalog = models.RiskCatalog(description="Data loss")
+        db.add(catalog)
+        db.flush()
+
+        risk = models.ProjectRisk(
             project_id=project.id,
-            risk_code="RSK-N",
-            description="Data loss",
+            risk_id=catalog.id,
             likelihood="High",
             impact="High",
             risk_rating="High",

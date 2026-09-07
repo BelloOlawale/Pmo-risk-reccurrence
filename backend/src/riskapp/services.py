@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from riskapp import models, schemas
@@ -27,18 +27,6 @@ def _next_project_code(db: Session) -> str:
         or 0
     )
     return f"{prefix}{count + 1:03d}"
-
-
-def next_risk_code(db: Session) -> str:
-    count = (
-        db.scalar(
-            select(func.count())
-            .select_from(models.Risk)
-            .where(models.Risk.risk_code.like("RSK-%"))
-        )
-        or 0
-    )
-    return f"RSK-{count + 1:03d}"
 
 
 def get_or_create_department(db: Session, name: str) -> models.Department:
@@ -113,32 +101,195 @@ def get_project(db: Session, project_id: int) -> models.Project | None:
     return db.scalar(stmt)
 
 
-def create_risk(db: Session, payload: schemas.RiskCreate) -> models.Risk:
+# A project can only be closed once every Project Risk on it is Resolved or
+# Closed (ADR 0002). Everything else counts as still open.
+_CLOSED_PROJECT_RISK_STATUSES = ("Resolved", "Closed")
+
+
+def close_project(db: Session, project: models.Project) -> models.Project:
+    """Close a project, blocking while any Project Risk is not Resolved/Closed.
+
+    Raises:
+        ValueError: with the still-open risks listed, when closure is blocked.
+    """
+    open_risks = db.scalars(
+        select(models.ProjectRisk)
+        .options(selectinload(models.ProjectRisk.catalog_risk))
+        .where(models.ProjectRisk.project_id == project.id)
+        .where(models.ProjectRisk.status.not_in(_CLOSED_PROJECT_RISK_STATUSES))
+        .order_by(models.ProjectRisk.id)
+    ).all()
+    if open_risks:
+        descriptions = [r.catalog_risk.description for r in open_risks]
+        raise ValueError(
+            f"Cannot close project: {len(open_risks)} risk(s) still open — "
+            + "; ".join(descriptions)
+        )
+    project.status = "Closed"
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+def reopen_project(db: Session, project: models.Project) -> models.Project:
+    """Reopen a Closed project, returning it to Active (an explicit action)."""
+    project.status = "Active"
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+def _get_or_create_catalog_risk(
+    db: Session,
+    description: str,
+    category: str | None,
+    subcategory: str | None,
+    risk_source: str | None,
+) -> models.RiskCatalog:
+    """Return the catalog entry for ``description`` + ``category``, creating it
+    if absent. Deduplication matches the backfill (normalized description +
+    category), so re-adding a known concept reuses its entry.
+    """
+    normalized_description = description.strip().lower()
+    normalized_category = (category or "").strip().lower()
+    catalog = db.scalar(
+        select(models.RiskCatalog).where(
+            func.lower(func.trim(models.RiskCatalog.description))
+            == normalized_description,
+            func.lower(func.trim(func.coalesce(models.RiskCatalog.category, "")))
+            == normalized_category,
+        )
+    )
+    if catalog is None:
+        catalog = models.RiskCatalog(
+            description=description,
+            category=category,
+            subcategory=subcategory,
+            risk_source=risk_source,
+        )
+        db.add(catalog)
+        db.flush()
+    return catalog
+
+
+def create_risk(db: Session, payload: schemas.RiskCreate) -> models.ProjectRisk:
     rating = compute_risk_rating(payload.likelihood, payload.impact)
     now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
-    risk = models.Risk(
+    sla_deadline = compute_deadline(
+        rating, deadline_anchor(payload.risk_start_date, now, settings.tz)
+    )
+
+    # Resolve the shared catalog Risk: attach an existing one by id, or create
+    # (or reuse) one from the description + category.
+    if payload.catalog_risk_id is not None:
+        catalog = get_catalog_risk(db, payload.catalog_risk_id)
+        if catalog is None:
+            raise ValueError("Catalog risk not found")
+    else:
+        catalog = _get_or_create_catalog_risk(
+            db,
+            payload.description or "",
+            payload.category,
+            payload.subcategory,
+            payload.risk_source,
+        )
+
+    # The tracked occurrence: a Project Risk linking the project to the catalog
+    # entry. Concept fields (description/category/…) live on the catalog entry;
+    # everything here is per-project tracking state.
+    instance = models.ProjectRisk(
         project_id=payload.project_id,
-        risk_code=next_risk_code(db),
-        description=payload.description,
-        category=payload.category,
-        subcategory=payload.subcategory,
-        risk_source=payload.risk_source,
+        risk_id=catalog.id,
         likelihood=payload.likelihood,
         impact=payload.impact,
         risk_rating=rating,
         response_strategy=payload.response_strategy,
         response_plan=payload.response_plan,
         owner_user_id=payload.owner_user_id,
-        risk_start_date=payload.risk_start_date,
-        risk_end_date=payload.risk_end_date,
+        status=RiskStatus.SUGGESTED.value,
         source=payload.source or "Custom",
         identified_during=payload.identified_during,
-        status=RiskStatus.SUGGESTED.value,
+        risk_start_date=payload.risk_start_date,
+        risk_end_date=payload.risk_end_date,
+        sla_deadline=sla_deadline,
         created_at=now,
         updated_at=now,
-        sla_deadline=compute_deadline(
-            rating, deadline_anchor(payload.risk_start_date, now, settings.tz)
-        ),
+    )
+    db.add(instance)
+    db.commit()
+    db.refresh(instance)
+    return instance
+
+
+_NON_NULLABLE_FIELDS = frozenset({"likelihood", "impact"})
+
+
+def get_risk(db: Session, risk_id: int) -> models.ProjectRisk | None:
+    return db.scalar(
+        select(models.ProjectRisk)
+        .options(
+            selectinload(models.ProjectRisk.catalog_risk),
+            selectinload(models.ProjectRisk.project),
+        )
+        .where(models.ProjectRisk.id == risk_id)
+    )
+
+
+def to_risk_read(instance: models.ProjectRisk) -> schemas.RiskRead:
+    """Flatten a Project Risk + its catalog Risk into the tracked-risk shape."""
+    catalog = instance.catalog_risk
+    return schemas.RiskRead(
+        id=instance.id,
+        project_id=instance.project_id,
+        risk_id=instance.risk_id,
+        name=catalog.name,
+        description=catalog.description,
+        category=catalog.category,
+        subcategory=catalog.subcategory,
+        risk_source=catalog.risk_source,
+        likelihood=instance.likelihood,
+        impact=instance.impact,
+        risk_rating=instance.risk_rating,
+        response_strategy=instance.response_strategy,
+        response_plan=instance.response_plan,
+        owner_user_id=instance.owner_user_id,
+        status=instance.status,
+        source=instance.source,
+        raised_by=instance.raised_by,
+        identified_during=instance.identified_during,
+        source_file_name=instance.source_file_name,
+        source_file_url=instance.source_file_url,
+        source_risk_id=instance.source_risk_id,
+        llm_analysis=instance.llm_analysis,
+        risk_start_date=instance.risk_start_date,
+        risk_end_date=instance.risk_end_date,
+        sla_deadline=instance.sla_deadline,
+        sla_acknowledged=instance.sla_acknowledged,
+        sla_manual_override=instance.sla_manual_override,
+        accepted_date=instance.accepted_date,
+        resolved_date=instance.resolved_date,
+        closed_date=instance.closed_date,
+        root_cause=instance.root_cause,
+        what_worked=instance.what_worked,
+        resolution_category=instance.resolution_category,
+        created_at=instance.created_at,
+    )
+
+
+def get_catalog_risk(db: Session, risk_id: int) -> models.RiskCatalog | None:
+    return db.get(models.RiskCatalog, risk_id)
+
+
+def create_catalog_risk(
+    db: Session, payload: schemas.RiskCatalogCreate
+) -> models.RiskCatalog:
+    """Create a shared catalog Risk entry (the short name is optional)."""
+    risk = models.RiskCatalog(
+        name=payload.name,
+        description=payload.description,
+        category=payload.category,
+        subcategory=payload.subcategory,
+        risk_source=payload.risk_source,
     )
     db.add(risk)
     db.commit()
@@ -146,16 +297,42 @@ def create_risk(db: Session, payload: schemas.RiskCreate) -> models.Risk:
     return risk
 
 
-_NON_NULLABLE_FIELDS = frozenset({"description", "likelihood", "impact"})
+def update_catalog_risk(
+    db: Session, risk: models.RiskCatalog, payload: schemas.RiskCatalogUpdate
+) -> models.RiskCatalog:
+    """Apply a partial update (rename and/or re-categorize) to a catalog entry."""
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(risk, field, value)
+    db.commit()
+    db.refresh(risk)
+    return risk
 
 
-def get_risk(db: Session, risk_id: int) -> models.Risk | None:
-    return db.get(models.Risk, risk_id)
+def merge_catalog_risks(
+    db: Session,
+    survivor: models.RiskCatalog,
+    absorbed: models.RiskCatalog,
+) -> models.RiskCatalog:
+    """Merge ``absorbed`` into ``survivor`` and delete the absorbed entry.
+
+    Every Project Risk that pointed at ``absorbed`` is re-pointed at
+    ``survivor`` first, so the surviving entry stays referenced while the
+    near-duplicate is removed from the catalog.
+    """
+    db.execute(
+        update(models.ProjectRisk)
+        .where(models.ProjectRisk.risk_id == absorbed.id)
+        .values(risk_id=survivor.id)
+    )
+    db.delete(absorbed)
+    db.commit()
+    db.refresh(survivor)
+    return survivor
 
 
 def transition_risk(
-    db: Session, risk: models.Risk, target: str, actor_user_id: int | None = None
-) -> models.Risk:
+    db: Session, risk: models.ProjectRisk, target: str, actor_user_id: int | None = None
+) -> models.ProjectRisk:
     """Transition a risk to ``target``, validating the transition and auditing it."""
     target_status = ensure_transition(risk.status, target)
     old_status = risk.status
@@ -175,8 +352,8 @@ def transition_risk(
 
 
 def acknowledge_risk(
-    db: Session, risk: models.Risk, actor_user_id: int | None = None
-) -> models.Risk:
+    db: Session, risk: models.ProjectRisk, actor_user_id: int | None = None
+) -> models.ProjectRisk:
     """Mark a risk as acknowledged (idempotent) and audit the event."""
     if not risk.sla_acknowledged:
         risk.sla_acknowledged = True
@@ -195,8 +372,8 @@ def acknowledge_risk(
 
 
 def accept_risk(
-    db: Session, risk: models.Risk, actor_user_id: int | None = None
-) -> models.Risk:
+    db: Session, risk: models.ProjectRisk, actor_user_id: int | None = None
+) -> models.ProjectRisk:
     """Accept a Suggested risk: transition to Open, assign owner, start SLA.
 
     The owner defaults to the project's PM when the risk has no explicit owner.
@@ -246,11 +423,11 @@ def accept_risk(
 
 def dismiss_risk(
     db: Session,
-    risk: models.Risk,
+    risk: models.ProjectRisk,
     *,
     actor_user_id: int | None = None,
     reason: str | None = None,
-) -> models.Risk:
+) -> models.ProjectRisk:
     """Dismiss a Suggested risk and remember it so it never reappears.
 
     Raises :class:`InvalidTransitionError` if the risk is not Suggested.
@@ -271,7 +448,7 @@ def dismiss_risk(
     db.add(
         models.SuggestionDismissal(
             project_id=risk.project_id,
-            historical_risk_key=risk.risk_code,
+            historical_risk_key=str(risk.id),
             reason=reason,
         )
     )
@@ -283,11 +460,11 @@ def dismiss_risk(
 
 def de_escalate_risk(
     db: Session,
-    risk: models.Risk,
+    risk: models.ProjectRisk,
     *,
     rationale: str,
     actor_user_id: int | None = None,
-) -> models.Risk:
+) -> models.ProjectRisk:
     """De-escalate an Escalated risk back to In Progress, with a rationale.
 
     Restricted to PM / PMO Lead (enforced at the API layer). The rationale is
@@ -320,7 +497,7 @@ def de_escalate_risk(
 
 
 def _set_auto_deadline(
-    db: Session, risk: models.Risk, actor_user_id: int | None = None
+    db: Session, risk: models.ProjectRisk, actor_user_id: int | None = None
 ) -> None:
     """Recompute the SLA deadline from the rating and start date, auditing if changed."""
     new_deadline = compute_deadline(
@@ -345,11 +522,14 @@ def _set_auto_deadline(
 
 def update_risk(
     db: Session,
-    risk: models.Risk,
+    risk: models.ProjectRisk,
     payload: schemas.RiskUpdate,
     actor_user_id: int | None = None,
-) -> models.Risk:
+) -> models.ProjectRisk:
     """Apply a partial update, auditing each changed field.
+
+    Concept fields (description/category/subcategory/risk_source) are applied to
+    the shared catalog entry; everything else is the per-project tracking state.
 
     Raises:
         InvalidTransitionError: if ``status`` requests an invalid transition.
@@ -360,6 +540,27 @@ def update_risk(
     target_status = data.pop("status", None)
     manual_deadline = data.pop("sla_deadline", None)
     reset_deadline = data.pop("reset_sla_deadline", False)
+
+    catalog = risk.catalog_risk
+    for field in ("description", "category", "subcategory", "risk_source"):
+        if field not in data:
+            continue
+        new_value = data.pop(field)
+        if field == "description" and (new_value is None or not str(new_value).strip()):
+            raise ValueError("Field 'description' cannot be cleared")
+        if new_value == getattr(catalog, field):
+            continue
+        old_value = getattr(catalog, field)
+        setattr(catalog, field, new_value)
+        record_change(
+            db,
+            risk,
+            action="field_edit",
+            field=field,
+            old_value=old_value,
+            new_value=new_value,
+            actor_user_id=actor_user_id,
+        )
 
     for field, new_value in data.items():
         if new_value is None and field in _NON_NULLABLE_FIELDS:

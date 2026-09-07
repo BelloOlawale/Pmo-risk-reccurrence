@@ -44,39 +44,16 @@ def pg_session() -> Session:
 
 
 def test_semantic_search_uses_pgvector(pg_session: Session) -> None:
-    department = models.Department(name="PGVEC-D")
-    project_type = models.ProjectType(name="PGVEC-T")
-    pg_session.add_all([department, project_type])
-    pg_session.flush()
-
-    project = models.Project(
-        name="pgvector test", project_code="PRJ-PGVEC", status="Active"
-    )
-    project.department = department
-    project.project_type = project_type
-    pg_session.add(project)
-    pg_session.flush()
-
-    def risk(code: str, embedding: list[float]) -> None:
+    def catalog(description: str, embedding: list[float]) -> None:
         pg_session.add(
-            models.Risk(
-                project_id=project.id,
-                risk_code=code,
-                description=f"risk {code}",
-                likelihood="Medium",
-                impact="Medium",
-                risk_rating="Medium",
-                source_file_name=f"{code}.xlsx",
-                source_risk_id=code,
-                embedding=embedding,
-            )
+            models.RiskCatalog(description=description, embedding=embedding)
         )
 
-    risk("RSK-1", [1.0, 0.0, 0.0])
-    risk("RSK-2", [0.9, 0.1, 0.0])
-    risk("RSK-3", [0.0, 1.0, 0.0])  # orthogonal → below threshold
+    catalog("risk 1", [1.0, 0.0, 0.0])
+    catalog("risk 2", [0.9, 0.1, 0.0])
+    catalog("risk 3", [0.0, 1.0, 0.0])  # orthogonal → below threshold
     pg_session.commit()
 
     results = semantic_search(pg_session, [1.0, 0.0, 0.0])
-    assert [r.risk_id for r in results] == ["RSK-1", "RSK-2"]
+    assert [r.risk_id for r in results] == ["1", "2"]
     assert results[0].similarity == pytest.approx(1.0, abs=1e-6)

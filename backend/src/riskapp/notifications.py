@@ -180,7 +180,7 @@ class NotificationService:
         event: str,
         title: str,
         body: str,
-        risk: models.Risk | None = None,
+        risk: models.ProjectRisk | None = None,
         project: models.Project | None = None,
     ) -> Recipients:
         """Resolve recipients, persist in-app rows, and send email."""
@@ -204,7 +204,7 @@ class NotificationService:
         title: str,
         body: str,
         recipients: Recipients,
-        risk: models.Risk | None = None,
+        risk: models.ProjectRisk | None = None,
         project: models.Project | None = None,
     ) -> Recipients:
         """Persist and email for an already-resolved recipient set."""
@@ -239,19 +239,19 @@ class NotificationService:
         return recipients
 
     @staticmethod
-    def _email_body(body: str, risk: models.Risk | None) -> str:
+    def _email_body(body: str, risk: models.ProjectRisk | None) -> str:
         escaped = html.escape(body)
         if risk is None:
             return f"<p>{escaped}</p>"
         link = f"{settings.app_base_url}/risks/{risk.id}"
         return (
             f"<p>{escaped}</p>"
-            f'<p><a href="{link}">Open risk {risk.risk_code} in Risk Recurrence</a></p>'
+            f'<p><a href="{link}">Open risk #{risk.id} in Risk Recurrence</a></p>'
         )
 
     @staticmethod
     def _build_context(
-        db: Session, risk: models.Risk | None, project: models.Project | None
+        db: Session, risk: models.ProjectRisk | None, project: models.Project | None
     ) -> RecipientContext:
         proj = project or (risk.project if risk else None)
 

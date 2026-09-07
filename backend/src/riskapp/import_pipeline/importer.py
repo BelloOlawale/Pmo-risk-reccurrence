@@ -38,7 +38,11 @@ from riskapp.import_pipeline.field_mapper import (
     map_wacl_row,
     normalize_level,
 )
-from riskapp.services import get_or_create_department, get_or_create_project_type
+from riskapp.services import (
+    _get_or_create_catalog_risk,
+    get_or_create_department,
+    get_or_create_project_type,
+)
 
 # Historical rows are seeded as Closed — they are past learnings, not active.
 HISTORICAL_RISK_STATUS = "Closed"
@@ -135,13 +139,9 @@ def import_directory(db: Session, root_path: str) -> ImportResult:
 
     year = dt.date.today().year
     project_codes = count(start=_count_project_codes(db, year) + 1)
-    risk_codes = count(start=_count_risk_codes(db) + 1)
 
     def next_project_code() -> str:
         return f"PRJ-{year}-{next(project_codes):03d}"
-
-    def next_risk_code() -> str:
-        return f"RSK-{next(risk_codes):03d}"
 
     for dept_path in sorted(root.iterdir()):
         if not dept_path.is_dir():
@@ -195,7 +195,16 @@ def import_directory(db: Session, root_path: str) -> ImportResult:
                         result.risks_skipped += 1
                         continue
 
-                    db.add(_build_risk(project.id, mapped, next_risk_code))
+                    # Link to a deduplicated catalog Risk and create the
+                    # Project Risk instance.
+                    catalog = _get_or_create_catalog_risk(
+                        db,
+                        mapped.get("risk_description", ""),
+                        mapped.get("risk_category") or None,
+                        None,
+                        None,
+                    )
+                    db.add(_build_project_risk(project.id, catalog.id, mapped))
                     result.risks_imported += 1
 
     db.commit()
@@ -238,35 +247,34 @@ def _risk_exists(db: Session, project_id: int, mapped: MappedRisk) -> bool:
     source_file = mapped.get("source_file_name", "")
     source_risk_id = mapped.get("source_risk_id", "")
 
+    stmt = select(models.ProjectRisk.id).where(
+        models.ProjectRisk.project_id == project_id,
+        models.ProjectRisk.source_file_name == source_file,
+    )
     if source_risk_id:
-        stmt = select(models.Risk.id).where(
-            models.Risk.project_id == project_id,
-            models.Risk.source_file_name == source_file,
-            models.Risk.source_risk_id == source_risk_id,
-        )
+        stmt = stmt.where(models.ProjectRisk.source_risk_id == source_risk_id)
     else:
-        stmt = select(models.Risk.id).where(
-            models.Risk.project_id == project_id,
-            models.Risk.source_file_name == source_file,
-            models.Risk.source_risk_id.is_(None),
-            models.Risk.description == mapped.get("risk_description", ""),
+        stmt = stmt.join(
+            models.RiskCatalog, models.ProjectRisk.risk_id == models.RiskCatalog.id
+        ).where(
+            models.ProjectRisk.source_risk_id.is_(None),
+            func.lower(func.trim(models.RiskCatalog.description))
+            == mapped.get("risk_description", "").strip().lower(),
         )
 
     return db.scalar(stmt) is not None
 
 
-def _build_risk(
-    project_id: int, mapped: MappedRisk, next_risk_code: Callable[[], str]
-) -> models.Risk:
+def _build_project_risk(
+    project_id: int, catalog_id: int, mapped: MappedRisk
+) -> models.ProjectRisk:
     likelihood = normalize_level(mapped.get("likelihood", ""))
     impact = normalize_level(mapped.get("impact", ""))
     rating = compute_risk_rating(likelihood, impact)
 
-    return models.Risk(
+    return models.ProjectRisk(
         project_id=project_id,
-        risk_code=next_risk_code(),
-        description=mapped.get("risk_description", ""),
-        category=mapped.get("risk_category") or None,
+        risk_id=catalog_id,
         likelihood=likelihood,
         impact=impact,
         risk_rating=rating,
@@ -316,17 +324,6 @@ def _count_project_codes(db: Session, year: int) -> int:
             select(func.count())
             .select_from(models.Project)
             .where(models.Project.project_code.like(f"PRJ-{year}-%"))
-        )
-        or 0
-    )
-
-
-def _count_risk_codes(db: Session) -> int:
-    return (
-        db.scalar(
-            select(func.count())
-            .select_from(models.Risk)
-            .where(models.Risk.risk_code.like("RSK-%"))
         )
         or 0
     )

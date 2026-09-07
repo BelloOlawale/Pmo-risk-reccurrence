@@ -25,10 +25,13 @@ def test_entity_round_trip(db_session: Session) -> None:
     db_session.add(project)
     db_session.flush()
 
-    risk = models.Risk(
+    catalog = models.RiskCatalog(description="Delay in AWS account provisioning")
+    db_session.add(catalog)
+    db_session.flush()
+
+    risk = models.ProjectRisk(
         project_id=project.id,
-        risk_code="RSK-001",
-        description="Delay in AWS account provisioning",
+        risk_id=catalog.id,
         likelihood="High",
         impact="Medium",
         risk_rating=compute_risk_rating("High", "Medium"),
@@ -39,9 +42,10 @@ def test_entity_round_trip(db_session: Session) -> None:
 
     assert risk.risk_rating == "High"
     assert risk.project is project
+    assert risk.catalog_risk is catalog
     assert project.department_name == "Digital Advisory"
     assert project.project_type_name == "Cloud Migration"
-    assert len(project.risks) == 1
+    assert len(project.project_risks) == 1
 
 
 def test_audit_log_round_trip(db_session: Session) -> None:
@@ -56,10 +60,13 @@ def test_audit_log_round_trip(db_session: Session) -> None:
     db_session.add(project)
     db_session.flush()
 
-    risk = models.Risk(
+    catalog = models.RiskCatalog(description="r")
+    db_session.add(catalog)
+    db_session.flush()
+
+    risk = models.ProjectRisk(
         project_id=project.id,
-        risk_code="RSK-1",
-        description="r",
+        risk_id=catalog.id,
         likelihood="Low",
         impact="Low",
         risk_rating="Low",

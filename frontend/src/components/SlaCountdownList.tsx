@@ -29,7 +29,7 @@ export function SlaCountdownList({ risks, onSelect }: SlaCountdownListProps) {
         const cd = countdownState(risk);
         return (
           <div key={risk.id} className="sla-row" onClick={() => onSelect(risk)}>
-            <span className="mono">{risk.risk_code}</span>
+            <span className="mono">{risk.name ?? '—'}</span>
             <RatingBadge rating={risk.risk_rating} />
             <span className="cell-ellipsis" title={risk.description}>
               {risk.description}

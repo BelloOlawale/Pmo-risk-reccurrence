@@ -23,7 +23,7 @@ export interface Project {
   stage_gate: string | null;
   risk_count: number;
   risk_ids: number[];
-  risk_codes: string[];
+  risk_names: string[];
 }
 
 export type Likelihood = 'Low' | 'Medium' | 'High';
@@ -33,8 +33,9 @@ export type ResponseStrategy = 'Mitigate' | 'Transfer' | 'Avoid' | 'Accept';
 
 export interface Risk {
   id: number;
-  risk_code: string;
   project_id: number;
+  risk_id: number;
+  name: string | null;
   description: string;
   category: string | null;
   subcategory: string | null;
@@ -65,6 +66,92 @@ export interface Risk {
   what_worked: string | null;
   resolution_category: string | null;
   created_at: string;
+}
+
+export interface RiskCatalog {
+  id: number;
+  name: string | null;
+  description: string;
+  category: string | null;
+  subcategory: string | null;
+  risk_source: string | null;
+  created_at: string;
+}
+
+export interface ProjectRisk {
+  id: number;
+  project_id: number;
+  risk_id: number;
+  name: string | null;
+  description: string;
+  category: string | null;
+  subcategory: string | null;
+  risk_source: string | null;
+  likelihood: string;
+  impact: string;
+  risk_rating: string;
+  response_strategy: string | null;
+  response_plan: string | null;
+  owner_user_id: number | null;
+  status: string;
+  source: string | null;
+  raised_by: string | null;
+  identified_during: string | null;
+  risk_start_date: string | null;
+  risk_end_date: string | null;
+  sla_deadline: string | null;
+  sla_acknowledged: boolean;
+  sla_manual_override: boolean;
+  created_at: string;
+}
+
+export interface ActiveRisk {
+  id: number;
+  project_id: number;
+  risk_id: number;
+  name: string | null;
+  description: string;
+  category: string | null;
+  subcategory: string | null;
+  risk_source: string | null;
+  likelihood: string;
+  impact: string;
+  risk_rating: string;
+  response_strategy: string | null;
+  response_plan: string | null;
+  owner_user_id: number | null;
+  status: string;
+  source: string | null;
+  identified_during: string | null;
+  risk_start_date: string | null;
+  risk_end_date: string | null;
+  sla_deadline: string | null;
+  sla_acknowledged: boolean;
+  project_code: string;
+  project_name: string;
+  department_name: string;
+  project_type_name: string;
+}
+
+export interface RiskCatalogCreatePayload {
+  name?: string | null;
+  description: string;
+  category?: string | null;
+  subcategory?: string | null;
+  risk_source?: string | null;
+}
+
+export interface RiskCatalogUpdatePayload {
+  name?: string | null;
+  description?: string | null;
+  category?: string | null;
+  subcategory?: string | null;
+  risk_source?: string | null;
+}
+
+export interface RiskCatalogMergePayload {
+  survivor_id: number;
+  absorbed_id: number;
 }
 
 export interface RiskAuditLog {
@@ -120,7 +207,8 @@ export interface ProjectCreatePayload {
 
 export interface RiskCreatePayload {
   project_id: number;
-  description: string;
+  catalog_risk_id?: number | null;
+  description?: string | null;
   category?: string | null;
   subcategory?: string | null;
   risk_source?: RiskSource | null;

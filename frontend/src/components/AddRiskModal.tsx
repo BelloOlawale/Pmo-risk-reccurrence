@@ -2,7 +2,16 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 
 import { api, ApiError } from '../api/client';
-import type { Project, ResponseStrategy, Risk, RiskSource } from '../api/types';
+import type {
+  Impact,
+  Likelihood,
+  Project,
+  ResponseStrategy,
+  Risk,
+  RiskCatalog,
+  RiskSource,
+} from '../api/types';
+import { useApi } from '../hooks/useApi';
 
 interface AddRiskModalProps {
   projects: Project[];
@@ -13,6 +22,7 @@ interface AddRiskModalProps {
 }
 
 interface FormState {
+  catalog_risk_id: string;
   project_id: string;
   description: string;
   category: string;
@@ -28,6 +38,7 @@ interface FormState {
 }
 
 const EMPTY: FormState = {
+  catalog_risk_id: '',
   project_id: '',
   description: '',
   category: '',
@@ -50,8 +61,25 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const { data: catalog } = useApi(() => api.get<RiskCatalog[]>('/api/catalog'));
+  const catalogRisks = catalog ?? [];
+
+  const attaching = Number(form.catalog_risk_id) > 0;
+
   function set<K extends keyof FormState>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  function handleCatalogSelect(value: string) {
+    const selected = catalogRisks.find((c) => String(c.id) === value);
+    setForm((f) => ({
+      ...f,
+      catalog_risk_id: value,
+      description: selected ? selected.description : f.description,
+      category: selected ? selected.category ?? '' : f.category,
+      subcategory: selected ? selected.subcategory ?? '' : f.subcategory,
+      risk_source: selected ? selected.risk_source ?? '' : f.risk_source,
+    }));
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -63,8 +91,10 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
       setError('Select the project this risk belongs to.');
       return;
     }
-    if (!form.description.trim()) {
-      setError('Description is required.');
+    const catalogRiskId = Number(form.catalog_risk_id);
+    const isAttaching = Number.isFinite(catalogRiskId) && catalogRiskId > 0;
+    if (!isAttaching && !form.description.trim()) {
+      setError('Description is required (or attach an existing catalog risk).');
       return;
     }
 
@@ -72,12 +102,13 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
     try {
       const risk = await api.post<Risk>('/api/risks', {
         project_id: projectId,
-        description: form.description.trim(),
-        category: form.category.trim() || null,
-        subcategory: form.subcategory.trim() || null,
-        risk_source: (form.risk_source || null) as RiskSource | null,
-        likelihood: form.likelihood,
-        impact: form.impact,
+        catalog_risk_id: isAttaching ? catalogRiskId : null,
+        description: isAttaching ? null : form.description.trim(),
+        category: isAttaching ? null : form.category.trim() || null,
+        subcategory: isAttaching ? null : form.subcategory.trim() || null,
+        risk_source: isAttaching ? null : ((form.risk_source || null) as RiskSource | null),
+        likelihood: form.likelihood as Likelihood,
+        impact: form.impact as Impact,
         response_strategy: (form.response_strategy || null) as ResponseStrategy | null,
         response_plan: form.response_plan.trim() || null,
         risk_start_date: form.risk_start_date || null,
@@ -123,25 +154,53 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
             </div>
 
             <div className="field" style={{ gridColumn: '1 / -1' }}>
+              <label>Existing catalog risk (optional)</label>
+              <select
+                value={form.catalog_risk_id}
+                onChange={(e) => handleCatalogSelect(e.target.value)}
+              >
+                <option value="">— New risk —</option>
+                {catalogRisks.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name ?? c.description} — {c.description}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
               <label>Description *</label>
               <textarea
                 value={form.description}
                 onChange={(e) => set('description', e.target.value)}
                 placeholder="Describe the risk…"
+                disabled={attaching}
               />
             </div>
 
             <div className="field">
               <label>Category</label>
-              <input value={form.category} onChange={(e) => set('category', e.target.value)} />
+              <input
+                value={form.category}
+                onChange={(e) => set('category', e.target.value)}
+                disabled={attaching}
+              />
             </div>
             <div className="field">
               <label>Subcategory</label>
-              <input value={form.subcategory} onChange={(e) => set('subcategory', e.target.value)} />
+              <input
+                value={form.subcategory}
+                onChange={(e) => set('subcategory', e.target.value)}
+                disabled={attaching}
+              />
             </div>
             <div className="field">
               <label>Risk source</label>
-              <select value={form.risk_source} onChange={(e) => set('risk_source', e.target.value)}>
+              <select
+                value={form.risk_source}
+                onChange={(e) => set('risk_source', e.target.value)}
+                disabled={attaching}
+              >
                 <option value="">—</option>
                 <option value="Human">Human</option>
                 <option value="Environmental">Environmental</option>

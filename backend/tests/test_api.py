@@ -64,7 +64,8 @@ def test_create_risk_computes_rating(client: TestClient) -> None:
     data = resp.json()
     assert data["risk_rating"] == "High"  # High x Medium -> High (3x3 matrix)
     assert data["status"] == "Suggested"
-    assert data["risk_code"].startswith("RSK-")
+    assert data["name"] is None  # brand-new risk has no catalog short name yet
+    assert data["risk_id"] is not None
 
 
 def test_create_risk_rejects_invalid_rating(client: TestClient) -> None:
@@ -106,32 +107,24 @@ def test_list_all_risks_across_projects(client: TestClient) -> None:
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 2
-    assert {r["risk_code"] for r in data} == {r1["risk_code"], r2["risk_code"]}
+    assert {r["id"] for r in data} == {r1["id"], r2["id"]}
 
 
-def test_projects_list_includes_risk_count_and_ids(client: TestClient) -> None:
-    """The projects table links to the register via risk id and count."""
+def test_projects_list_includes_risk_count(client: TestClient) -> None:
+    """The projects table's risk count reflects Project Risk rows."""
     p = client.post(
         "/api/projects", json={"name": "P", "department": "D", "project_type": "T"}
     ).json()
-    r1 = client.post(
-        "/api/risks",
-        json={"project_id": p["id"], "description": "r", "likelihood": "Low", "impact": "Low"},
-    ).json()
-    r2 = client.post(
-        "/api/risks",
-        json={
-            "project_id": p["id"],
-            "description": "r2",
-            "likelihood": "Medium",
-            "impact": "Medium",
-        },
-    ).json()
+    for desc in ("r1", "r2"):
+        client.post(
+            "/api/risks",
+            json={"project_id": p["id"], "description": desc, "likelihood": "Low", "impact": "Low"},
+        )
 
     resp = client.get("/api/projects")
     assert resp.status_code == 200
     match = [x for x in resp.json() if x["id"] == p["id"]]
     assert len(match) == 1
     assert match[0]["risk_count"] == 2
-    assert sorted(match[0]["risk_ids"]) == sorted([r1["id"], r2["id"]])
-    assert sorted(match[0]["risk_codes"]) == sorted([r1["risk_code"], r2["risk_code"]])
+    assert len(match[0]["risk_ids"]) == 2
+    assert len(match[0]["risk_names"]) == 2

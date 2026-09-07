@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class DepartmentCreate(BaseModel):
@@ -56,12 +56,20 @@ class ProjectRead(BaseModel):
     stage_gate: str | None
     risk_count: int = 0
     risk_ids: list[int] = Field(default_factory=list)
-    risk_codes: list[str] = Field(default_factory=list)
+    risk_names: list[str] = Field(default_factory=list)
 
 
 class RiskCreate(BaseModel):
+    """Create a risk on a project.
+
+    Either attach an existing catalog Risk (``catalog_risk_id``) or describe a
+    brand-new risk (``description``); the service layer creates or reuses the
+    shared catalog entry accordingly.
+    """
+
     project_id: int
-    description: str = Field(min_length=1)
+    catalog_risk_id: int | None = None
+    description: str | None = Field(default=None, min_length=1)
     category: str | None = None
     subcategory: str | None = None
     risk_source: Literal["Human", "Environmental", "Technical"] | None = None
@@ -75,13 +83,20 @@ class RiskCreate(BaseModel):
     source: Literal["Historical", "Custom", "Kickoff"] | None = None
     identified_during: str | None = None
 
+    @model_validator(mode="after")
+    def _require_catalog_or_description(self) -> RiskCreate:
+        if self.catalog_risk_id is None and not (self.description or "").strip():
+            raise ValueError("Provide either catalog_risk_id or a description")
+        return self
+
 
 class RiskRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    """A tracked risk: a Project Risk joined to its catalog Risk."""
 
     id: int
-    risk_code: str
     project_id: int
+    risk_id: int
+    name: str | None
     description: str
     category: str | None
     subcategory: str | None
@@ -112,6 +127,113 @@ class RiskRead(BaseModel):
     what_worked: str | None = None
     resolution_category: str | None = None
     created_at: dt.datetime
+
+
+class RiskCatalogRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str | None
+    description: str
+    category: str | None
+    subcategory: str | None
+    risk_source: str | None
+    created_at: dt.datetime
+
+
+class ProjectRiskRead(BaseModel):
+    """A Project Risk joined to its catalog Risk.
+
+    Concept fields (name, description, category, subcategory, risk_source) come
+    from the shared catalog entry; the rest is the per-project tracking state.
+    """
+
+    id: int
+    project_id: int
+    risk_id: int
+    name: str | None
+    description: str
+    category: str | None
+    subcategory: str | None
+    risk_source: str | None
+    likelihood: str
+    impact: str
+    risk_rating: str
+    response_strategy: str | None
+    response_plan: str | None
+    owner_user_id: int | None
+    status: str
+    source: str | None
+    raised_by: str | None
+    identified_during: str | None
+    risk_start_date: dt.date | None
+    risk_end_date: dt.date | None
+    sla_deadline: dt.datetime | None
+    sla_acknowledged: bool
+    sla_manual_override: bool
+    created_at: dt.datetime
+
+
+class ActiveRiskRead(BaseModel):
+    """One row of the Active Risk Register.
+
+    A Project Risk joined to its catalog Risk and its Project. Only risks on
+    Active projects whose status is not Resolved/Closed/Dismissed appear.
+    """
+
+    id: int
+    project_id: int
+    risk_id: int
+    name: str | None
+    description: str
+    category: str | None
+    subcategory: str | None
+    risk_source: str | None
+    likelihood: str
+    impact: str
+    risk_rating: str
+    response_strategy: str | None
+    response_plan: str | None
+    owner_user_id: int | None
+    status: str
+    source: str | None
+    identified_during: str | None
+    risk_start_date: dt.date | None
+    risk_end_date: dt.date | None
+    sla_deadline: dt.datetime | None
+    sla_acknowledged: bool
+    project_code: str
+    project_name: str
+    department_name: str
+    project_type_name: str
+
+
+class RiskCatalogCreate(BaseModel):
+    name: str | None = Field(default=None, max_length=200)
+    description: str = Field(min_length=1)
+    category: str | None = None
+    subcategory: str | None = None
+    risk_source: str | None = None
+
+
+class RiskCatalogUpdate(BaseModel):
+    """Partial update of a catalog risk (rename or re-categorize).
+
+    Omitted fields are left unchanged; an explicit ``null`` clears a field.
+    """
+
+    name: str | None = None
+    description: str | None = None
+    category: str | None = None
+    subcategory: str | None = None
+    risk_source: str | None = None
+
+
+class RiskCatalogMerge(BaseModel):
+    """Merge ``absorbed_id`` into ``survivor_id``, re-pointing Project Risks."""
+
+    survivor_id: int
+    absorbed_id: int
 
 
 class RiskUpdate(BaseModel):
