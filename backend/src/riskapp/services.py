@@ -257,6 +257,11 @@ def transition_risk(
         new_value=target_status.value,
         actor_user_id=actor_user_id,
     )
+    # Reaching Event materializes the risk: create its single Issue immediately
+    # (idempotent) whatever the caller — manual status change or the scheduler
+    # end-date monitor — instead of waiting for the next backfill sweep.
+    if target_status == RiskStatus.EVENT:
+        ensure_issue_for_risk(db, risk, actor_user_id=actor_user_id)
     db.commit()
     db.refresh(risk)
     return risk
@@ -624,6 +629,11 @@ def update_risk(
             new_value=target.value,
             actor_user_id=actor_user_id,
         )
+
+    # A manual status change to Event materializes the risk immediately; later
+    # edits of an already-Event risk backfill the same invariant. Idempotent.
+    if risk.status == RiskStatus.EVENT.value:
+        ensure_issue_for_risk(db, risk, actor_user_id=actor_user_id)
 
     db.commit()
     db.refresh(risk)

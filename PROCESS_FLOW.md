@@ -285,9 +285,12 @@ flowchart TD
 > one **Issue** populated from the originating risk (idempotent per risk).
 > Acknowledgement satisfies the SLA *acknowledgement* requirement only — an
 > acknowledged but unresolved risk still materializes once its Risk End Date
-> passes. `Resolved` / `Closed` risks never materialize, the original risk is
-> always retained for audit, and a materialized risk is never automatically
-> closed (the PMO Lead keeps sole closure authority).
+> passes. A **manual** status change to `Event` by the owner/PM materializes the
+> risk identically and immediately (same Issue creation + notification), so the
+> outcome does not depend on the next hourly sweep. `Resolved` / `Closed` risks
+> never materialize, the original risk is always retained for audit, and a
+> materialized risk is never automatically closed (the PMO Lead keeps sole
+> closure authority).
 
 ---
 

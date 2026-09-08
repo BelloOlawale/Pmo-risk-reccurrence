@@ -34,6 +34,7 @@ from riskapp.import_api import (
 )
 from riskapp.import_pipeline.excel_parser import parse_excel_bytes
 from riskapp.llm.chat import AzureOpenAIChat, ChatProvider
+from riskapp.notifications import EVENT_MATERIALIZED, NotificationService
 from riskapp.services import (
     accept_risk,
     acknowledge_risk,
@@ -427,12 +428,32 @@ def patch_risk(
             status_code=403,
             detail="You are not authorized to close risks. Only a PMO Lead can close a risk.",
         )
+    was_event = risk.status == RiskStatus.EVENT.value
     try:
         updated = update_risk(db, risk, payload, actor_user_id=payload.actor_user_id)
     except InvalidTransitionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # A manual transition to Event materializes the risk the same way the hourly
+    # job does: update_risk has already created the single Issue, so mirror the
+    # materialization notification to the owner, PM, and PMO Lead.
+    if not was_event and updated.status == RiskStatus.EVENT.value:
+        issue = updated.issue
+        assert issue is not None  # update_risk created it for the new Event risk
+        NotificationService().notify(
+            db,
+            event=EVENT_MATERIALIZED,
+            title=f"Risk materialized: {updated.risk_code}",
+            body=(
+                f"Risk {updated.risk_code} was marked as an Event (materialized) and "
+                f"Issue {issue.issue_code} has been created from the materialized risk."
+            ),
+            risk=updated,
+        )
+        db.commit()
+        db.refresh(updated)
     return schemas.RiskRead.model_validate(updated)
 
 

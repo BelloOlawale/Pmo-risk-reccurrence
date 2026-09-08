@@ -131,7 +131,7 @@ Suggested ──► Open ──► In Progress ──► Escalated ──► Eve
 | Open | Accepted and live; owner + SLA assigned; awaiting first action |
 | In Progress | Owner acknowledged / working |
 | Escalated | SLA breached (no activity before deadline) |
-| Event | Risk materialised (displays as "Materialized"); set **automatically** when the Risk End Date passes with the risk still unresolved |
+| Event | Risk materialised (displays as "Materialized"); set **automatically** when the Risk End Date passes with the risk still unresolved, or **deliberately** when the owner/PM changes the status to Event |
 | Resolved | Issue resolved; residual acceptable |
 | Closed | Formally closed with root cause / lessons learned; read-only |
 
@@ -147,16 +147,19 @@ These are three distinct concepts:
   requirement is permanently satisfied. The risk stays active.
 - **Resolved** — the owner dealt with the risk before the Risk End Date;
   status `Resolved`. No materialization, no Issue.
-- **Materialized** — the risk was **not** resolved by its Risk End Date;
-  status → `Event` (displays as "Materialized"), one Issue is auto-created.
+- **Materialized** — the risk was **not** resolved by its Risk End Date, or the
+  owner/PM deliberately marked it as having occurred; status → `Event`
+  (displays as "Materialized"), one Issue is auto-created.
 
-Materialization is a **backend** automation (hourly job) — never a frontend
-client-side date check. It fires when:
+Both materialization paths behave identically and are **backend** operations —
+never a frontend client-side date check:
 
-```text
-risk_end_date has fully passed (business timezone)
-AND status is still Open / In Progress / Escalated
-```
+1. **Automatic (end date)** — an hourly job fires when `risk_end_date` has
+   fully passed (business timezone) and the status is still
+   `Open` / `In Progress` / `Escalated`.
+2. **Manual** — a user with risk access transitions the status to `Event`
+   directly; the transition creates the single Issue immediately (no waiting
+   for the hourly sweep).
 
 `Resolved` / `Closed` / `Dismissed` / `Suggested` risks never materialize, the
 original risk is never deleted, and `Event` is **not** `Closed` — only the PMO
@@ -335,5 +338,6 @@ treatment workflow (residual risk scoring, management sign-off).
     the Risk End Date).
 14. Materialization = `risk_end_date` passed (business timezone) + risk
     unresolved → status `Event` ("Materialized") + exactly one auto-created
-    Issue; backend-only and idempotent; resolved/closed risks never materialize;
+    Issue; a manual status change to `Event` materializes identically;
+    backend-only and idempotent; resolved/closed risks never materialize;
     the PMO Lead keeps sole closure authority.

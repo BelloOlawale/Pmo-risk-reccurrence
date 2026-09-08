@@ -162,10 +162,14 @@ department ──< project_type ──< project ──< risk ──< risk_audit_
 representation of a *materialized* risk and displays as "Materialized". The
 hourly end-date monitor (see §9) transitions overdue **unresolved** risks
 (`Open` / `In Progress` / `Escalated` whose `risk_end_date < today` in the
-business timezone) to `Event` and creates exactly one `Issue` from each.
-`Resolved` / `Closed` / `Dismissed` / `Suggested` risks never materialize, a
-materialized risk is never automatically set to `Closed` (PMO Lead closure
-authority is unchanged), and the original risk is always retained for audit.
+business timezone) to `Event` and creates exactly one `Issue` from each. A
+**manual** status change to `Event` (PATCH `/api/risks/{id}`) materializes
+identically and immediately: the transition helpers in `services.py` create
+the Issue in the same transaction, so the result never depends on the next
+scheduler sweep. `Resolved` / `Closed` / `Dismissed` / `Suggested` risks never
+materialize, a materialized risk is never automatically set to `Closed` (PMO
+Lead closure authority is unchanged), and the original risk is always retained
+for audit.
 
 ---
 

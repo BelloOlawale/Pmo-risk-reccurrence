@@ -21,7 +21,7 @@ from riskapp.scheduler import (
     find_overdue_risks,
     run_end_date_monitor,
 )
-from riskapp.services import ensure_issue_for_risk
+from riskapp.services import ensure_issue_for_risk, transition_risk
 
 TODAY = dt.date(2026, 8, 24)
 PAST = dt.date(2026, 8, 20)
@@ -375,3 +375,31 @@ def test_no_issues_are_ever_created_for_resolved_risks(db_session: Session) -> N
     _risk(db_session, code="RSK-CLOSED", status="Closed", end_date=PAST)
     count = db_session.scalar(select(func.count()).select_from(models.Issue)) or 0
     assert count == 0
+
+
+class TestTransitionRiskMaterializes:
+    """Any programmatic transition to Event creates the single Issue at once."""
+
+    def test_transition_to_event_creates_issue(self, db_session: Session) -> None:
+        risk = _risk(db_session, code="RSK-TRANS")
+        db_session.refresh(risk)
+
+        transition_risk(db_session, risk, RiskStatus.EVENT.value)
+
+        db_session.refresh(risk)
+        assert risk.status == RiskStatus.EVENT.value
+        issues = _issues(db_session)
+        assert len(issues) == 1
+        assert issues[0].source_risk_id == risk.id
+        assert issues[0].description == risk.description
+
+    def test_transition_to_non_event_statuses_do_not_create_issue(
+        self, db_session: Session
+    ) -> None:
+        risk = _risk(db_session, code="RSK-NOTMAT")
+        db_session.refresh(risk)
+
+        transition_risk(db_session, risk, RiskStatus.IN_PROGRESS.value)
+        transition_risk(db_session, risk, RiskStatus.RESOLVED.value)
+
+        assert _issues(db_session) == []

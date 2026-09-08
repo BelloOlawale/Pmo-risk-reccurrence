@@ -30,6 +30,10 @@ reused — nothing is duplicated.
    - a backfill sweep guarantees every `Event` risk has an Issue, so manual
      Event transitions are also covered and repeated runs never duplicate;
    - `Resolved` / `Closed` / `Dismissed` / `Suggested` risks are excluded.
+   - the same transition helpers (`services.transition_risk` / `update_risk`)
+     create the single Issue **immediately** whenever a risk becomes `Event`, so
+     a **manual** status change to Event materializes the risk at once — it
+     never waits for the next hourly sweep (the sweep is only a safety net).
 3. **Notification + audit** — materialization notifies owner + PM + PMO Lead
    (email + in-app, `EVENT_MATERIALIZED`); the transition and Issue creation are
    recorded on the append-only `risk_audit_log`.
@@ -52,6 +56,8 @@ reused — nothing is duplicated.
       Materialized + Issue automatically created
 - [x] Resolved / Closed risks are never materialized after their Risk End Date
 - [x] Exactly one Issue per materialized risk — automation runs twice, no duplicate
+- [x] A manual status change to `Event` materializes identically and immediately
+      (Issue created in the same transaction; notification mirrors the automatic path)
 - [x] Issue is linked to the originating risk (`source_risk_id`) and to the
       correct Risk Register/project (`project_id`)
 - [x] Issue is fully populated from the originating risk (no blanked fields)
@@ -70,5 +76,6 @@ reused — nothing is duplicated.
   idempotency, field inheritance, audit trail, notifications, all five
   lifecycle scenarios.
 - `backend/tests/test_issues_api.py` — Issues endpoints, per-register scoping,
-  row-level access (PM / PMO Lead / owner), risk→issue link, effective status.
+  row-level access (PM / PMO Lead / owner), risk→issue link, effective status,
+  manual Event transition materialization (immediate Issue + notification).
 - `backend/tests/test_notifications.py` — materialized recipient matrix.

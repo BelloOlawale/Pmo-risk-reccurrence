@@ -273,3 +273,139 @@ class TestEffectiveIssueStatus:
         assert resp.status_code == 200
         assert resp.json()["status"] == "Closed"
         assert resp.json()["source_risk_status"] == "Closed"
+
+
+class TestManualEventMaterialization:
+    """A manual status change to Event materializes the risk like the job does."""
+
+    def _issue_for(self, db_session: Session, risk_id: int) -> models.Issue | None:
+        return db_session.scalar(
+            select(models.Issue).where(models.Issue.source_risk_id == risk_id)
+        )
+
+    def test_patch_to_event_creates_issue_immediately(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        project = _create_project(client, user_id=7, name="Manual event register")
+        risk = _open_risk(client, project, user_id=7)
+
+        resp = client.patch(
+            f"/api/risks/{risk['id']}",
+            json={"status": "Event", "actor_user_id": 7},
+            headers=_headers(7, "Project Manager"),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "Event"
+
+        issue = self._issue_for(db_session, risk["id"])
+        assert issue is not None
+        assert issue.issue_code == "ISS-001"
+        assert issue.source_risk_id == risk["id"]
+        assert issue.project_id == project["id"]
+        # Fully populated from the originating risk (no blanking).
+        assert issue.description == risk["description"]
+        assert issue.category == risk["category"]
+        assert issue.risk_rating == risk["risk_rating"]
+        assert issue.status == "Open"
+
+        # Original risk is retained, not closed.
+        risk_row = db_session.get(models.Risk, risk["id"])
+        assert risk_row is not None
+        assert risk_row.status == "Event"
+
+    def test_repeat_edits_of_event_risk_do_not_duplicate_issue(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        project = _create_project(client, user_id=7, name="No dup register")
+        risk = _open_risk(client, project, user_id=7)
+
+        assert (
+            client.patch(
+                f"/api/risks/{risk['id']}",
+                json={"status": "Event", "actor_user_id": 7},
+                headers=_headers(7, "Project Manager"),
+            ).status_code
+            == 200
+        )
+        # A later ordinary edit of the Event risk must not create a second Issue.
+        assert (
+            client.patch(
+                f"/api/risks/{risk['id']}",
+                json={"description": "Updated while materialized", "actor_user_id": 7},
+                headers=_headers(7, "Project Manager"),
+            ).status_code
+            == 200
+        )
+
+        issues = list(
+            db_session.scalars(
+                select(models.Issue).where(models.Issue.source_risk_id == risk["id"])
+            ).all()
+        )
+        assert len(issues) == 1
+
+    def test_manual_event_is_audited_and_notified(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        project = _create_project(client, user_id=7, name="Audit register")
+        risk = _open_risk(client, project, user_id=7)
+
+        # Dev-mode auth does not create user rows, so give the risk real owner/PM
+        # rows (the same setup the scheduler notification tests use).
+        owner = models.User(upn="owner@example.com", display_name="Owner")
+        pm = models.User(upn="pm@example.com", display_name="PM")
+        db_session.add_all([owner, pm])
+        db_session.flush()
+        risk_row = db_session.get(models.Risk, risk["id"])
+        project_row = db_session.get(models.Project, project["id"])
+        assert risk_row is not None and project_row is not None
+        risk_row.owner_user_id = owner.id
+        project_row.pm_user_id = pm.id
+        db_session.commit()
+
+        assert (
+            client.patch(
+                f"/api/risks/{risk['id']}",
+                json={"status": "Event", "actor_user_id": pm.id},
+                headers=_headers(pm.id, "Project Manager"),
+            ).status_code
+            == 200
+        )
+
+        # Audit trail: Open -> Event plus issue_created.
+        actions = list(
+            db_session.scalars(
+                select(models.RiskAuditLog.action).where(
+                    models.RiskAuditLog.risk_id == risk["id"]
+                )
+            ).all()
+        )
+        assert "status_change" in actions
+        assert "issue_created" in actions
+
+        # In-app notification mirrors the scheduler materialization event.
+        notices = list(
+            db_session.scalars(
+                select(models.Notification).where(
+                    models.Notification.type == "materialized",
+                    models.Notification.risk_id == risk["id"],
+                )
+            ).all()
+        )
+        assert {n.recipient_user_id for n in notices} == {owner.id, pm.id}
+
+    def test_patch_to_event_is_not_an_issue_for_non_materializing_targets(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        project = _create_project(client, user_id=7, name="Resolve only register")
+        risk = _open_risk(client, project, user_id=7)
+
+        # Resolving does not create an Issue.
+        resp = client.patch(
+            f"/api/risks/{risk['id']}",
+            json={"status": "Resolved", "actor_user_id": 7},
+            headers=_headers(7, "Project Manager"),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "Resolved"
+        assert self._issue_for(db_session, risk["id"]) is None
