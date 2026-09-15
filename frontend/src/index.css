@@ -1031,6 +1031,47 @@ input:disabled {
   margin-bottom: 16px;
 }
 
+.info-banner {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+/* AI risk-landscape overview shown above the suggested risks table. */
+.suggestion-overview {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
+.suggestion-overview-text {
+  margin: 0;
+  color: var(--text);
+}
+
+.suggestion-recommendations {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--text);
+}
+
+.suggestion-recommendations li {
+  margin-bottom: 4px;
+}
+
+.suggested-analysis {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: normal;
+}
+
 .tone-danger {
   color: var(--danger);
 }

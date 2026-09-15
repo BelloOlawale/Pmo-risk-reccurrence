@@ -145,6 +145,26 @@ export interface SuggestedRisk {
   category: string | null;
 }
 
+/** Citation audit summary returned by `POST /api/projects/{id}/suggest`. */
+export interface SuggestionEvaluation {
+  groundedness: number;
+  verified_citations: { risk_id: string; source_file: string }[];
+  unverified_citations: { risk_id: string; source_file: string }[];
+  /** Set when the chat deployment failed; suggestions are retrieval-only. */
+  llm_error: string | null;
+  /** Set when embedding/semantic retrieval failed; keyword matches still apply. */
+  semantic_error: string | null;
+}
+
+/** Full LLM-backed suggestion payload from `POST /api/projects/{id}/suggest`. */
+export interface SuggestionResult {
+  project_id: number;
+  overview: string;
+  recommendations: string[];
+  suggested_risks: SuggestedRisk[];
+  evaluation: SuggestionEvaluation;
+}
+
 export interface ProjectCreatePayload {
   name: string;
   department: string;
