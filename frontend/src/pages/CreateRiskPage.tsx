@@ -201,10 +201,10 @@ function CreateRiskForm({ onCreate }: { onCreate: (project: Project) => void }) 
 
       {error ? <div className="error-banner">{error}</div> : null}
 
-      <div className="card" style={{ maxWidth: 720 }}>
+      <div className="card create-register-card">
         <div className="card-body">
           <form onSubmit={handleSubmit} noValidate>
-            <div className="form-grid">
+            <div className="form-grid create-risk-grid">
               <div className="form-section-title">Project information</div>
               <div className="field" style={{ gridColumn: '1 / -1' }}>
                 <label>Project / register name *</label>
@@ -283,7 +283,7 @@ function CreateRiskForm({ onCreate }: { onCreate: (project: Project) => void }) 
                 />
               </div>
             </div>
-            <div className="btn-group">
+            <div className="btn-group create-register-actions">
               <button className="btn btn-primary" type="submit" disabled={saving}>
                 {saving ? 'Creating…' : 'Create Risk Register'}
               </button>

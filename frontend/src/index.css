@@ -1583,6 +1583,36 @@ input:disabled {
 
 /* ---------- Create Risk workflow ---------- */
 
+/* Wider Create Risk Register form.
+   The card previously capped itself at 720px, leaving a large empty area to
+   the right on desktop. It now fills the content column up to a comfortable
+   cap and lays related fields out in two balanced columns instead of a narrow
+   single stack. */
+.create-register-card {
+  max-width: 1360px;
+  width: 100%;
+}
+
+.create-register-actions {
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.create-risk-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 28px;
+  row-gap: 2px;
+}
+
+/* Single column on tablets and smaller windows: two-column inputs collapse
+   and every field (including the full-width ones) stacks cleanly. */
+@media (max-width: 900px) {
+  .create-risk-grid {
+    grid-template-columns: minmax(0, 1fr);
+    column-gap: 0;
+  }
+}
+
 .combobox {
   position: relative;
 }
