@@ -140,3 +140,106 @@ def test_accept_suggestion_returns_201_when_risk_codes_have_gaps(
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["risk_code"] == "RSK-004"
+
+    # A second submission of the same suggestion is idempotent: it returns the
+    # already-created risk and never creates a duplicate register entry.
+    second = client.post(
+        f"/api/projects/{target.id}/suggestions/accept",
+        json={"risk_id": "RSK-001"},
+    )
+    assert second.status_code in (200, 201), second.text
+    assert second.json()["id"] == resp.json()["id"]
+
+    risks = client.get(f"/api/projects/{target.id}/risks").json()
+    assert len(risks) == 1
+
+
+def test_double_submit_accept_does_not_duplicate(client: TestClient, db_session: Session) -> None:
+    """Regression: two sequential accepts of one suggestion = one register risk.
+
+    The old flow committed the risk before recording the processed marker, so
+    the second acceptance persisted a duplicate risk and then failed with a 500
+    on the marker's unique constraint.
+    """
+    dept = models.Department(name="SAP")
+    ptype = models.ProjectType(name="ERP")
+    db_session.add_all([dept, ptype])
+    db_session.flush()
+
+    def make(code: str) -> models.Project:
+        p = models.Project(name=f"Project {code}", project_code=code, status="Active")
+        p.department = dept
+        p.project_type = ptype
+        db_session.add(p)
+        db_session.flush()
+        return p
+
+    historical = make("PRJ-H")
+    target = make("PRJ-T")
+    db_session.add(
+        models.Risk(
+            project_id=historical.id,
+            risk_code="RSK-1",
+            description="Data migration delay",
+            likelihood="Medium",
+            impact="High",
+            risk_rating="High",
+            source="Historical",
+            status="Closed",
+            source_file_name="a.xlsx",
+            source_risk_id="R1",
+        )
+    )
+    db_session.commit()
+
+    path = f"/api/projects/{target.id}/suggestions/accept"
+    first = client.post(path, json={"risk_id": "RSK-1"})
+    second = client.post(path, json={"risk_id": "RSK-1"})
+    assert first.status_code == 201, first.text
+    assert second.status_code in (200, 201), second.text
+    assert second.json()["id"] == first.json()["id"]
+
+    risks = client.get(f"/api/projects/{target.id}/risks").json()
+    assert len(risks) == 1
+    assert risks[0]["risk_code"] == first.json()["risk_code"]
+
+
+def test_accept_suggestion_persists_llm_analysis(
+    client: TestClient, db_session: Session
+) -> None:
+    """The analysis sent when accepting is stored and returned on the risk."""
+    dept = models.Department(name="Digital Advisory")
+    ptype = models.ProjectType(name="Cloud Migration")
+    db_session.add_all([dept, ptype])
+    db_session.flush()
+
+    historical = models.Project(name="Old", project_code="PRJ-ANA-H", status="Active")
+    historical.department = dept
+    historical.project_type = ptype
+    target = models.Project(name="New", project_code="PRJ-ANA-T", status="Active")
+    target.department = dept
+    target.project_type = ptype
+    db_session.add_all([historical, target])
+    db_session.flush()
+    db_session.add(
+        models.Risk(
+            project_id=historical.id,
+            risk_code="RSK-ANA-1",
+            description="Data loss during cutover",
+            likelihood="Medium",
+            impact="High",
+            risk_rating="High",
+            source="Historical",
+            status="Closed",
+            source_file_name="a.xlsx",
+            source_risk_id="R1",
+        )
+    )
+    db_session.commit()
+
+    resp = client.post(
+        f"/api/projects/{target.id}/suggestions/accept",
+        json={"risk_id": "RSK-ANA-1", "analysis": "High cutover risk."},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["llm_analysis"] == "High cutover risk."

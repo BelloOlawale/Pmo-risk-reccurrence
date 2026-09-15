@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from riskapp import models
@@ -19,8 +20,9 @@ def _make_projects(
     *,
     department: str,
     project_type: str,
-) -> tuple[models.Project, models.Project]:
-    """Create a historical project and a target project sharing dept + type."""
+    count: int = 2,
+) -> tuple[models.Project, ...]:
+    """Create a historical project and one or more target projects sharing dept + type."""
     dept = models.Department(name=department)
     db.add(dept)
     db.flush()
@@ -36,7 +38,7 @@ def _make_projects(
         db.flush()
         return p
 
-    return project("PRJ-H"), project("PRJ-T")
+    return tuple(project(f"PRJ-{'H' if i == 0 else 'T'}{i}") for i in range(count))
 
 
 def _historical_risk(
@@ -127,6 +129,106 @@ class TestAcceptSuggestion:
         _, target = _make_projects(db_session, department="SAP", project_type="ERP")
         with pytest.raises(ValueError):
             accept_suggestion(db_session, target, "RSK-NOPE")
+
+    def test_accept_persists_llm_analysis(self, db_session: Session) -> None:
+        """The LLM analysis shown on a suggestion is stored on the accepted risk."""
+        historical, target = _make_projects(db_session, department="SAP", project_type="ERP")
+        _historical_risk(
+            db_session, code="RSK-H1", project=historical, description="Data migration delay"
+        )
+
+        accepted = accept_suggestion(
+            db_session,
+            target,
+            "RSK-H1",
+            analysis="High cutover risk for the migration window.",
+        )
+
+        assert accepted.llm_analysis == "High cutover risk for the migration window."
+        # The analysis survives the accept transition (risk is now Open).
+        db_session.refresh(accepted)
+        assert accepted.llm_analysis == "High cutover risk for the migration window."
+
+    def test_reaccept_same_suggestion_is_idempotent(self, db_session: Session) -> None:
+        """Accepting the same suggestion twice must not create a duplicate risk.
+
+        Regression: the risk row used to be committed before the processed
+        marker, so a second acceptance persisted a second risk and then failed
+        with an IntegrityError (HTTP 500) on the marker's unique constraint.
+        """
+        historical, target = _make_projects(db_session, department="SAP", project_type="ERP")
+        _historical_risk(
+            db_session,
+            code="RSK-H1",
+            project=historical,
+            description="Data migration delay",
+            source_file="a.xlsx",
+        )
+        _historical_risk(db_session, project=historical, code="RSK-H2", description="X")
+
+        first = accept_suggestion(db_session, target, "RSK-H1")
+        second = accept_suggestion(db_session, target, "RSK-H1")
+
+        assert second.id == first.id
+        risks = db_session.scalars(
+            select(models.Risk).where(models.Risk.project_id == target.id)
+        ).all()
+        assert len(risks) == 1
+        assert risks[0].description == "Data migration delay"
+
+    def test_accept_after_dismiss_raises(self, db_session: Session) -> None:
+        """A suggestion dismissed for a register cannot be resurrected."""
+        historical, target = _make_projects(db_session, department="SAP", project_type="ERP")
+        _historical_risk(
+            db_session, code="RSK-H1", project=historical, description="Data migration delay"
+        )
+
+        dismiss_suggestion(db_session, target, "RSK-H1", reason="not applicable")
+
+        with pytest.raises(ValueError, match="already been processed"):
+            accept_suggestion(db_session, target, "RSK-H1")
+        risks = db_session.scalars(
+            select(models.Risk).where(models.Risk.project_id == target.id)
+        ).all()
+        assert risks == []
+
+    def test_accepting_then_relisting_excludes_register_own_risk(
+        self, db_session: Session
+    ) -> None:
+        """The just-accepted risk must not be suggested back to its own register.
+
+        Regression: accepted risks keep ``source="Historical"`` and used to be
+        retrieved as candidates for the same department/type, so the accepted
+        suggestion reappeared under a fresh risk code and could be accepted
+        again, duplicating it.
+        """
+        historical, target = _make_projects(db_session, department="SAP", project_type="ERP")
+        _historical_risk(
+            db_session, code="RSK-H1", project=historical, description="Data migration delay"
+        )
+
+        accept_suggestion(db_session, target, "RSK-H1")
+
+        remaining = [s.risk_id for s in list_suggestions(db_session, target)]
+        assert remaining == []
+
+    def test_suggestion_still_reappears_for_other_registers(self, db_session: Session) -> None:
+        """Accepted risks stay available as recurrence suggestions for other registers."""
+        historical, target_a, target_b = _make_projects(
+            db_session, department="SAP", project_type="ERP", count=3
+        )
+        _historical_risk(
+            db_session, code="RSK-H1", project=historical, description="Data migration delay"
+        )
+
+        accept_suggestion(db_session, target_a, "RSK-H1")
+
+        # The recurrence candidate (the accepted copy and its historical source
+        # share provenance, so merge/dedup collapses them to one suggestion) is
+        # still proposed for a second, unrelated register.
+        remaining = list_suggestions(db_session, target_b)
+        assert len(remaining) == 1
+        assert remaining[0].description == "Data migration delay"
 
     def test_accept_does_not_reuse_risk_code_when_sequence_has_gaps(
         self, db_session: Session

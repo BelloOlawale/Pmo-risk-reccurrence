@@ -266,6 +266,9 @@ class SuggestionAccept(BaseModel):
     risk_id: str = Field(min_length=1)
     likelihood: Literal["Low", "Medium", "High"] | None = None
     impact: Literal["Low", "Medium", "High"] | None = None
+    # Optional LLM analysis shown alongside the suggestion, persisted on the
+    # created risk so the detail page can display why it was suggested.
+    analysis: str | None = None
     actor_user_id: int | None = None
 
 
@@ -286,6 +289,13 @@ class SuggestionEvaluation(BaseModel):
     groundedness: float
     verified_citations: list[CitationRead]
     unverified_citations: list[CitationRead]
+    # Present only when the chat deployment failed; the suggestions are then a
+    # retrieval-only fallback and the UI should say so rather than implying the
+    # LLM produced no analysis.
+    llm_error: str | None = None
+    # Present only when semantic (embedding) retrieval failed; the candidate set
+    # then falls back to exact + keyword matches.
+    semantic_error: str | None = None
 
 
 class SuggestionRead(BaseModel):

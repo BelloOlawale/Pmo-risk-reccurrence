@@ -138,10 +138,36 @@ class TestRetrieveCandidates:
         project = _seed(db_session)
         candidates = retrieve_candidates(
             db_session, project, FakeEmbeddings([1.0, 0.0, 0.0])
-        )
+        ).candidates
         # RSK-1, RSK-2 exact; RSK-3 keyword ("aws"/"migration"); RSK-3 semantic deduped.
         assert [c.risk_id for c in candidates] == ["RSK-1", "RSK-2", "RSK-3"]
         assert [c.match_type.value for c in candidates] == ["exact", "exact", "keyword"]
+
+    def test_without_embedding_provider_returns_deterministic_matches(
+        self, db_session: Session
+    ) -> None:
+        project = _seed(db_session)
+        result = retrieve_candidates(db_session, project)
+        assert [c.risk_id for c in result.candidates] == ["RSK-1", "RSK-2", "RSK-3"]
+        assert result.semantic_error is None
+
+    def test_semantic_failure_degrades_to_exact_and_keyword(
+        self, db_session: Session
+    ) -> None:
+        project = _seed(db_session)
+
+        class BrokenEmbeddings:
+            def embed_text(self, text: str) -> list[float]:
+                raise RuntimeError("embeddings offline")
+
+            def embed_texts(self, texts: list[str]) -> list[list[float]]:
+                raise RuntimeError("embeddings offline")
+
+        result = retrieve_candidates(db_session, project, BrokenEmbeddings())
+        # Retrieval still succeeds on the deterministic matches and reports the
+        # degradation instead of raising.
+        assert [c.risk_id for c in result.candidates] == ["RSK-1", "RSK-2", "RSK-3"]
+        assert "RuntimeError: embeddings offline" in (result.semantic_error or "")
 
     def test_dismissed_risks_are_filtered(self, db_session: Session) -> None:
         project = _seed(db_session)
@@ -154,7 +180,7 @@ class TestRetrieveCandidates:
 
         candidates = retrieve_candidates(
             db_session, project, FakeEmbeddings([1.0, 0.0, 0.0])
-        )
+        ).candidates
         assert [c.risk_id for c in candidates] == ["RSK-2", "RSK-3"]
 
 
@@ -184,6 +210,24 @@ class TestGenerateSuggestions:
         assert result.suggested_risks[0]["citation"] == "[RSK-1, hist-a.xlsx]"
         assert result.suggested_risks[0]["analysis"] == "High cutover risk."
         assert result.evaluation["groundedness"] == 1.0
+        # Rating/category are carried through from the historical source so the
+        # review table still has them when driven by the LLM endpoint.
+        assert result.suggested_risks[0]["risk_rating"] == "Medium"
+
+    def test_llm_failure_is_surfaced_in_evaluation(self, db_session: Session) -> None:
+        project = _seed(db_session)
+
+        class BrokenChat:
+            def complete(self, messages, **kwargs) -> str:
+                raise RuntimeError("deployment not found")
+
+        result = generate_suggestions(
+            db_session, project, BrokenChat(), FakeEmbeddings([1.0, 0.0, 0.0])
+        )
+        # The fallback still returns retrieval results, but the failure is no
+        # longer silent: it is reported in the evaluation payload.
+        assert result.evaluation["llm_error"] is not None
+        assert "RuntimeError: deployment not found" in result.evaluation["llm_error"]
 
     def test_unverified_citation_lowers_groundedness(self, db_session: Session) -> None:
         project = _seed(db_session)
@@ -218,3 +262,4 @@ class TestGenerateSuggestions:
         assert "3 historical risks" in result.overview
         assert result.recommendations == []
         assert result.evaluation["groundedness"] == 1.0  # no citations to verify
+        assert "RuntimeError: boom" in result.evaluation["llm_error"]

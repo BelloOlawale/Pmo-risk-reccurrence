@@ -548,6 +548,7 @@ def de_escalate(
 )
 def suggest_risks(
     project_id: int,
+    principal: PrincipalDep,
     db: DbDep,
     chat: Annotated[ChatProvider, Depends(get_chat_provider)],
     embeddings: Annotated[EmbeddingProvider, Depends(get_embedding_provider)],
@@ -555,6 +556,8 @@ def suggest_risks(
     project = get_project(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
+    if not can_access_project(principal, project):
+        raise HTTPException(status_code=403, detail="Forbidden")
     result = generate_suggestions(db, project, chat, embeddings)
     return schemas.SuggestionRead.model_validate(result, from_attributes=True)
 
@@ -597,6 +600,7 @@ def accept_project_suggestion(
             payload.risk_id,
             likelihood=payload.likelihood,
             impact=payload.impact,
+            analysis=payload.analysis,
             actor_user_id=payload.actor_user_id,
         )
     except ValueError as exc:
