@@ -11,14 +11,18 @@ from sqlalchemy.orm import Session, selectinload
 
 from riskapp import models, schemas
 from riskapp.auth import (
+    LOCAL_LOGIN_TTL_HOURS,
     Principal,
     PrincipalDep,
     Role,
+    authenticate_local,
     can_access_issue,
     can_access_project,
     can_access_risk,
     can_close_project,
     can_close_risk,
+    create_local_token,
+    get_principal,
     require_roles,
 )
 from riskapp.blob import AzureBlobStorage, BlobStorageProvider, register_blob_name
@@ -34,7 +38,12 @@ from riskapp.import_api import (
 )
 from riskapp.import_pipeline.excel_parser import parse_excel_bytes
 from riskapp.llm.chat import AzureOpenAIChat, ChatProvider
-from riskapp.notifications import EVENT_MATERIALIZED, NotificationService
+from riskapp.notifications import (
+    EVENT_MATERIALIZED,
+    EVENT_OWNER_ASSIGNMENT,
+    build_notification_service,
+)
+from riskapp.security import hash_password, verify_password
 from riskapp.services import (
     accept_risk,
     acknowledge_risk,
@@ -48,6 +57,7 @@ from riskapp.services import (
     get_or_create_user,
     get_project,
     get_risk,
+    list_users,
     update_risk,
 )
 from riskapp.suggestions import (
@@ -92,9 +102,160 @@ AdminDep = Annotated[
 ]
 
 
+def _project_read(db: Session, project: models.Project) -> schemas.ProjectRead:
+    """Serialize a project with its risk count (shared by GET / PATCH)."""
+    risk_count = db.scalar(
+        select(func.count(models.Risk.id)).where(models.Risk.project_id == project.id)
+    ) or 0
+    item = schemas.ProjectRead.model_validate(project)
+    item.risk_count = int(risk_count)
+    return item
+
+
+def _notify_owner_assignment(db: Session, risk: models.Risk) -> None:
+    """Tell a newly-assigned owner (in-app + email) that the risk is theirs."""
+    if risk.owner_user_id is None:
+        return
+    owners = "" if not risk.owner else f" ({risk.owner.display_name})"
+    deadline = (
+        f" The SLA deadline is {risk.sla_deadline:%Y-%m-%d %H:%M} UTC."
+        if risk.sla_deadline
+        else ""
+    )
+    build_notification_service().notify(
+        db,
+        event=EVENT_OWNER_ASSIGNMENT,
+        title=f"Risk assigned: {risk.risk_code}",
+        body=(
+            f"Risk {risk.risk_code}{owners} has been assigned to you.{deadline} "
+            "Open the app to review and acknowledge it."
+        ),
+        risk=risk,
+    )
+    db.commit()
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/auth/test-login/status", response_model=schemas.TestLoginStatus)
+def test_login_status() -> schemas.TestLoginStatus:
+    """Whether the local (non-Microsoft) test login is available. Public."""
+    return schemas.TestLoginStatus(
+        enabled=settings.test_login_enabled,
+        code_required=bool(settings.test_login_code),
+    )
+
+
+@app.post("/api/auth/test-login", response_model=schemas.TestLoginToken)
+def test_login(payload: schemas.TestLoginRequest, db: DbDep) -> schemas.TestLoginToken:
+    """Issue a short-lived token for a role, without Microsoft sign-in.
+
+    Testing aid only: disabled unless ``RISKAPP_TEST_LOGIN_ENABLED`` is set, and
+    gated by ``RISKAPP_TEST_LOGIN_CODE`` when configured.
+    """
+    if not settings.test_login_enabled:
+        raise HTTPException(status_code=404, detail="Test login is disabled")
+    if settings.test_login_code and payload.code != settings.test_login_code:
+        raise HTTPException(status_code=403, detail="Invalid access code")
+
+    role = Role(payload.role)
+    default_upn = f"test.{role.name.lower()}@test.local"
+    upn = (payload.upn or "").strip() or default_upn
+    display_name = f"Test {role.value}" if upn == default_upn else upn
+    user = get_or_create_user(db, upn, display_name)
+    db.commit()
+
+    token = create_local_token(
+        user_id=user.id, upn=user.upn, display_name=user.display_name, role=role
+    )
+    return schemas.TestLoginToken(
+        access_token=token,
+        expires_in=LOCAL_LOGIN_TTL_HOURS * 3600,
+        role=role.value,
+        upn=user.upn,
+        display_name=user.display_name,
+    )
+
+
+@app.get("/api/auth/login-options", response_model=schemas.LoginOptions)
+def login_options() -> schemas.LoginOptions:
+    """Which non-Microsoft sign-in methods this deployment offers. Public."""
+    return schemas.LoginOptions(
+        password_enabled=settings.local_login_enabled,
+        test_login_enabled=settings.test_login_enabled,
+        test_code_required=bool(settings.test_login_code),
+    )
+
+
+@app.post("/api/auth/login", response_model=schemas.TestLoginToken)
+def password_login(
+    payload: schemas.PasswordLoginRequest, db: DbDep
+) -> schemas.TestLoginToken:
+    """Sign in with an app-managed email + password.
+
+    Passwords are independent of Entra (which cannot validate a tenant password
+    from an app). Disabled unless ``RISKAPP_LOCAL_LOGIN_ENABLED`` is set.
+    """
+    if not settings.local_login_enabled:
+        raise HTTPException(status_code=404, detail="Password login is disabled")
+
+    principal = authenticate_local(db, payload.email, payload.password)
+    if principal is None or principal.user_id is None:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    user = db.get(models.User, principal.user_id)
+    if user is None:  # pragma: no cover - authenticated user must exist
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    role = next(iter(principal.roles), Role.PROJECT_MANAGER)
+    token = create_local_token(
+        user_id=user.id, upn=user.upn, display_name=user.display_name, role=role
+    )
+    return schemas.TestLoginToken(
+        access_token=token,
+        expires_in=LOCAL_LOGIN_TTL_HOURS * 3600,
+        role=role.value,
+        upn=user.upn,
+        display_name=user.display_name,
+    )
+
+
+@app.post("/api/auth/change-password")
+def change_password(
+    payload: schemas.ChangePasswordRequest, principal: PrincipalDep, db: DbDep
+) -> dict[str, str]:
+    """Change your own local password (local accounts only)."""
+    if principal.user_id is None:
+        raise HTTPException(status_code=403, detail="No local account for this session")
+    user = db.get(models.User, principal.user_id)
+    if user is None or not user.password_hash:
+        raise HTTPException(status_code=403, detail="This account has no local password")
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    user.password_hash = hash_password(payload.new_password)
+    db.commit()
+    return {"status": "ok"}
+
+
+@app.post("/api/users/{user_id}/credentials", response_model=schemas.UserRead)
+def set_user_credentials(
+    user_id: int, payload: schemas.SetCredentialsRequest, principal: AdminDep, db: DbDep
+) -> schemas.UserRead:
+    """Onboard/reset a user's local password (and optionally their role).
+
+    System Admin / PMO Lead only — this is how local accounts are created.
+    """
+    user = db.get(models.User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.password_hash = hash_password(payload.password)
+    if payload.role is not None:
+        user.role = payload.role
+    db.commit()
+    db.refresh(user)
+    return schemas.UserRead.model_validate(user)
 
 
 @app.get("/api/me")
@@ -105,6 +266,21 @@ def me(principal: PrincipalDep) -> dict[str, object]:
         "upn": principal.upn,
         "roles": sorted(role.value for role in principal.roles),
     }
+
+
+@app.get(
+    "/api/users",
+    response_model=list[schemas.UserRead],
+    dependencies=[Depends(get_principal)],
+)
+def list_directory_users(db: DbDep) -> list[schemas.UserRead]:
+    """Directory of known users for owner / PM pickers.
+
+    Any authenticated caller may read it (it is an internal colleague list);
+    rows are created automatically on first sign-in, so a brand-new user only
+    appears after they have logged in at least once.
+    """
+    return [schemas.UserRead.model_validate(user) for user in list_users(db)]
 
 
 @app.get("/api/risk-meta")
@@ -262,12 +438,34 @@ def read_project(
         raise HTTPException(status_code=404, detail="Project not found")
     if not can_access_project(principal, project):
         raise HTTPException(status_code=403, detail="Forbidden")
-    risk_count = db.scalar(
-        select(func.count(models.Risk.id)).where(models.Risk.project_id == project_id)
-    ) or 0
-    item = schemas.ProjectRead.model_validate(project)
-    item.risk_count = int(risk_count)
-    return item
+    return _project_read(db, project)
+
+
+@app.patch("/api/projects/{project_id}", response_model=schemas.ProjectRead)
+def patch_project(
+    project_id: int, payload: schemas.ProjectUpdate, principal: AdminDep, db: DbDep
+) -> schemas.ProjectRead:
+    """Reassign a project's Project Manager (PMO Lead / System Admin only).
+
+    Each register has its own PM, so this is how different projects get different
+    managers — and how a manager is changed without recreating the project.
+    """
+    project = get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if payload.pm_upn:
+        project.pm_user_id = get_or_create_user(db, payload.pm_upn).id
+    elif "pm_user_id" in payload.model_fields_set:
+        if payload.pm_user_id is not None:
+            user = db.get(models.User, payload.pm_user_id)
+            if user is None:
+                raise HTTPException(status_code=422, detail="Unknown pm_user_id")
+        project.pm_user_id = payload.pm_user_id
+
+    db.commit()
+    db.refresh(project)
+    return _project_read(db, project)
 
 
 @app.post(
@@ -292,6 +490,7 @@ def add_risk(
         project.closed_by_user_id = None
         db.commit()
         db.refresh(project)
+    _notify_owner_assignment(db, risk)
     return schemas.RiskRead.model_validate(risk)
 
 
@@ -429,6 +628,7 @@ def patch_risk(
             detail="You are not authorized to close risks. Only a PMO Lead can close a risk.",
         )
     was_event = risk.status == RiskStatus.EVENT.value
+    owner_before = risk.owner_user_id
     try:
         updated = update_risk(db, risk, payload, actor_user_id=payload.actor_user_id)
     except InvalidTransitionError as exc:
@@ -436,13 +636,17 @@ def patch_risk(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    # Tell the new owner (in-app + email) when the assignment changed.
+    if updated.owner_user_id is not None and updated.owner_user_id != owner_before:
+        _notify_owner_assignment(db, updated)
+
     # A manual transition to Event materializes the risk the same way the hourly
     # job does: update_risk has already created the single Issue, so mirror the
     # materialization notification to the owner, PM, and PMO Lead.
     if not was_event and updated.status == RiskStatus.EVENT.value:
         issue = updated.issue
         assert issue is not None  # update_risk created it for the new Event risk
-        NotificationService().notify(
+        build_notification_service().notify(
             db,
             event=EVENT_MATERIALIZED,
             title=f"Risk materialized: {updated.risk_code}",
@@ -470,10 +674,13 @@ def accept(risk_id: int, db: DbDep) -> schemas.RiskRead:
     risk = get_risk(db, risk_id)
     if risk is None:
         raise HTTPException(status_code=404, detail="Risk not found")
+    owner_before = risk.owner_user_id
     try:
         accepted = accept_risk(db, risk)
     except InvalidTransitionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if accepted.owner_user_id is not None and accepted.owner_user_id != owner_before:
+        _notify_owner_assignment(db, accepted)
     return schemas.RiskRead.model_validate(accepted)
 
 

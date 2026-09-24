@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 
 import { api } from '../api/client';
 import type { Project } from '../api/types';
+import { ownerName, useUsers } from '../api/users';
 import { StatusBadge } from '../components/Badges';
 import { useApi } from '../hooks/useApi';
 import { formatDate } from '../utils/format';
@@ -10,6 +11,7 @@ import { formatDate } from '../utils/format';
 export function ProjectsPage() {
   const { data, error, loading } = useApi(() => api.get<Project[]>('/api/projects'));
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const users = useUsers();
 
   // Risk History shows only closed registers — completed/historical work.
   const projects = useMemo(
@@ -54,6 +56,7 @@ export function ProjectsPage() {
                 <th>Department</th>
                 <th>Type</th>
                 <th>Customer</th>
+                <th>PM</th>
                 <th>Status</th>
                 <th>Risks</th>
                 <th>Closed</th>
@@ -79,6 +82,7 @@ export function ProjectsPage() {
                       <td>{p.department_name}</td>
                       <td>{p.project_type_name}</td>
                       <td>{p.customer ?? '—'}</td>
+                      <td>{ownerName(users, p.pm_user_id)}</td>
                       <td>
                         <StatusBadge status={p.status} />
                       </td>
@@ -87,7 +91,7 @@ export function ProjectsPage() {
                     </tr>
                     {expanded ? (
                       <tr className="expanded-row">
-                        <td colSpan={7}>
+                        <td colSpan={8}>
                           <div className="expanded-panel">
                             <div className="expanded-title">Risks ({p.risk_codes.length})</div>
                             {p.risk_codes.length === 0 ? (

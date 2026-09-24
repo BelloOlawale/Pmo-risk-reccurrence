@@ -26,6 +26,9 @@ dependencies = [
     "azure-communication-email>=1.0.0",
     "azure-core>=1.30",
     "azure-storage-blob>=12.19",
+    # pycparser 3.0's published wheel fails pip's hash check at install time
+    # (upstream packaging issue) — stay on the stable 2.x line.
+    "pycparser<3",
 ]
 
 [project.optional-dependencies]

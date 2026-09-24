@@ -12,6 +12,16 @@ from openai import AzureOpenAI
 
 from riskapp.config import settings
 
+# GPT-5.x and the o-series reasoning models use a different request shape:
+# they accept ``max_completion_tokens`` (not ``max_tokens``) and reject a
+# custom ``temperature``. Older chat models still use the legacy parameters.
+_REASONING_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+
+
+def is_reasoning_model(model: str) -> bool:
+    """Return True for models that require the newer request parameters."""
+    return model.lower().startswith(_REASONING_MODEL_PREFIXES)
+
 
 class ChatProvider(Protocol):
     """Contract for producing a chat completion for a message list."""
@@ -68,12 +78,21 @@ class AzureOpenAIChat:
         temperature: float = 0.0,
         max_tokens: int = 1500,
     ) -> str:
-        """Run a chat completion and return the assistant message text."""
-        response = self._ensure_client().chat.completions.create(
-            model=self._deployment,
-            messages=cast(Any, messages),
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+        """Run a chat completion and return the assistant message text.
+
+        Adapts the request to the deployment: GPT-5.x / o-series models require
+        ``max_completion_tokens`` and do not accept a custom ``temperature``.
+        """
+        request: dict[str, Any] = {
+            "model": self._deployment,
+            "messages": cast(Any, messages),
+        }
+        if is_reasoning_model(self._deployment):
+            request["max_completion_tokens"] = max_tokens
+        else:
+            request["max_tokens"] = max_tokens
+            request["temperature"] = temperature
+
+        response = self._ensure_client().chat.completions.create(**request)
         content = response.choices[0].message.content
         return content or ""

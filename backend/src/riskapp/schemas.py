@@ -37,6 +37,65 @@ class ProjectTypeRead(BaseModel):
     name: str
 
 
+class UserRead(BaseModel):
+    """A directory user, for owner/PM pickers. Users are created on first sign-in."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    upn: str
+    display_name: str
+
+
+class TestLoginStatus(BaseModel):
+    """Whether the non-Microsoft test login is available."""
+
+    enabled: bool
+    code_required: bool
+
+
+class TestLoginRequest(BaseModel):
+    """Sign in as a role without Microsoft (testing only)."""
+
+    role: Literal["System Admin", "PMO Lead", "Project Manager"] = "System Admin"
+    upn: str | None = None
+    code: str | None = None
+
+
+class TestLoginToken(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    role: str
+    upn: str
+    display_name: str
+
+
+class LoginOptions(BaseModel):
+    """Which non-Microsoft sign-in methods the deployment offers."""
+
+    password_enabled: bool
+    test_login_enabled: bool
+    test_code_required: bool
+
+
+class PasswordLoginRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=200)
+    new_password: str = Field(min_length=8, max_length=200)
+
+
+class SetCredentialsRequest(BaseModel):
+    """Admin onboarding: set (or reset) a user's local password and role."""
+
+    password: str = Field(min_length=8, max_length=200)
+    role: Literal["System Admin", "PMO Lead", "Project Manager"] | None = None
+
+
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     department: str = Field(min_length=1, max_length=100)
@@ -61,6 +120,17 @@ class ProjectCreate(BaseModel):
         if not v:
             raise ValueError("Customer is required.")
         return v
+
+
+class ProjectUpdate(BaseModel):
+    """Partial update of a project. Omitted fields are left unchanged.
+
+    Only the Project Manager can be changed today; ``pm_upn`` resolves/creates
+    the user, ``pm_user_id`` selects an existing one (null clears it).
+    """
+
+    pm_user_id: int | None = None
+    pm_upn: str | None = None
 
 
 class ProjectRead(BaseModel):
@@ -158,6 +228,8 @@ class RiskUpdate(BaseModel):
     response_strategy: Literal["Mitigate", "Transfer", "Avoid", "Accept"] | None = None
     response_plan: str | None = None
     owner_user_id: int | None = None
+    # Alternative to owner_user_id: resolve/create the user by UPN. Wins when set.
+    owner_upn: str | None = None
     risk_start_date: dt.date | None = None
     risk_end_date: dt.date | None = None
     sla_deadline: dt.datetime | None = None

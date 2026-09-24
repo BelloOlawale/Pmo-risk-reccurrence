@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 
 import { api } from '../api/client';
 import type { Project, Risk } from '../api/types';
+import { ownerName, useUsers } from '../api/users';
 import { useAuth } from '../auth/AuthContext';
 import { AddRiskModal } from '../components/AddRiskModal';
 import { RiskTable } from '../components/RiskTable';
@@ -12,6 +13,7 @@ import { isActiveStatus } from '../utils/status';
 export function ActiveRiskRegisterPage() {
   const navigate = useNavigate();
   const auth = useAuth();
+  const users = useUsers();
   const { data: projects, reload: reloadProjects } = useApi(() =>
     api.get<Project[]>('/api/projects?status=Active'),
   );
@@ -147,6 +149,8 @@ export function ActiveRiskRegisterPage() {
                         <span>{p.department_name}</span>
                         <span className="register-sep">·</span>
                         <span>{p.project_type_name}</span>
+                        <span className="register-sep">·</span>
+                        <span>PM: {ownerName(users, p.pm_user_id)}</span>
                       </div>
                     </div>
                   </div>

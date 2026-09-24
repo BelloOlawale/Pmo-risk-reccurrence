@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 
-import type { Issue } from '../api/types';
+import type { Issue, User } from '../api/types';
+import { ownerName, useUsers } from '../api/users';
 import { ratingRank, statusLabel } from '../utils/colors';
 import { formatDate, formatDateTime } from '../utils/format';
 import { RatingBadge, StatusBadge } from './Badges';
@@ -44,11 +45,8 @@ function compare(a: Issue, b: Issue, key: SortKey, dir: 'asc' | 'desc'): number 
   return dir === 'asc' ? cmp : -cmp;
 }
 
-function ownerLabel(ownerUserId: number | null): string {
-  return ownerUserId !== null ? `User #${ownerUserId}` : 'Unassigned';
-}
-
 export function IssueTable({ issues, onSelect }: IssueTableProps) {
+  const users = useUsers();
   const [sortKey, setSortKey] = useState<SortKey>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -111,6 +109,7 @@ export function IssueTable({ issues, onSelect }: IssueTableProps) {
               <IssueRow
                 key={issue.id}
                 issue={issue}
+                users={users}
                 isOpen={isOpen}
                 onSelect={onSelect}
                 onToggle={() => toggleExpand(issue.id)}
@@ -133,11 +132,13 @@ export function IssueTable({ issues, onSelect }: IssueTableProps) {
 
 function IssueRow({
   issue,
+  users,
   isOpen,
   onSelect,
   onToggle,
 }: {
   issue: Issue;
+  users: User[];
   isOpen: boolean;
   onSelect: (issue: Issue) => void;
   onToggle: () => void;
@@ -183,7 +184,7 @@ function IssueRow({
         <td>
           <StatusBadge status={issue.status} />
         </td>
-        <td className="col-hide-sm">{ownerLabel(issue.owner_user_id)}</td>
+        <td className="col-hide-sm">{ownerName(users, issue.owner_user_id)}</td>
         <td className="col-hide-md">{formatDateTime(issue.created_at)}</td>
         <td>
           <button

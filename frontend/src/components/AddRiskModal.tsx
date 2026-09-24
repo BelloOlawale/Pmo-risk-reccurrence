@@ -3,9 +3,11 @@ import type { FormEvent } from 'react';
 
 import { api, ApiError } from '../api/client';
 import type { Project, ResponseStrategy, Risk, RiskMeta, RiskSource } from '../api/types';
+import { useUsers } from '../api/users';
 import { useApi } from '../hooks/useApi';
 import { computeRiskEndDate, computeRiskRating, todayISO } from '../utils/format';
 import { PickOrTypeField } from './PickOrTypeField';
+import { UserPicker } from './UserPicker';
 
 interface AddRiskModalProps {
   projects: Project[];
@@ -24,6 +26,7 @@ interface FormState {
   impact: string;
   response_strategy: string;
   response_plan: string;
+  owner_user_id: string;
   risk_start_date: string;
   identified_during: string;
 }
@@ -37,6 +40,7 @@ const EMPTY: FormState = {
   impact: 'Medium',
   response_strategy: '',
   response_plan: '',
+  owner_user_id: '',
   risk_start_date: '',
   identified_during: '',
 };
@@ -49,6 +53,7 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { data: meta } = useApi(() => api.get<RiskMeta>('/api/risk-meta'), []);
+  const users = useUsers();
   const categoryOptions = meta?.categories ?? [];
   const lifecycleOptions = meta?.lifecycle ?? [];
   const today = todayISO();
@@ -88,6 +93,7 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
         impact: form.impact,
         response_strategy: (form.response_strategy || null) as ResponseStrategy | null,
         response_plan: form.response_plan.trim() || null,
+        owner_user_id: form.owner_user_id === '' ? null : Number(form.owner_user_id),
         risk_start_date: form.risk_start_date || null,
         identified_during: form.identified_during.trim() || null,
         source: 'Custom',
@@ -209,6 +215,18 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
               options={lifecycleOptions}
               placeholder="e.g. Execution, Discovery…"
             />
+            <div className="field">
+              <label>Owner</label>
+              <UserPicker
+                users={users}
+                selectedUserId={
+                  form.owner_user_id === '' ? null : Number(form.owner_user_id)
+                }
+                onSelect={(user) =>
+                  set('owner_user_id', user === null ? '' : String(user.id))
+                }
+              />
+            </div>
             <div className="field" style={{ gridColumn: '1 / -1' }}>
               <label>Response plan</label>
               <textarea

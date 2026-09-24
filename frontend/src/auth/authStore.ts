@@ -8,12 +8,19 @@ export interface AuthState {
   devUserId: number | null;
   /** Dev-mode role, sent as the X-User-Role header. */
   devRole: string;
+  /**
+   * True when running against Entra ID. In that mode ONLY a bearer token is
+   * sent — never the dev headers, which the backend ignores anyway and which
+   * would mask "not signed in yet" as a confusing 401.
+   */
+  entra: boolean;
 }
 
 let state: AuthState = {
   accessToken: null,
   devUserId: null,
   devRole: 'System Admin',
+  entra: false,
 };
 
 export function setAuthState(next: Partial<AuthState>): void {
@@ -27,14 +34,14 @@ export function getAuthState(): AuthState {
 /** Headers to attach to every API request based on the current session. */
 export function authHeaders(): Record<string, string> {
   const s = getAuthState();
-  const headers: Record<string, string> = {};
-  if (s.accessToken) {
-    headers.Authorization = `Bearer ${s.accessToken}`;
-  } else {
-    if (s.devUserId !== null) {
-      headers['X-User-Id'] = String(s.devUserId);
-    }
-    headers['X-User-Role'] = s.devRole;
+
+  if (s.entra) {
+    return s.accessToken ? { Authorization: `Bearer ${s.accessToken}` } : {};
+  }
+
+  const headers: Record<string, string> = { 'X-User-Role': s.devRole };
+  if (s.devUserId !== null) {
+    headers['X-User-Id'] = String(s.devUserId);
   }
   return headers;
 }

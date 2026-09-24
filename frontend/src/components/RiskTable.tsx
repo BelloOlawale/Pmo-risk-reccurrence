@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 
-import type { Risk } from '../api/types';
+import type { Risk, User } from '../api/types';
+import { ownerName, useUsers } from '../api/users';
 import { ratingRank, statusRank } from '../utils/colors';
 import { formatDate } from '../utils/format';
 import { RatingBadge, StatusBadge } from './Badges';
@@ -46,11 +47,8 @@ function compare(a: Risk, b: Risk, key: SortKey, dir: 'asc' | 'desc'): number {
   return dir === 'asc' ? cmp : -cmp;
 }
 
-function ownerLabel(ownerUserId: number | null): string {
-  return ownerUserId !== null ? `User #${ownerUserId}` : 'Unassigned';
-}
-
 export function RiskTable({ risks, onSelect, showToolbar = true }: RiskTableProps) {
+  const users = useUsers();
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [ratingFilter, setRatingFilter] = useState('');
@@ -169,6 +167,7 @@ export function RiskTable({ risks, onSelect, showToolbar = true }: RiskTableProp
                 <RiskRow
                   key={risk.id}
                   risk={risk}
+                  users={users}
                   isOpen={isOpen}
                   onSelect={onSelect}
                   onToggle={() => toggleExpand(risk.id)}
@@ -191,11 +190,13 @@ export function RiskTable({ risks, onSelect, showToolbar = true }: RiskTableProp
 
 function RiskRow({
   risk,
+  users,
   isOpen,
   onSelect,
   onToggle,
 }: {
   risk: Risk;
+  users: User[];
   isOpen: boolean;
   onSelect: (risk: Risk) => void;
   onToggle: () => void;
@@ -237,7 +238,7 @@ function RiskRow({
         <td>
           <StatusBadge status={risk.status} />
         </td>
-        <td className="col-hide-sm">{ownerLabel(risk.owner_user_id)}</td>
+        <td className="col-hide-sm">{ownerName(users, risk.owner_user_id)}</td>
         <td className="col-hide-md">{formatDate(risk.risk_start_date)}</td>
         <td className="col-hide-md">{formatDate(risk.risk_end_date)}</td>
         <td>

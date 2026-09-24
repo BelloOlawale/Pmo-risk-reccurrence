@@ -12,7 +12,7 @@ import datetime as dt
 from riskapp.celery_app import celery_app
 from riskapp.config import settings
 from riskapp.db import SessionLocal
-from riskapp.notifications import NotificationService
+from riskapp.notifications import build_notification_service
 from riskapp.scheduler import (
     run_end_date_monitor,
     run_sla_monitor,
@@ -26,15 +26,20 @@ def monitor_sla() -> int:
     """Hourly SLA monitor: warn approaching deadlines, escalate breaches."""
     now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
     with SessionLocal() as db:
-        return run_sla_monitor(db, NotificationService(), now)
+        return run_sla_monitor(db, build_notification_service(), now)
 
 
 @celery_app.task(name="riskapp.tasks.check_start_dates")  # type: ignore[untyped-decorator]
 def check_start_dates() -> int:
-    """Daily check: notify owners of risks whose active window starts today."""
+    """Hourly check: notify owners of risks whose active window starts today.
+
+    Runs hourly (not just once a day) so a risk whose start date is set to
+    "today" during the day is still picked up; already-notified risks are
+    filtered out so each owner is mailed once.
+    """
     today = dt.datetime.now(settings.tz).date()
     with SessionLocal() as db:
-        return run_start_date_check(db, NotificationService(), today)
+        return run_start_date_check(db, build_notification_service(), today)
 
 
 @celery_app.task(name="riskapp.tasks.materialize_overdue_risks")  # type: ignore[untyped-decorator]
@@ -46,11 +51,11 @@ def materialize_overdue_risks() -> int:
     """
     today = dt.datetime.now(settings.tz).date()
     with SessionLocal() as db:
-        return run_end_date_monitor(db, NotificationService(), today)
+        return run_end_date_monitor(db, build_notification_service(), today)
 
 
 @celery_app.task(name="riskapp.tasks.weekly_summary")  # type: ignore[untyped-decorator]
 def weekly_summary() -> dict[str, int | float]:
     """Monday 8 AM: aggregate the portfolio and email PMs + PMO Lead."""
     with SessionLocal() as db:
-        return run_weekly_summary(db, NotificationService())
+        return run_weekly_summary(db, build_notification_service())

@@ -1,7 +1,7 @@
 import type { EChartsOption } from 'echarts';
 
 import { EChart } from './EChart';
-import { RATING_COLORS, STATUS_GROUP_COLORS } from '../utils/colors';
+import { BRAND, RATING_COLORS, STATUS_GROUP_COLORS } from '../utils/colors';
 import type {
   EscalationTrend,
   HeatmapData,
@@ -10,9 +10,9 @@ import type {
   StackData,
 } from '../utils/aggregates';
 
-const AXIS_LABEL = '#64748b';
-const GRID_LINE = '#e5e9f0';
-const ACCENT = '#14418c';
+const AXIS_LABEL = '#6B7280';
+const GRID_LINE = '#E5E9F0';
+const ACCENT = BRAND.grey; // Neutral grey for structural chart elements
 
 function emptyOption(message: string): EChartsOption {
   return {
@@ -142,8 +142,8 @@ export function StatusDonutChart({ data }: { data: NameValue[] }) {
 
 export function EscalatedDonutChart({ data }: { data: NameValue[] }) {
   const colors: Record<string, string> = {
-    Escalated: '#ee1f2f',
-    'Not escalated': '#e2e8f0',
+    Escalated: BRAND.red,    // Wragby Red for escalated
+    'Not escalated': '#E5E9F0',
   };
   const escalated = data.find((d) => d.name === 'Escalated')?.value ?? 0;
   const option: EChartsOption = {
@@ -168,7 +168,7 @@ export function EscalatedDonutChart({ data }: { data: NameValue[] }) {
       subtext: 'escalated',
       left: 'center',
       top: '36%',
-      textStyle: { fontSize: 26, fontWeight: 700, color: '#ee1f2f' },
+      textStyle: { fontSize: 26, fontWeight: 700, color: BRAND.red },
       subtextStyle: { fontSize: 11, color: AXIS_LABEL },
     },
   };
@@ -355,7 +355,7 @@ export function HeatmapChart({
       itemWidth: 140,
       itemHeight: 12,
       textGap: 10,
-      inRange: { color: ['#e8eef9', '#14418c', '#ee1f2f'] },
+      inRange: { color: ['#F1F5F9', BRAND.grey, BRAND.red] },  // Grey → Red intensity scale
       textStyle: { color: AXIS_LABEL, fontSize: 11 },
     },
     series: [
@@ -421,9 +421,9 @@ export function EscalationTrendChart({ data }: { data: EscalationTrend }) {
         smooth: true,
         symbol: 'circle',
         symbolSize: 8,
-        itemStyle: { color: '#ee1f2f', borderColor: '#ffffff', borderWidth: 2 },
-        lineStyle: { color: '#ee1f2f', width: 2.5 },
-        areaStyle: { color: 'rgba(238,31,47,0.10)' },
+        itemStyle: { color: BRAND.red, borderColor: '#ffffff', borderWidth: 2 },
+        lineStyle: { color: BRAND.red, width: 2.5 },
+        areaStyle: { color: 'rgba(237, 28, 46, 0.08)' },
       },
     ],
   };
@@ -497,7 +497,7 @@ export function TreemapChart({ data }: { data: NameValue[] }) {
         itemStyle: { borderColor: '#ffffff', borderWidth: 2, gapWidth: 2 },
         levels: [
           {
-            color: ['#0e3168', '#14418c', '#4a76b8', '#8aa8d6'],
+            color: [BRAND.greyDark, BRAND.grey, BRAND.greyMid, BRAND.greyLight],
           },
         ],
       },

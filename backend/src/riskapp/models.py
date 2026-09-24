@@ -61,6 +61,11 @@ class User(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     upn: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     display_name: Mapped[str] = mapped_column(String(255))
+    # Local (non-Entra) sign-in. ``password_hash`` is a scrypt hash; ``role`` is
+    # the role granted to a local account (Entra users get theirs from group
+    # claims instead, so both stay null for them).
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    role: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
 
 class Project(TimestampMixin, Base):

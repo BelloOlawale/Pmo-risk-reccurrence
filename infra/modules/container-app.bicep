@@ -1,112 +1,159 @@
-// Generic Azure Container App (consumption plan).
+// =============================================================================
+// Azure Container App Module
+// =============================================================================
 //
-// Secrets passed in `secrets` (array of { name: <RISKAPP_* var name>, value })
-// are stored as container-app secrets and exposed to the process as env vars
-// of the same name via secretRef (secret stored under a lowercase name).
-// Plain env vars in `envVars` are set directly.
+// Generic Container App for Azure Container Apps (consumption plan).
+// Supports a user-assigned managed identity, external/internal ingress,
+// HTTP-based autoscaling, plain env vars, secret env vars, and image pulls
+// via either managed identity or registry credentials.
+//
+// =============================================================================
+
 @description('Container App resource name.')
 param name string
 
 @description('Azure region.')
 param location string
 
-@description('Managed environment resource id.')
+@description('Container Apps Environment resource ID.')
 param environmentId string
 
-@description('Registry server e.g. myacr.azurecr.io.')
+@description('Registry server (e.g. myacr.azurecr.io).')
 param registryServer string
 
-@description('Full image reference, e.g. myacr.azurecr.io/riskapp-backend:sha.')
+@description('Full image reference (e.g. myacr.azurecr.io/riskapp-backend:latest).')
 param image string
 
-@description('Registry admin username.')
-param registryUsername string
+@description('Registry resource ID used for managed-identity image pulls. Takes precedence over username/password.')
+param registryIdentityId string = ''
 
-@description('Registry admin password (stored as a container-app secret).')
+@description('Registry admin username (used only when registryIdentityId is empty).')
+param registryUsername string = ''
+
+@description('Registry admin password (used only when registryIdentityId is empty).')
 @secure()
-param registryPassword string
+param registryPassword string = ''
 
-@description('Plain (non-secret) env vars: array of { name, value }.')
+@description('Plain (non-secret) environment variables: array of { name, value }.')
 param envVars array = []
 
-@description('Secret env vars: array of { name: <VAR_NAME>, value }. Stored as container-app secrets and referenced by env var <VAR_NAME>.')
+@description('Secret values to register on the app: array of { name, value }.')
 param secrets array = []
 
-@description('Container command override (e.g. celery worker). Empty = image CMD.')
+@description('Environment variables bound to secrets: array of { name, secretName }.')
+param secretRefs array = []
+
+@description('Container command override. Empty = image default CMD.')
 param command array = []
 
-@description('Expose the app publicly via HTTPS ingress.')
+@description('Enable external (public) HTTPS ingress.')
 param externalIngress bool = false
 
-@description('Ingress target port. 0 disables ingress (background apps).')
+@description('Ingress target port. Use 0 for background apps without ingress.')
 param targetPort int = 0
 
-@description('Minimum running replicas.')
+@description('Minimum number of replicas.')
 param minReplicas int = 1
 
-@description('Maximum running replicas.')
+@description('Maximum number of replicas.')
 param maxReplicas int = 2
 
-@description('HTTP concurrency for the HTTP autoscaler rule (empty = no rule).')
+@description('Concurrent HTTP requests per replica for the HTTP autoscaler.')
 param httpConcurrency string = ''
 
-@description('vCPU per replica (consumption plan).')
+@description('User-assigned managed identity resource ID.')
+param managedIdentityId string = ''
+
+@description('CPU cores per replica (e.g. 0.5, 1, 2).')
 param cpu string = '0.5'
 
-@description('Memory per replica (consumption plan).')
+@description('Memory per replica (e.g. 1Gi, 2Gi).')
 param memory string = '1Gi'
 
-var secretDefs = [for s in secrets: {
-  name: toLower(replace(s.name, '_', '-'))
-  value: s.value
+var usesRegistryIdentity = !empty(registryIdentityId)
+
+// Ingress configuration (null when the app has no ingress)
+var ingressConfig = targetPort > 0 ? {
+  external: externalIngress
+  targetPort: targetPort
+  allowInsecure: false
+  transport: 'auto'
+  traffic: [
+    {
+      latestRevision: true
+      weight: 100
+    }
+  ]
+} : null
+
+// Registry configuration: managed identity or admin credentials
+var registryConfig = usesRegistryIdentity ? {
+  server: registryServer
+  identity: registryIdentityId
+} : {
+  server: registryServer
+  username: registryUsername
+  passwordSecretRef: 'registry-password'
+}
+
+// Secrets registered on the app (registry password only when credentials are used)
+var appSecrets = concat(
+  usesRegistryIdentity ? [] : [
+    {
+      name: 'registry-password'
+      value: registryPassword
+    }
+  ],
+  secrets
+)
+
+// Secret-bound env vars (for-expressions must be assigned to their own variable)
+var secretEnv = [for ref in secretRefs: {
+  name: ref.name
+  secretRef: ref.secretName
 }]
 
-var secretRefEnv = [for s in secrets: {
-  name: s.name
-  secretRef: toLower(replace(s.name, '_', '-'))
-}]
+// Plain env vars + secret-bound env vars
+var appEnv = concat(envVars, secretEnv)
 
-var containerEnv = concat(envVars, secretRefEnv)
+// HTTP autoscaling rule (optional)
+var scaleRules = !empty(httpConcurrency) && targetPort > 0 ? [
+  {
+    name: 'http-scaling-rule'
+    http: {
+      metadata: {
+        concurrentRequests: httpConcurrency
+      }
+    }
+  }
+] : []
 
-resource app 'Microsoft.App/containerApps@2024-03-01' = {
+resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
   name: name
   location: location
+  identity: !empty(managedIdentityId) ? {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${managedIdentityId}': {}
+    }
+  } : null
   properties: {
     managedEnvironmentId: environmentId
     configuration: {
       activeRevisionsMode: 'Single'
-      ingress: targetPort > 0 ? {
-        external: externalIngress
-        targetPort: targetPort
-        allowInsecure: false
-        traffic: [
-          {
-            latestRevision: true
-            weight: 100
-          }
-        ]
-      } : null
+      ingress: ingressConfig
       registries: [
-        {
-          server: registryServer
-          username: registryUsername
-          passwordSecretRef: 'registry-password'
-        }
+        registryConfig
       ]
-      secrets: concat(secretDefs, [
-        {
-          name: 'registry-password'
-          value: registryPassword
-        }
-      ])
+      secrets: appSecrets
     }
     template: {
       containers: [
         {
           name: name
           image: image
-          command: command
-          env: containerEnv
+          command: !empty(command) ? command : null
+          env: appEnv
           resources: {
             cpu: json(cpu)
             memory: memory
@@ -116,21 +163,12 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
       scale: {
         minReplicas: minReplicas
         maxReplicas: maxReplicas
-        rules: httpConcurrency != '' ? [
-          {
-            name: 'http'
-            custom: {
-              type: 'http'
-              metadata: {
-                concurrency: httpConcurrency
-              }
-            }
-          }
-        ] : []
+        rules: scaleRules
       }
     }
   }
 }
 
-output fqdn string = targetPort > 0 ? app.properties.configuration.ingress.fqdn : ''
-output id string = app.id
+output fqdn string = targetPort > 0 ? containerApp.properties.configuration.ingress.fqdn : ''
+output id string = containerApp.id
+output name string = containerApp.name

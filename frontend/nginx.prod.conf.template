@@ -12,6 +12,17 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    # index.html must always be revalidated so a new deploy (new hashed asset
+    # names) is picked up on refresh; hashed assets can be cached forever.
+    location = /index.html {
+        add_header Cache-Control "no-cache, must-revalidate";
+    }
+
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
     # React Router fallback: let the SPA handle client-side routes.
     location / {
         try_files $uri $uri/ /index.html;
@@ -19,9 +30,15 @@ server {
 
     # Same-origin API proxy. The browser only talks to this origin, so there is
     # no CORS between the SPA and the API.
+    #
+    # `proxy_ssl_server_name on` sends SNI and `Host $proxy_host` sends the
+    # upstream's own hostname (not the frontend's); Container Apps ingress routes
+    # on Host/SNI, so without both it resets the TLS handshake.
     location /api/ {
         proxy_pass ${API_UPSTREAM};
-        proxy_set_header Host $host;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_set_header Host $proxy_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;

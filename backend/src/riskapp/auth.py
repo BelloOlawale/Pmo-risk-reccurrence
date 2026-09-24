@@ -18,6 +18,7 @@ exhaustively unit-tested independently of Entra.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -27,10 +28,13 @@ from typing import Annotated, Any
 import jwt as pyjwt
 from fastapi import Depends, Header, HTTPException
 from jwt import PyJWKClient
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from riskapp import models
 from riskapp.config import settings
 from riskapp.db import get_db
+from riskapp.security import verify_password
 from riskapp.services import get_or_create_user
 
 
@@ -72,6 +76,105 @@ def _role_group_map() -> dict[Role, str]:
 
 
 _JWKS_CLIENT: PyJWKClient | None = None
+
+# ---------------------------------------------------------------------------
+# Local test login (non-Microsoft)
+#
+# Issues a short-lived HS256 token carrying the same shape of claims the rest
+# of the app expects (upn / name / roles), so authorization behaves identically
+# to an Entra token. Disabled unless ``settings.test_login_enabled``.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Local (non-Microsoft) sign-in
+#
+# Issues a short-lived HS256 token carrying the same shape of claims the rest
+# of the app expects (upn / name / roles), so authorization behaves identically
+# to an Entra token. Two ways to obtain one, each behind its own flag:
+#   * email + password        (local_login_enabled)
+#   * role-only test login    (test_login_enabled, optional shared code)
+# ---------------------------------------------------------------------------
+
+LOCAL_LOGIN_ISSUER = "riskapp-test-login"
+LOCAL_LOGIN_TTL_HOURS = 8
+
+
+def _local_login_key() -> str:
+    """Signing key for local tokens (stable across replicas)."""
+    return (
+        settings.test_login_secret
+        or settings.entra_client_secret
+        or "riskapp-local-login-dev-key"
+    )
+
+
+def create_local_token(
+    *, user_id: int | None, upn: str, display_name: str, role: Role
+) -> str:
+    now = dt.datetime.now(dt.UTC)
+    payload: dict[str, Any] = {
+        "iss": LOCAL_LOGIN_ISSUER,
+        "sub": str(user_id) if user_id is not None else upn,
+        "upn": upn,
+        "name": display_name,
+        "roles": [role.value],
+        "iat": int(now.timestamp()),
+        "exp": int((now + dt.timedelta(hours=LOCAL_LOGIN_TTL_HOURS)).timestamp()),
+    }
+    return pyjwt.encode(payload, _local_login_key(), algorithm="HS256")
+
+
+def _decode_local_token(token: str) -> dict[str, Any] | None:
+    """Return the claims for a valid local token, else None."""
+    try:
+        claims: dict[str, Any] = pyjwt.decode(
+            token,
+            _local_login_key(),
+            algorithms=["HS256"],
+            issuer=LOCAL_LOGIN_ISSUER,
+        )
+        return claims
+    except Exception:
+        return None
+
+
+def _principal_from_local_claims(claims: dict[str, Any], db: Session) -> Principal:
+    upn = str(claims.get("upn") or "")
+    display_name = str(claims.get("name") or upn)
+    roles: set[Role] = set()
+    for raw in claims.get("roles") or []:
+        try:
+            roles.add(Role(str(raw)))
+        except ValueError:
+            continue
+    user_id: int | None = None
+    if upn:
+        user_id = get_or_create_user(db, upn, display_name).id
+        db.commit()
+    return Principal(user_id=user_id, upn=upn, roles=frozenset(roles))
+
+
+def authenticate_local(db: Session, email: str, password: str) -> Principal | None:
+    """Verify an app-managed email + password; None when invalid.
+
+    Deliberately returns the same result for "no such user" and "wrong
+    password" so the endpoint cannot be used to enumerate accounts.
+    """
+    upn = (email or "").strip()
+    if not upn or not password:
+        return None
+    user = db.scalar(
+        select(models.User).where(func.lower(models.User.upn) == upn.lower())
+    )
+    if user is None or not user.password_hash:
+        return None
+    if not verify_password(password, user.password_hash):
+        return None
+    try:
+        role = Role(user.role) if user.role else Role.PROJECT_MANAGER
+    except ValueError:
+        role = Role.PROJECT_MANAGER
+    return Principal(user_id=user.id, upn=user.upn, roles=frozenset({role}))
 
 
 def _signing_key(token: str) -> Any:
@@ -125,11 +228,21 @@ def get_principal(
     x_user_id: Annotated[str | None, Header()] = None,
     x_user_role: Annotated[str | None, Header()] = None,
 ) -> Principal:
-    """Resolve the current principal (Entra token in prod, headers in dev)."""
+    """Resolve the current principal (Entra token, test token, or dev headers)."""
+    token: str | None = None
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+
+    # Locally-issued token (password login, or the role-only test login).
+    if (settings.test_login_enabled or settings.local_login_enabled) and token:
+        claims = _decode_local_token(token)
+        if claims is not None:
+            return _principal_from_local_claims(claims, db)
+
     if settings.entra_tenant_id:
-        if not authorization or not authorization.lower().startswith("bearer "):
+        if not token:
             raise HTTPException(status_code=401, detail="Missing bearer token")
-        return _principal_from_token(authorization.split(" ", 1)[1].strip(), db)
+        return _principal_from_token(token, db)
 
     role_name = x_user_role or Role.SYSTEM_ADMIN.value
     try:

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 
 import { DEV_ROLES, useAuth } from '../auth/AuthContext';
+import { SignInPage } from './auth/SignInPage';
 import { NotificationBell } from './NotificationBell';
 
 function NavIcon({ children }: { children: ReactNode }) {
@@ -37,6 +38,13 @@ const ICONS: Record<string, ReactNode> = {
 
 export function Layout() {
   const auth = useAuth();
+
+  // Unauthenticated users get the dedicated sign-in layout. The application
+  // shell (sidebar, topbar, navigation, page data) must never be rendered
+  // before a session exists.
+  if (!auth.isDevMode && !auth.isAuthenticated) {
+    return <SignInPage />;
+  }
 
   // Remount the active page whenever the dev identity changes so every page
   // refetches with the new role/user (otherwise lists fetched under the old
@@ -113,7 +121,6 @@ export function Layout() {
       <div className="main">
         <header className="topbar">
           <div className="topbar-title">
-            <span className="topbar-mark" aria-hidden="true">W</span>
             <span>PMO Risk Management</span>
           </div>
           <div className="topbar-actions">
@@ -121,17 +128,7 @@ export function Layout() {
           </div>
         </header>
         <main className="content">
-          {!auth.isDevMode && !auth.isAuthenticated ? (
-            <div className="empty-state">
-              <h2>Sign in required</h2>
-              <p className="muted">Authenticate with your Microsoft account to continue.</p>
-              <button className="btn btn-primary" onClick={auth.login}>
-                Sign in with Microsoft
-              </button>
-            </div>
-          ) : (
-            <Outlet key={outletKey} />
-          )}
+          <Outlet key={outletKey} />
         </main>
       </div>
     </div>

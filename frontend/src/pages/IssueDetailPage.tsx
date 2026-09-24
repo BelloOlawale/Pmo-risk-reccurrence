@@ -2,16 +2,14 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 
 import { api } from '../api/client';
 import type { Issue } from '../api/types';
+import { ownerName, useUsers } from '../api/users';
 import { RatingBadge, SectionCard, StatusBadge } from '../components/Badges';
 import { useApi } from '../hooks/useApi';
 import { statusLabel } from '../utils/colors';
 import { formatDate, formatDateTime } from '../utils/format';
 
-function ownerLabel(ownerUserId: number | null): string {
-  return ownerUserId !== null ? `User #${ownerUserId}` : 'Unassigned';
-}
-
 export function IssueDetailPage() {
+  const users = useUsers();
   const { issueId } = useParams();
   const [searchParams] = useSearchParams();
   const from = searchParams.get('from') === 'risk-history' ? 'risk-history' : 'active-risk';
@@ -112,7 +110,7 @@ export function IssueDetailPage() {
                   </div>
                   <div>
                     <div className="kv-label">Owner</div>
-                    <div className="kv-value">{ownerLabel(issue.owner_user_id)}</div>
+                    <div className="kv-value">{ownerName(users, issue.owner_user_id)}</div>
                   </div>
                   <div>
                     <div className="kv-label">Project life cycle</div>

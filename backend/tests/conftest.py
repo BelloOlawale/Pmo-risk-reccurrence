@@ -28,6 +28,10 @@ def _force_dev_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "blob_account_name", "")
     monkeypatch.setattr(settings, "blob_account_key", "")
     monkeypatch.setattr(settings, "blob_container", "")
+    # ACS: blank so build_notification_service() never attempts a real send.
+    monkeypatch.setattr(settings, "acs_endpoint", "")
+    monkeypatch.setattr(settings, "acs_access_key", "")
+    monkeypatch.setattr(settings, "acs_sender_email", "")
 
 
 @pytest.fixture()

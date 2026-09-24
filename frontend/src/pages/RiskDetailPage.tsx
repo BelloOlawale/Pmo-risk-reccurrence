@@ -13,8 +13,10 @@ import type {
   RiskSource,
 } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
+import { ownerName, useUsers } from '../api/users';
 import { RatingBadge, SectionCard, StatusBadge } from '../components/Badges';
 import { PickOrTypeField } from '../components/PickOrTypeField';
+import { UserPicker } from '../components/UserPicker';
 import { useApi } from '../hooks/useApi';
 import { allowedTransitions } from '../utils/status';
 import {
@@ -165,6 +167,7 @@ export function RiskDetailPage() {
   );
   const { data: me } = useApi(() => api.get<Me>('/api/me'), []);
   const { data: meta } = useApi(() => api.get<RiskMeta>('/api/risk-meta'), []);
+  const users = useUsers();
   const categoryOptions = meta?.categories ?? [];
   const lifecycleOptions = meta?.lifecycle ?? [];
 
@@ -432,11 +435,18 @@ export function RiskDetailPage() {
                         />
                       </div>
                       <div className="field">
-                        <label>Owner user ID</label>
-                        <input
-                          type="number"
-                          value={form.owner_user_id}
-                          onChange={(e) => setForm({ ...form, owner_user_id: e.target.value })}
+                        <label>Owner</label>
+                        <UserPicker
+                          users={users}
+                          selectedUserId={
+                            form.owner_user_id === '' ? null : Number(form.owner_user_id)
+                          }
+                          onSelect={(user) =>
+                            setForm({
+                              ...form,
+                              owner_user_id: user === null ? '' : String(user.id),
+                            })
+                          }
                         />
                       </div>
                       <div className="field">
@@ -502,7 +512,7 @@ export function RiskDetailPage() {
                     <div>
                       <div className="kv-label">Owner</div>
                       <div className="kv-value">
-                        {risk.owner_user_id !== null ? `User #${risk.owner_user_id}` : '—'}
+                        {ownerName(users, risk.owner_user_id)}
                       </div>
                     </div>
                     <div>
@@ -637,7 +647,7 @@ export function RiskDetailPage() {
                             {actionLabel(entry.action, entry.field)}
                           </div>
                           <div className="timeline-meta">
-                            {entry.user_id !== null ? `User #${entry.user_id} · ` : ''}
+                            {entry.user_id !== null ? `${ownerName(users, entry.user_id)} · ` : ''}
                             {formatDateTime(entry.created_at)}
                           </div>
                           {entry.field &&

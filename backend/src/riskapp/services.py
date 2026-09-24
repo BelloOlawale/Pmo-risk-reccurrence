@@ -114,6 +114,13 @@ def get_or_create_user(
     return user
 
 
+def list_users(db: Session) -> list[models.User]:
+    """Every known user (created on first sign-in), ordered for pickers."""
+    return list(
+        db.scalars(select(models.User).order_by(models.User.display_name, models.User.id))
+    )
+
+
 def create_project(
     db: Session, payload: schemas.ProjectCreate, *, pm_user_id: int | None = None
 ) -> models.Project:
@@ -531,6 +538,10 @@ def update_risk(
     """
     data = payload.model_dump(exclude_unset=True)
     data.pop("actor_user_id", None)
+    # owner_upn is a convenience alias: resolve/create the user, then assign.
+    owner_upn = data.pop("owner_upn", None)
+    if owner_upn:
+        data["owner_user_id"] = get_or_create_user(db, owner_upn).id
     target_status = data.pop("status", None)
     manual_deadline = data.pop("sla_deadline", None)
     reset_deadline = data.pop("reset_sla_deadline", False)

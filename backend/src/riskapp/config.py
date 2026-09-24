@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     azure_openai_endpoint: str = ""
     azure_openai_api_key: str = ""
     azure_openai_embedding_deployment: str = "text-embedding-3-small"
-    azure_openai_chat_deployment: str = "gpt-4.1-mini"
-    azure_openai_api_version: str = "2024-02-01"
+    azure_openai_chat_deployment: str = "gpt-5.4"
+    azure_openai_api_version: str = "2025-04-01-preview"
 
     # Frontend base URL for email deep links.
     app_base_url: str = "http://localhost:5173"
@@ -45,6 +45,17 @@ class Settings(BaseSettings):
     entra_client_id: str = ""
     entra_client_secret: str = ""
     entra_role_group_ids: str = ""  # JSON mapping role name -> group object id
+
+    # Local test login (NON-Microsoft). Lets testers sign in with just a role
+    # while Entra consent is pending. Keep this OFF in production: when enabled
+    # anyone who knows the code can mint a role's token.
+    test_login_enabled: bool = False
+    test_login_code: str = ""  # optional shared passcode required to sign in
+    test_login_secret: str = ""  # HMAC key; falls back to the Entra client secret
+
+    # Local email + password sign-in (app-managed passwords, independent of
+    # Entra). Off by default; enable only where that trade-off is acceptable.
+    local_login_enabled: bool = False
 
     @property
     def tz(self) -> ZoneInfo:

@@ -141,10 +141,24 @@ def run_sla_monitor(db: Session, notifier: NotificationService, now: dt.datetime
 
 
 def find_start_date_risks(db: Session, today: dt.date) -> list[models.Risk]:
-    """Risks whose ``risk_start_date`` is ``today`` (in the app timezone)."""
+    """Risks starting today that have not yet had their start notification.
+
+    The dedupe (via the notification rows) lets this run hourly: a risk whose
+    start date is set to "today" mid-morning is still caught on the next hourly
+    pass, while each owner is only notified once.
+    """
+    already_notified = select(models.Notification.risk_id).where(
+        models.Notification.type == EVENT_RISK_START,
+        models.Notification.risk_id.is_not(None),
+    )
     return list(
         db.scalars(
-            select(models.Risk).where(models.Risk.risk_start_date == today)
+            select(models.Risk).where(
+                models.Risk.risk_start_date == today,
+                # Nothing to send to without an owner (and it would re-fire).
+                models.Risk.owner_user_id.is_not(None),
+                ~models.Risk.id.in_(already_notified),
+            )
         ).all()
     )
 

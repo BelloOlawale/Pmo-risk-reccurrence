@@ -1,33 +1,79 @@
-// Azure Container Registry for this environment's images.
-@description('Container registry name (globally unique, lowercase alphanumerics only).')
+// =============================================================================
+// Azure Container Registry Module
+// =============================================================================
+//
+// Deploys an Azure Container Registry and grants the application's managed
+// identity AcrPull so Container Apps can pull images without stored
+// credentials.
+//
+// =============================================================================
+
+@description('Container Registry name (5-50 chars, alphanumeric only, globally unique).')
 param name string
 
 @description('Azure region.')
 param location string
 
-@description('Registry SKU (Basic is fine for a single app).')
-param sku string = 'Basic'
+@description('Principal ID of the managed identity that needs image pull access.')
+param managedIdentityPrincipalId string = ''
 
-@description('Enable the registry admin account. The deployed container apps pull using these credentials. Switch to a managed identity before hardening.')
-param adminEnabled bool = true
+@description('Container Registry SKU.')
+@allowed([
+  'Basic'
+  'Standard'
+  'Premium'
+])
+param skuName string = 'Basic'
 
-resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
+@description('Enable the registry admin account (used by CI/CD push pipelines).')
+param adminUserEnabled bool = true
+
+// Container Registry
+resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: name
   location: location
   sku: {
-    name: sku
+    name: skuName
   }
+  properties: union(
+    {
+      adminUserEnabled: adminUserEnabled
+      publicNetworkAccess: 'Enabled'
+      policies: {
+        quarantinePolicy: {
+          status: 'disabled'
+        }
+        trustPolicy: {
+          type: 'Notary'
+          status: 'disabled'
+        }
+        retentionPolicy: {
+          days: 7
+          status: 'disabled'
+        }
+      }
+    },
+    // Network rule sets are only supported on the Premium SKU. Setting the
+    // property at all on Basic/Standard fails with NetworkRuleNotSupported.
+    skuName == 'Premium' ? {
+      networkRuleSet: {
+        defaultAction: 'Allow'
+      }
+    } : {}
+  )
+}
+
+// AcrPull for the managed identity
+resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(managedIdentityPrincipalId)) {
+  name: guid(name, managedIdentityPrincipalId, 'acr-pull')
+  scope: containerRegistry
   properties: {
-    adminUserEnabled: adminEnabled
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+    principalId: managedIdentityPrincipalId
+    principalType: 'ServicePrincipal'
   }
 }
 
-output id string = registry.id
-output loginServer string = registry.properties.loginServer
-
-// The admin credentials are consumed by the container-app modules in this same
-// deployment (registry auth secret), never shown to end users.
-#disable-next-line outputs-should-not-contain-secrets // deploy-time registry auth, consumed in-template
-output username string = adminEnabled ? registry.listCredentials().username : ''
-#disable-next-line outputs-should-not-contain-secrets // deploy-time registry auth, consumed in-template
-output password string = adminEnabled ? registry.listCredentials().passwords[0].value : ''
+output loginServer string = containerRegistry.properties.loginServer
+output acrId string = containerRegistry.id
+output name string = containerRegistry.name

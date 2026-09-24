@@ -15,7 +15,14 @@ htmlcov/
 
 # Env / secrets
 .env
+infra/deploy.*.env
 local.settings.json
+
+# Generated deployment artifacts (reproducible — do not commit)
+infra/main.json
+infra/params.json
+infra/deployment_*.json
+infra/deployment-info-*.json
 *.db
 *.sqlite3
 

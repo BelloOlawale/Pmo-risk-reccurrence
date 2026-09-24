@@ -9,6 +9,7 @@ a pure function so it is exhaustively unit-tested.
 from __future__ import annotations
 
 import html
+import logging
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -17,6 +18,8 @@ from sqlalchemy.orm import Session
 
 from riskapp import models
 from riskapp.config import settings
+
+logger = logging.getLogger(__name__)
 
 EVENT_OWNER_ASSIGNMENT = "owner_assignment"
 EVENT_SLA_WARNING = "sla_warning"
@@ -243,8 +246,11 @@ class NotificationService:
                 )
             except Exception:
                 # Email is best-effort; never let a mail failure roll back the
-                # in-app notification or the surrounding transaction.
-                pass
+                # in-app notification or the surrounding transaction. Log it so
+                # silent delivery failures are visible in the container logs.
+                logger.exception(
+                    "Email delivery failed for event=%s to=%s", event, recipients.to_emails
+                )
         return recipients
 
     @staticmethod
@@ -285,3 +291,20 @@ class NotificationService:
 def _get_setting(db: Session, key: str) -> str | None:
     value = db.scalar(select(models.Setting.value).where(models.Setting.key == key))
     return value or None
+
+
+def build_notification_service(
+    email: EmailProvider | None = None,
+) -> NotificationService:
+    """A NotificationService with ACS email wired whenever it is configured.
+
+    Callers (API endpoints and Celery tasks) should use this instead of
+    ``NotificationService()`` — constructing it directly leaves the email
+    provider unset, so only in-app rows are written and no mail is ever sent.
+    Email stays best-effort: a mail failure never fails the request.
+    """
+    if email is not None:
+        return NotificationService(email)
+    if settings.acs_endpoint and settings.acs_access_key and settings.acs_sender_email:
+        return NotificationService(AzureCommunicationEmail())
+    return NotificationService()

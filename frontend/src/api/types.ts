@@ -10,6 +10,32 @@ export interface ProjectType {
   name: string;
 }
 
+export interface User {
+  id: number;
+  upn: string;
+  display_name: string;
+}
+
+export interface TestLoginStatus {
+  enabled: boolean;
+  code_required: boolean;
+}
+
+export interface LoginOptions {
+  password_enabled: boolean;
+  test_login_enabled: boolean;
+  test_code_required: boolean;
+}
+
+export interface TestLoginToken {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  role: string;
+  upn: string;
+  display_name: string;
+}
+
 export interface Project {
   id: number;
   project_code: string;

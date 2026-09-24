@@ -34,8 +34,10 @@ app/
 │   ├── start-nginx.sh            # renders template when API_UPSTREAM is set
 │   └── .dockerignore
 ├── infra/                         # Azure Container Apps IaC (issue #13)
-│   ├── main.bicep + modules/      # ACR, environment, container apps
-│   ├── deploy.sh / deploy.ps1     # staged deploy: infra → images → apps
+│   ├── main-complete.bicep        # Full deployment (infra + apps)
+│   ├── main.bicep + modules/      # Deploy any service (web/worker/beat/frontend)
+│   ├── deploy.sh / deploy.ps1     # Full deploy: infra → images → apps
+│   ├── deploy-service.sh/.ps1     # Per-service deploy (any subset of services)
 │   ├── make_params.py             # builds deployment parameters from env / .env
 │   └── README.md
 ├── .github/workflows/
@@ -204,6 +206,10 @@ Both jobs run in parallel on `ubuntu-latest` using Python 3.11 and Node 20.
   1. Provision ACR + Container Apps environment — `bash infra/deploy.sh dev --stage infra`
   2. Build & push images — `bash infra/deploy.sh dev --stage images`
   3. Deploy the four container apps — `bash infra/deploy.sh dev --stage apps`
+
+  Day-to-day releases can target a single service with
+  `bash infra/deploy-service.sh dev --service web` (or `worker`, `beat`,
+  `frontend`, or any comma-separated combination).
 - Key Vault-backed secrets + managed-identity image pulls (hardening).
 - Dev + prod environments, custom domains/TLS if required.
 
