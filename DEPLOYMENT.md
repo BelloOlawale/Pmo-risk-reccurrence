@@ -1,3 +1,4 @@
+
 # Deployment & Local Containerization
 
 This document covers the Docker artifacts and local full-stack setup for the
