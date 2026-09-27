@@ -70,6 +70,13 @@ def test_close_project_records_closure_and_leaves_active_register(client: TestCl
     assert any(p["id"] == project["id"] and p["status"] == "Closed" for p in all_projects)
 
 
+def test_admin_can_close_register_they_created(client: TestClient) -> None:
+    project = _create_project(client, "Admin's register")
+    response = client.post(f"/api/projects/{project['id']}/close")
+    assert response.status_code == 200
+    assert response.json()["closed_by_user_id"] == project["pm_user_id"]
+
+
 def test_close_project_requires_assigned_project_manager(client: TestClient) -> None:
     project = _create_project(client, "Owned by 1", user_id=1, role="Project Manager")
 

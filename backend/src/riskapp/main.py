@@ -362,10 +362,11 @@ def add_project(
     db: DbDep,
     principal: ProjectManagerDep,
 ) -> schemas.ProjectRead:
-    # Assign the PM: an explicit pm_upn wins, otherwise the creating user.
     pm_user_id = principal.user_id
-    if payload.pm_upn:
-        pm_user_id = get_or_create_user(db, payload.pm_upn).id
+    if pm_user_id is None:
+        if not principal.upn:
+            raise HTTPException(status_code=401, detail="Authenticated user has no identity")
+        pm_user_id = get_or_create_user(db, principal.upn).id
     return schemas.ProjectRead.model_validate(
         create_project(db, payload, pm_user_id=pm_user_id)
     )
@@ -420,7 +421,7 @@ def close_project_endpoint(
         raise HTTPException(status_code=404, detail="Project not found")
     if not can_close_project(principal, project):
         raise HTTPException(
-            status_code=403, detail="Only the assigned Project Manager can close this project"
+            status_code=403, detail="Only the assigned PM or System Admin can close this project"
         )
     try:
         closed = close_project(db, project, actor_user_id=principal.user_id)
@@ -438,33 +439,6 @@ def read_project(
         raise HTTPException(status_code=404, detail="Project not found")
     if not can_access_project(principal, project):
         raise HTTPException(status_code=403, detail="Forbidden")
-    return _project_read(db, project)
-
-
-@app.patch("/api/projects/{project_id}", response_model=schemas.ProjectRead)
-def patch_project(
-    project_id: int, payload: schemas.ProjectUpdate, principal: AdminDep, db: DbDep
-) -> schemas.ProjectRead:
-    """Reassign a project's Project Manager (PMO Lead / System Admin only).
-
-    Each register has its own PM, so this is how different projects get different
-    managers — and how a manager is changed without recreating the project.
-    """
-    project = get_project(db, project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    if payload.pm_upn:
-        project.pm_user_id = get_or_create_user(db, payload.pm_upn).id
-    elif "pm_user_id" in payload.model_fields_set:
-        if payload.pm_user_id is not None:
-            user = db.get(models.User, payload.pm_user_id)
-            if user is None:
-                raise HTTPException(status_code=422, detail="Unknown pm_user_id")
-        project.pm_user_id = payload.pm_user_id
-
-    db.commit()
-    db.refresh(project)
     return _project_read(db, project)
 
 

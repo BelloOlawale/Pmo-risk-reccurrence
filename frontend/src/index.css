@@ -1948,17 +1948,6 @@ input:disabled {
   cursor: default;
 }
 
-.pm-editor {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 320px;
-}
-
-.pm-editor .user-picker {
-  flex: 1;
-}
-
 /* ================================================================
    TEST LOGIN (non-Microsoft, testing only)
    ================================================================ */

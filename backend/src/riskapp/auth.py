@@ -250,9 +250,16 @@ def get_principal(
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=f"Unknown role {role_name!r}") from exc
     user_id = int(x_user_id) if x_user_id else None
+    dev_upn = "dev.pm@local" if role == Role.PROJECT_MANAGER else "dev@local"
+    if user_id is None and role == Role.PROJECT_MANAGER:
+        user_id = get_or_create_user(db, dev_upn).id
+        db.commit()
+    elif user_id is None and role == Role.SYSTEM_ADMIN:
+        admin = db.scalar(select(models.User).where(models.User.upn == dev_upn))
+        user_id = admin.id if admin else None
     return Principal(
         user_id=user_id,
-        upn=x_user_id or "dev@local",
+        upn=x_user_id or dev_upn,
         roles=frozenset({role}),
     )
 
@@ -283,9 +290,9 @@ def can_access_project(principal: Principal, project: Any) -> bool:
 
 
 def can_close_project(principal: Principal, project: Any) -> bool:
-    """True only for the Project Manager explicitly assigned to the project."""
+    """Only an assigned creator with PM or Admin authority can close a register."""
     return (
-        principal.has_role(Role.PROJECT_MANAGER)
+        principal.has_role(Role.PROJECT_MANAGER, Role.SYSTEM_ADMIN)
         and principal.user_id is not None
         and project.pm_user_id == principal.user_id
     )

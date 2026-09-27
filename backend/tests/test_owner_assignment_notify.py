@@ -45,7 +45,7 @@ class TestAssignOwnerNotifies:
     ) -> None:
         owner = get_or_create_user(db_session, "owner@example.com", "Owner")
         db_session.commit()
-        _, risk = _project_and_risk(client)
+        project, risk = _project_and_risk(client)
 
         resp = client.patch(f"/api/risks/{risk['id']}", json={"owner_user_id": owner.id})
         assert resp.status_code == 200
@@ -55,9 +55,8 @@ class TestAssignOwnerNotifies:
                 select(models.Notification).where(models.Notification.type == "owner_assignment")
             )
         )
-        assert len(rows) == 1
-        assert rows[0].recipient_user_id == owner.id
-        assert rows[0].risk_id == risk["id"]
+        assert {row.recipient_user_id for row in rows} == {owner.id, project["pm_user_id"]}
+        assert all(row.risk_id == risk["id"] for row in rows)
 
     def test_reassigning_notifies_the_new_owner_only(
         self, client: TestClient, db_session: Session
@@ -65,7 +64,7 @@ class TestAssignOwnerNotifies:
         first = get_or_create_user(db_session, "a@example.com", "A")
         second = get_or_create_user(db_session, "b@example.com", "B")
         db_session.commit()
-        _, risk = _project_and_risk(client)
+        project, risk = _project_and_risk(client)
 
         client.patch(f"/api/risks/{risk['id']}", json={"owner_user_id": first.id})
         client.patch(f"/api/risks/{risk['id']}", json={"owner_user_id": second.id})
@@ -77,14 +76,16 @@ class TestAssignOwnerNotifies:
                 .order_by(models.Notification.id)
             )
         )
-        assert [r.recipient_user_id for r in rows] == [first.id, second.id]
+        assert [r.recipient_user_id for r in rows] == [
+            first.id, project["pm_user_id"], second.id, project["pm_user_id"]
+        ]
 
     def test_assigning_the_same_owner_again_does_not_renotify(
         self, client: TestClient, db_session: Session
     ) -> None:
         owner = get_or_create_user(db_session, "same@example.com", "Same")
         db_session.commit()
-        _, risk = _project_and_risk(client)
+        project, risk = _project_and_risk(client)
 
         client.patch(f"/api/risks/{risk['id']}", json={"owner_user_id": owner.id})
         client.patch(f"/api/risks/{risk['id']}", json={"owner_user_id": owner.id})
@@ -94,7 +95,8 @@ class TestAssignOwnerNotifies:
                 select(models.Notification).where(models.Notification.type == "owner_assignment")
             )
         )
-        assert len(rows) == 1
+        assert {row.recipient_user_id for row in rows} == {owner.id, project["pm_user_id"]}
+        assert len(rows) == 2
 
     def test_create_risk_with_owner_notifies(
         self, client: TestClient, db_session: Session
@@ -121,8 +123,7 @@ class TestAssignOwnerNotifies:
                 select(models.Notification).where(models.Notification.type == "owner_assignment")
             )
         )
-        assert len(rows) == 1
-        assert rows[0].recipient_user_id == owner.id
+        assert {row.recipient_user_id for row in rows} == {owner.id, project["pm_user_id"]}
 
 
 class TestEmailProviderWiring:

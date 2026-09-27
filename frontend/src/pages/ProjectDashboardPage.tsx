@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { api } from '../api/client';
-import type { Issue, Me, Project, Risk } from '../api/types';
+import type { Issue, Project, Risk } from '../api/types';
 import { ownerName, useUsers } from '../api/users';
 import { AddRiskModal } from '../components/AddRiskModal';
 import { SectionCard, StatusBadge } from '../components/Badges';
@@ -11,7 +11,6 @@ import { IssueTable } from '../components/IssueTable';
 import { KpiCard } from '../components/KpiCard';
 import { RiskTable } from '../components/RiskTable';
 import { SlaCountdownList } from '../components/SlaCountdownList';
-import { UserPicker } from '../components/UserPicker';
 import { useApi } from '../hooks/useApi';
 import { categoryTreemap, computeKpis, ratingDistribution, statusStack } from '../utils/aggregates';
 import { formatPercent } from '../utils/format';
@@ -22,13 +21,6 @@ export function ProjectDashboardPage() {
   const id = Number(projectId);
   const [adding, setAdding] = useState(false);
   const users = useUsers();
-  const [editingPm, setEditingPm] = useState(false);
-  const [pmSaving, setPmSaving] = useState(false);
-  const [pmError, setPmError] = useState<string | null>(null);
-  const { data: me } = useApi(() => api.get<Me>('/api/me'), []);
-  const canManagePm = (me?.roles ?? []).some(
-    (role) => role === 'PMO Lead' || role === 'System Admin',
-  );
 
   const { data: project, error: projectError, reload: reloadProject } = useApi(
     () => api.get<Project>(`/api/projects/${id}`),
@@ -52,22 +44,6 @@ export function ProjectDashboardPage() {
   const isClosed = project?.status === 'Closed';
   const backTo = isClosed ? '/risk-history' : '/active-risk';
   const backLabel = isClosed ? '← Risk History' : '← Active Risk';
-
-  async function savePm(user: { id: number } | null) {
-    setPmSaving(true);
-    setPmError(null);
-    try {
-      await api.patch<Project>(`/api/projects/${id}`, {
-        pm_user_id: user ? user.id : null,
-      });
-      setEditingPm(false);
-      reloadProject();
-    } catch (err) {
-      setPmError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setPmSaving(false);
-    }
-  }
 
   function handleRiskCreated() {
     setAdding(false);
@@ -106,33 +82,11 @@ export function ProjectDashboardPage() {
           </div>
         </div>
         <div className="page-header-actions">
-          {canManagePm ? (
-            editingPm ? (
-              <div className="pm-editor">
-                <UserPicker
-                  users={users}
-                  selectedUserId={project?.pm_user_id ?? null}
-                  noneLabel="Unassigned"
-                  disabled={pmSaving}
-                  onSelect={(user) => void savePm(user)}
-                />
-                <button className="btn" onClick={() => setEditingPm(false)} disabled={pmSaving}>
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <button className="btn" onClick={() => setEditingPm(true)}>
-                Change PM
-              </button>
-            )
-          ) : null}
           <button className="btn btn-primary" onClick={() => setAdding(true)}>
             + Add New
           </button>
         </div>
       </div>
-
-      {pmError ? <div className="error-banner">{pmError}</div> : null}
 
       {projectError ? <div className="error-banner">{projectError}</div> : null}
       {risksError ? <div className="error-banner">{risksError}</div> : null}

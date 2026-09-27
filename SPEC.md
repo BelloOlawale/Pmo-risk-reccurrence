@@ -257,7 +257,7 @@ Three permission roles (mapped to **Entra ID security groups**):
 |---|---|
 | System Admin | everything: users, config, imports, all data |
 | PMO Lead | portfolio, de-escalate, escalation handling, settings, import |
-| Project Manager | create projects; full control of *own* projects' risks |
+| Project Manager | create projects (automatically assigned as PM); full control of *own* projects' risks |
 
 Record-level assignments (NOT permission roles):
 - **Risk Owner** — per-risk assignment (edit own assigned risks).
@@ -265,6 +265,10 @@ Record-level assignments (NOT permission roles):
 
 Row-level scoping: PMs see/edit only their own projects; owners only their assigned
 risks; PMO Lead / Admin see all. Enforced in the API layer.
+System Admins may also create registers and are assigned as PM when they do.
+The PM is fixed at creation; reassignment is not available. Existing registers
+retain their recorded PM.
+The assigned creator (Project Manager or System Admin) can close the register.
 
 Dropped from MVP: PMO Analyst, Data Scientist, Information Security Manager.
 

@@ -97,6 +97,8 @@ class SetCredentialsRequest(BaseModel):
 
 
 class ProjectCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(min_length=1, max_length=200)
     department: str = Field(min_length=1, max_length=100)
     project_type: str = Field(min_length=1, max_length=100)
@@ -104,7 +106,6 @@ class ProjectCreate(BaseModel):
     start_date: dt.date | None = None
     end_date: dt.date | None = None
     stage_gate: str | None = None
-    pm_upn: str | None = None
 
     @field_validator("start_date")
     @classmethod
@@ -120,17 +121,6 @@ class ProjectCreate(BaseModel):
         if not v:
             raise ValueError("Customer is required.")
         return v
-
-
-class ProjectUpdate(BaseModel):
-    """Partial update of a project. Omitted fields are left unchanged.
-
-    Only the Project Manager can be changed today; ``pm_upn`` resolves/creates
-    the user, ``pm_user_id`` selects an existing one (null clears it).
-    """
-
-    pm_user_id: int | None = None
-    pm_upn: str | None = None
 
 
 class ProjectRead(BaseModel):

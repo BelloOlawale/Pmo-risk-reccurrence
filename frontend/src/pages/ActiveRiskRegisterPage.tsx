@@ -2,9 +2,8 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { api } from '../api/client';
-import type { Project, Risk } from '../api/types';
+import type { Me, Project, Risk } from '../api/types';
 import { ownerName, useUsers } from '../api/users';
-import { useAuth } from '../auth/AuthContext';
 import { AddRiskModal } from '../components/AddRiskModal';
 import { RiskTable } from '../components/RiskTable';
 import { useApi } from '../hooks/useApi';
@@ -12,8 +11,8 @@ import { isActiveStatus } from '../utils/status';
 
 export function ActiveRiskRegisterPage() {
   const navigate = useNavigate();
-  const auth = useAuth();
   const users = useUsers();
+  const { data: me } = useApi(() => api.get<Me>('/api/me'), []);
   const { data: projects, reload: reloadProjects } = useApi(() =>
     api.get<Project[]>('/api/projects?status=Active'),
   );
@@ -64,12 +63,11 @@ export function ActiveRiskRegisterPage() {
   }
 
   function canCloseProject(p: Project): boolean {
-    // In dev mode the role/user are known locally, so only the assigned
-    // Project Manager sees the action. In Entra (production) mode roles are
-    // resolved server-side; the button stays visible and the backend enforces
-    // the same rule with a 403 for anyone else.
-    if (!auth.isDevMode) return true;
-    return auth.role === 'Project Manager' && auth.userId !== null && p.pm_user_id === auth.userId;
+    return Boolean(
+      me?.roles.some((role) => role === 'Project Manager' || role === 'System Admin') &&
+        me.user_id !== null &&
+        p.pm_user_id === me.user_id,
+    );
   }
 
   function requestClose(p: Project) {

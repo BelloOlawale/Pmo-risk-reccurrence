@@ -237,8 +237,8 @@ principal = Principal(user_id=user.id, upn=upn, roles=roles)
 
 `principal.user_id` then flows into:
 
-- **Project creation** — `POST /api/projects` assigns `pm_user_id` from an
-  explicit `pm_upn` (resolved to a user id) or from the authenticated creator.
+- **Project creation** — `POST /api/projects` assigns `pm_user_id` from the
+  authenticated creator; the request cannot select or later reassign the PM.
 - **Risk accept** — `accept_risk` defaults the owner to `project.pm_user_id`.
 - **Row-level scoping** — see §6.4.
 

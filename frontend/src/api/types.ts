@@ -199,7 +199,6 @@ export interface ProjectCreatePayload {
   start_date?: string | null;
   end_date?: string | null;
   stage_gate?: string | null;
-  pm_upn?: string | null;
 }
 
 export interface RiskCreatePayload {

@@ -7,9 +7,7 @@ import type { Project, ProjectCreatePayload, Risk } from '../api/types';
 import { AddRiskModal } from '../components/AddRiskModal';
 import { RatingBadge, StatusBadge } from '../components/Badges';
 import { SuggestionsPanel } from '../components/SuggestionsPanel';
-import { UserPicker } from '../components/UserPicker';
 import { useApi } from '../hooks/useApi';
-import { ownerName, useUsers } from '../api/users';
 import { todayISO } from '../utils/format';
 
 const DEPARTMENTS: string[] = [
@@ -34,7 +32,6 @@ interface FormState {
   start_date: string;
   end_date: string;
   stage_gate: string;
-  pm_upn: string;
 }
 
 const EMPTY: FormState = {
@@ -45,7 +42,6 @@ const EMPTY: FormState = {
   start_date: '',
   end_date: '',
   stage_gate: '',
-  pm_upn: '',
 };
 
 function DepartmentField({
@@ -142,12 +138,7 @@ function CreateRiskForm({ onCreate }: { onCreate: (project: Project) => void }) 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<Record<string, string>>({});
-  const users = useUsers();
   const today = todayISO();
-
-  // The picker works with user ids; the API takes a UPN, so map back and forth.
-  const selectedPmId =
-    users.find((u) => u.upn.toLowerCase() === form.pm_upn.trim().toLowerCase())?.id ?? null;
 
   function set<K extends keyof FormState>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -180,7 +171,6 @@ function CreateRiskForm({ onCreate }: { onCreate: (project: Project) => void }) 
       start_date: form.start_date || null,
       end_date: form.end_date || null,
       stage_gate: form.stage_gate.trim() || null,
-      pm_upn: form.pm_upn.trim() || null,
     };
 
     setSaving(true);
@@ -251,7 +241,7 @@ function CreateRiskForm({ onCreate }: { onCreate: (project: Project) => void }) 
                   <span className="field-error">{fieldError.customer}</span>
                 ) : null}
               </div>
-              <div className="form-section-title">Schedule &amp; ownership</div>
+              <div className="form-section-title">Schedule</div>
               <div className="field">
                 <label>Start date</label>
                 <input
@@ -279,20 +269,6 @@ function CreateRiskForm({ onCreate }: { onCreate: (project: Project) => void }) 
                   onChange={(e) => set('stage_gate', e.target.value)}
                   placeholder="e.g. Discovery"
                 />
-              </div>
-              <div className="field">
-                <label>Project Manager</label>
-                <UserPicker
-                  users={users}
-                  selectedUserId={selectedPmId}
-                  noneLabel="Unassigned"
-                  onSelect={(user) => set('pm_upn', user ? user.upn : '')}
-                />
-                <span className="field-hint">
-                  {selectedPmId
-                    ? `PM: ${ownerName(users, selectedPmId)}`
-                    : 'Leave blank to make yourself the PM.'}
-                </span>
               </div>
             </div>
             <div className="btn-group create-register-actions">
