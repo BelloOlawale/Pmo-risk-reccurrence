@@ -4,6 +4,7 @@ This directory contains Infrastructure as Code (Bicep) templates and deployment 
 
 ## Table of Contents
 
+- [**Deploy Runbook →**](./RUNBOOK.md) — the short version: which script to run when
 - [Quick Start](#quick-start)
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
@@ -228,12 +229,36 @@ bash infra/deploy-service.sh prod --image-tag "$(git rev-parse --short HEAD)"
 |--------|------|------------|-------------|
 | Service(s) | `--service web,worker` | `-Services web,worker` | `web`, `worker`, `beat`, `frontend`, `all` (default) |
 | Stage | `--stage apps` | `-Stage apps` | `all` (default), `infra`, `images`, `apps` |
-| Image tag | `--image-tag <tag>` | `-ImageTag <tag>` | Default `latest` |
+| Image tag | `--image-tag <tag>` | `-ImageTag <tag>` | Default: commit short SHA (immutable — see below) |
 | Skip build | `--no-build` | `-NoBuild` | Reuse existing images |
 | Config file | `--env-file <path>` | `-EnvFile <path>` | Default `backend/.env` |
 | Override | `--env K=V` / `--secret K=V` | `-Env @{K='V'}` / `-Secret @{K='V'}` | Ad-hoc values |
 | Managed identity | `--managed-identity <id>` | `-ManagedIdentity <id>` | Identity used by the apps |
 | Registry identity | `--registry-identity <id>` | `-RegistryIdentity <id>` | Pull images without ACR admin creds |
+| Allow dev auth | `--allow-dev-auth` | *(not implemented)* | Opt out of the tenant preflight (**bash only**) |
+
+> **The default image tag is the commit short SHA, not `latest`.** Container Apps
+> will not roll a new revision for a tag string it has already seen, so a mutable
+> tag like `latest` makes redeploys silently do nothing. If you have *uncommitted*
+> changes the SHA no longer identifies the code being shipped — the script warns
+> and you should pass an explicit tag, e.g. `--image-tag "$(git rev-parse --short HEAD)-$(date +%m%d%H%M)"`.
+
+### Safety preflights (`deploy-service.sh`)
+
+The bash script performs these checks before it touches Azure, so a misconfigured
+run fails fast instead of half-deploying or hanging:
+
+| Check | Behaviour |
+|-------|-----------|
+| `RISKAPP_DATABASE_URL` empty | **Refuses** — the API cannot start. |
+| `RISKAPP_ENTRA_TENANT_ID` empty | **Refuses** — with no tenant the API trusts unauthenticated `X-User-Role` headers (`get_principal` in `backend/src/riskapp/auth.py`), so anyone reaching the URL is an administrator. Override only deliberately with `--allow-dev-auth`. |
+| Free disk < 3 GB before an image build | **Refuses** — a full disk makes `docker build` stall for tens of minutes rather than reporting `ENOSPC`. |
+| Uncommitted changes under `frontend/` or `backend/` with a default SHA tag | **Warns** — the tag may already exist, so no new revision would roll. |
+| Test login / password login enabled for a non-`dev` environment | **Warns** — these bypass Entra MFA and Conditional Access. |
+
+> `deploy-service.ps1` does **not** implement these preflights yet. Until it does,
+> prefer the bash script (or WSL) for deploys, and never bypass the tenant check on
+> a shared environment.
 
 Which service maps to which image:
 
@@ -587,21 +612,30 @@ infra/
 ├── deploy.ps1               # Full deployment (PowerShell)
 ├── deploy-service.sh        # Per-service deployment (bash)
 ├── deploy-service.ps1       # Per-service deployment (PowerShell)
-├── make_params.py           # Builds a params file for main.bicep
+├── generate-deploy-env.sh   # Rebuild deploy.<env>.env from live Azure
+├── register-entra-app.sh    # Entra app registration / SSO keys
+├── sync-entra-users.sh      # Import Entra users into the users table
+├── deploy.<env>.env         # Runtime config + secrets (git-ignored, generated)
 ├── deployment-info-*.json   # Deployment output files (generated)
 ├── README.md                # This file
+├── RUNBOOK.md               # Which script to run when (start here)
 └── modules/
-    ├── container-app.bicep  # Container App
-    ├── environment.bicep    # Container Apps Environment + Log Analytics
+    ├── container-app.bicep  # Container App                    (used by main.bicep)
+    ├── environment.bicep    # Container Apps Environment + Log Analytics (used by main.bicep)
+    ├── registry.bicep       # Container Registry               (used by main.bicep)
     ├── entra.bicep          # Entra ID app registration reference
     ├── keyvault.bicep       # Key Vault + RBAC
     ├── network.bicep        # Virtual Network + subnets
     ├── openai.bicep         # Azure OpenAI + model deployments
     ├── postgres.bicep       # PostgreSQL Flexible Server + pgvector
     ├── redis.bicep          # Azure Cache for Redis
-    ├── registry.bicep       # Container Registry
     └── storage.bicep        # Blob Storage
 ```
+
+> Only the first three modules are referenced by `main.bicep` (the per-service
+> deploy path). The rest are pulled in by `main-complete.bicep`, which is the
+> **only** template that provisions Postgres, Redis, OpenAI, Storage, Key Vault
+> and the VNet — i.e. what you use to stand the environment up from scratch.
 
 ---
 

@@ -37,6 +37,15 @@
 #   bash infra/deploy-service.sh dev --image-tag "$(git rev-parse --short HEAD)"
 #   RISKAPP_DATABASE_URL=... bash infra/deploy-service.sh dev --service web
 #
+# SAFETY PREFLIGHTS (automatic; fail fast instead of half-deploying)
+#   - refuses to deploy the API when RISKAPP_ENTRA_TENANT_ID is empty, because
+#     the backend then trusts unauthenticated `X-User-Role` headers
+#     (override deliberately with --allow-dev-auth)
+#   - refuses to deploy without a database URL
+#   - checks free disk space before building (a full disk makes docker hang)
+#   - warns when the built tree is dirty, because the default image tag is the
+#     commit SHA and re-pushing it does not roll a new revision
+#
 # CONFIGURATION SOURCES (highest priority first)
 #   1. Process environment variables (e.g. CI secrets)
 #   2. The file passed with --env-file
@@ -59,6 +68,11 @@ TEMPLATE_FILE="$SCRIPT_DIR/main.bicep"
 # -----------------------------------------------------------------------------
 
 # Non-secret values -> plain Container App env vars.
+#
+# NOTE: RISKAPP_ENVIRONMENT is deliberately NOT here — main.bicep owns it
+# (`backendEnvVars = concat(appEnv, [{name:'RISKAPP_ENVIRONMENT', ...}])`) and
+# derives it from environmentName. Adding it here emits a DUPLICATE env var,
+# which would disagree if someone set a different value in the env file.
 PLAIN_ENV_VARS=(
   RISKAPP_AZURE_OPENAI_ENDPOINT
   RISKAPP_AZURE_OPENAI_EMBEDDING_DEPLOYMENT
@@ -119,6 +133,11 @@ MANAGED_IDENTITY_PRINCIPAL_ID="${MANAGED_IDENTITY_PRINCIPAL_ID:-}"
 REGISTRY_IDENTITY_ID="${REGISTRY_IDENTITY_ID:-}"
 BACKEND_IMAGE_NAME="${BACKEND_IMAGE_NAME:-riskapp-backend}"
 FRONTEND_IMAGE_NAME="${FRONTEND_IMAGE_NAME:-riskapp-frontend}"
+# True once --image-tag is passed explicitly (suppresses the default-SHA warning).
+IMAGE_TAG_EXPLICIT="false"
+# Set by --allow-dev-auth: permits deploying an API with no Entra tenant, which
+# leaves it accepting unauthenticated `X-User-Role` headers.
+ALLOW_DEV_AUTH="false"
 
 # Ad-hoc overrides collected from --env / --secret
 declare -a CLI_ENV_PAIRS=()
@@ -135,8 +154,27 @@ success() { echo -e "${GREEN}[OK]${NC} $*"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
 
+# Fail fast when the host disk is nearly full. Docker builds do not report
+# ENOSPC cleanly — they stall for tens of minutes or die mid-layer.
+check_disk_space() {
+    local need_mb="${1:-3000}" avail_mb
+    command -v df >/dev/null 2>&1 || return 0
+    avail_mb="$(df -Pk "$REPO_ROOT" 2>/dev/null | awk 'NR==2 {print $4}')"
+    [[ "$avail_mb" =~ ^[0-9]+$ ]] || return 0   # unknown → do not block
+    if (( avail_mb < need_mb )); then
+        error "Only $((avail_mb / 1024)) MB free on the build volume (need >= $((need_mb / 1024)) MB).
+Docker builds hang or fail when the disk is full. Free space first, e.g.
+  docker builder prune -f
+and delete stale temp files, then re-run."
+    fi
+    info "Disk space OK for image builds: $((avail_mb / 1024)) MB available."
+}
+
 usage() {
-    sed -n '2,46p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    # Print the leading comment block, however long it grows. (A hardcoded line
+    # range silently truncated --help whenever a header line was added.)
+    awk 'NR > 1 && /^#/ { print; next } NR > 1 { exit }' "${BASH_SOURCE[0]}" \
+        | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 
@@ -152,7 +190,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --service|--services)   SERVICES="$2"; shift 2 ;;
         --stage)                STAGE="$2"; shift 2 ;;
-        --image-tag)            IMAGE_TAG="$2"; shift 2 ;;
+        --image-tag)            IMAGE_TAG="$2"; IMAGE_TAG_EXPLICIT="true"; shift 2 ;;
         --location)             LOCATION="$2"; shift 2 ;;
         --prefix)               PREFIX="$2"; shift 2 ;;
         --resource-group)       RG_NAME="$2"; shift 2 ;;
@@ -166,6 +204,7 @@ while [[ $# -gt 0 ]]; do
         --frontend-image)       FRONTEND_IMAGE_NAME="$2"; shift 2 ;;
         --env)                  CLI_ENV_PAIRS+=("$2"); shift 2 ;;
         --secret)               CLI_SECRET_PAIRS+=("$2"); shift 2 ;;
+        --allow-dev-auth)       ALLOW_DEV_AUTH="true"; shift ;;
         --no-build)             BUILD_IMAGES="false"; shift ;;
         --build)                BUILD_IMAGES="true"; shift ;;
         -h|--help)              usage 0 ;;
@@ -231,6 +270,20 @@ done
 if [[ "$STAGE" == "all" || "$STAGE" == "images" ]] && [[ "$BUILD_IMAGES" == "true" ]]; then
     command -v docker >/dev/null || error "Docker is required to build images (use --no-build to skip)."
     docker info >/dev/null 2>&1 || error "Docker is not running."
+    check_disk_space 3000
+fi
+
+# The default image tag is the commit SHA. With uncommitted changes the SHA no
+# longer identifies the shipped code, and pushing the same tag again does not
+# roll a new Container Apps revision — the deploy would silently do nothing.
+if [[ "$NEEDS_BACKEND_IMAGE" == "true" || "$NEEDS_FRONTEND_IMAGE" == "true" ]] \
+   && [[ "$IMAGE_TAG_EXPLICIT" != "true" ]] \
+   && git -C "$REPO_ROOT" rev-parse --short HEAD >/dev/null 2>&1; then
+    if [[ -n "$(git -C "$REPO_ROOT" status --porcelain -- frontend backend 2>/dev/null)" ]]; then
+        warn "Built tree has uncommitted changes, but the image tag is the commit SHA ('$IMAGE_TAG')."
+        warn "If ':${IMAGE_TAG}' already exists in ACR this run will NOT roll a new revision."
+        warn "Re-run with an explicit tag: --image-tag \"${IMAGE_TAG}-$(date +%m%d%H%M)\""
+    fi
 fi
 
 ACCOUNT_USER=$(az account show --query user.name -o tsv)
@@ -279,6 +332,44 @@ value() {
 }
 
 secret_name() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr '_' '-'; }
+
+# Refuse configurations that would ship an unauthenticated or non-starting API.
+validate_deploy_config() {
+    [[ "$STAGE" == "all" || "$STAGE" == "apps" ]] || return 0
+    if [[ "$DEPLOY_WEB" != "true" && "$DEPLOY_WORKER" != "true" && "$DEPLOY_BEAT" != "true" ]]; then
+        return 0
+    fi
+
+    if [[ -z "$(value RISKAPP_DATABASE_URL)" ]]; then
+        error "RISKAPP_DATABASE_URL is empty — the API cannot start.
+Set it in $ENV_FILE (see infra/generate-deploy-env.sh), or pass
+  --secret RISKAPP_DATABASE_URL=..."
+    fi
+
+    if [[ -z "$(value RISKAPP_ENTRA_TENANT_ID)" ]]; then
+        if [[ "$ALLOW_DEV_AUTH" != "true" ]]; then
+            error "RISKAPP_ENTRA_TENANT_ID is empty — refusing to deploy an unauthenticated API.
+With no Entra tenant the backend trusts 'X-User-Role: System Admin' headers with
+no credentials (see get_principal in backend/src/riskapp/auth.py), so anyone who
+can reach the URL is an administrator.
+
+Set RISKAPP_ENTRA_TENANT_ID in $ENV_FILE, or pass --allow-dev-auth if you truly
+mean to run an open API (never on a shared or internet-facing environment)."
+        fi
+        warn "Deploying with NO Entra tenant (--allow-dev-auth)."
+        warn "The API will accept unauthenticated X-User-Role headers."
+    fi
+
+    if [[ "$ENV_NAME" != "dev" ]]; then
+        if [[ "$(value RISKAPP_TEST_LOGIN_ENABLED)" == "true" ]] \
+           || [[ "$(value RISKAPP_LOCAL_LOGIN_ENABLED)" == "true" ]]; then
+            warn "Test login and/or app-managed password login are ENABLED for '$ENV_NAME'."
+            warn "These bypass Entra MFA and Conditional Access; keep them dev-only."
+        fi
+    fi
+}
+
+validate_deploy_config
 
 # Collect the runtime configuration into a temp file consumed by the renderer.
 PARTS_FILE="$(mktemp)"
@@ -523,9 +614,37 @@ fi
 
 app_fqdn() { az containerapp show -g "$RG_NAME" -n "$1" --query 'properties.configuration.ingress.fqdn' -o tsv 2>/dev/null || true; }
 
-WEB_FQDN=""; FRONTEND_FQDN=""
-[[ "$DEPLOY_WEB" == "true" ]] && WEB_FQDN="$(app_fqdn "${PREFIX}-${ENV_NAME}-web")"
-[[ "$DEPLOY_FRONTEND" == "true" ]] && FRONTEND_FQDN="$(app_fqdn "${PREFIX}-${ENV_NAME}-frontend")"
+app_image() { az containerapp show -g "$RG_NAME" -n "$1" --query 'properties.template.containers[0].image' -o tsv 2>/dev/null || true; }
+
+# Always resolve both endpoints: a frontend-only run still has a live API, and
+# reporting it as blank was misleading.
+WEB_FQDN="$(app_fqdn "${PREFIX}-${ENV_NAME}-web")"
+FRONTEND_FQDN="$(app_fqdn "${PREFIX}-${ENV_NAME}-frontend")"
+
+# Report the image actually running after this deploy. Previously the summary
+# printed this run's tag for BOTH images even when only one service ran, so a
+# frontend-only deploy falsely reported the backend on the new tag.
+DID_BACKEND="false"; DID_FRONTEND="false"
+[[ "$DEPLOY_WEB" == "true" || "$DEPLOY_WORKER" == "true" || "$DEPLOY_BEAT" == "true" ]] && DID_BACKEND="true"
+[[ "$DEPLOY_FRONTEND" == "true" ]] && DID_FRONTEND="true"
+
+if [[ "$DID_BACKEND" == "true" ]]; then
+    BACKEND_IMAGE_REPORT="${ACR_SERVER}/${BACKEND_IMAGE_NAME}:${IMAGE_TAG}"
+else
+    BACKEND_IMAGE_REPORT="$(app_image "${PREFIX}-${ENV_NAME}-web")"
+    BACKEND_IMAGE_REPORT="${BACKEND_IMAGE_REPORT:-(unchanged)}"
+fi
+BACKEND_IMAGE_NOTE="deployed this run"
+[[ "$DID_BACKEND" != "true" ]] && BACKEND_IMAGE_NOTE="unchanged"
+
+if [[ "$DID_FRONTEND" == "true" ]]; then
+    FRONTEND_IMAGE_REPORT="${ACR_SERVER}/${FRONTEND_IMAGE_NAME}:${IMAGE_TAG}"
+else
+    FRONTEND_IMAGE_REPORT="$(app_image "${PREFIX}-${ENV_NAME}-frontend")"
+    FRONTEND_IMAGE_REPORT="${FRONTEND_IMAGE_REPORT:-(unchanged)}"
+fi
+FRONTEND_IMAGE_NOTE="deployed this run"
+[[ "$DID_FRONTEND" != "true" ]] && FRONTEND_IMAGE_NOTE="unchanged"
 
 cat <<EOF
 
@@ -546,8 +665,8 @@ API docs       : ${WEB_FQDN:+https://$WEB_FQDN/docs}
 
 Images
 ------
-Backend        : ${ACR_SERVER}/${BACKEND_IMAGE_NAME}:${IMAGE_TAG}
-Frontend       : ${ACR_SERVER}/${FRONTEND_IMAGE_NAME}:${IMAGE_TAG}
+Backend        : ${BACKEND_IMAGE_REPORT}  (${BACKEND_IMAGE_NOTE})
+Frontend       : ${FRONTEND_IMAGE_REPORT}  (${FRONTEND_IMAGE_NOTE})
 EOF
 
 cat > "$SCRIPT_DIR/deployment-info-${ENV_NAME}.json" <<JSON
@@ -559,8 +678,11 @@ cat > "$SCRIPT_DIR/deployment-info-${ENV_NAME}.json" <<JSON
   "frontendUrl": "${FRONTEND_FQDN:+https://$FRONTEND_FQDN}",
   "apiUrl": "${WEB_FQDN:+https://$WEB_FQDN}",
   "acrServer": "$ACR_SERVER",
-  "backendImage": "${ACR_SERVER}/${BACKEND_IMAGE_NAME}:${IMAGE_TAG}",
-  "frontendImage": "${ACR_SERVER}/${FRONTEND_IMAGE_NAME}:${IMAGE_TAG}",
+  "imageTag": "$IMAGE_TAG",
+  "backendImage": "$BACKEND_IMAGE_REPORT",
+  "frontendImage": "$FRONTEND_IMAGE_REPORT",
+  "backendDeployedThisRun": $DID_BACKEND,
+  "frontendDeployedThisRun": $DID_FRONTEND,
   "tenantId": "$ACCOUNT_TENANT",
   "deploymentDate": "$(date -Iseconds)"
 }

@@ -1,11 +1,31 @@
 
+
+
+
+
+
+
+
+
 # Deployment & Local Containerization
 
+
+
+
+
+
+
 This document covers the Docker artifacts and local full-stack setup for the
+
+
+
+
 PMO Risk Recurrence Predictor. It corresponds to `Issues/13-deployment-cicd.md`.
 
 > Status:
 > - **Dockerfiles + local Docker Compose implemented.**
+
+
 > - **GitHub Actions PR CI implemented** (`.github/workflows/ci.yml`).
 > - **Azure provisioning drafted** — Bicep templates + deploy scripts under
 >   `infra/` (ACR, Container Apps environment, web/worker/beat/frontend apps)
@@ -39,8 +59,8 @@ app/
 │   ├── main.bicep + modules/      # Deploy any service (web/worker/beat/frontend)
 │   ├── deploy.sh / deploy.ps1     # Full deploy: infra → images → apps
 │   ├── deploy-service.sh/.ps1     # Per-service deploy (any subset of services)
-│   ├── make_params.py             # builds deployment parameters from env / .env
-│   └── README.md
+│   ├── generate-deploy-env.sh     # Rebuild deploy.<env>.env from live Azure
+│   └── README.md / RUNBOOK.md     # Full guide / quick deploy reference
 ├── .github/workflows/
 │   ├── ci.yml                     # PR CI (pytest/ruff/mypy, typecheck/build)
 │   └── deploy.yml                 # manual Container Apps deploy (workflow_dispatch)

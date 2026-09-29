@@ -1,0 +1,5 @@
+# Shell scripts are executed by bash everywhere (Git Bash on Windows, bash on
+# CI). With core.autocrlf=true and no attributes, git checks them out with CRLF
+# on Windows, which is a needless portability hazard for scripts that must run
+# identically on a fresh clone and on CI. Pin them to LF.
+*.sh text eol=lf
