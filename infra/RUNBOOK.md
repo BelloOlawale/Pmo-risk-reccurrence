@@ -206,3 +206,47 @@ with a fresh `--image-tag`.
 
 **Roll back** → redeploy the previous tag:
 `bash infra/deploy-service.sh dev --service frontend --stage apps --no-build --image-tag <previous-tag>`
+
+---
+
+## 7. Performance — co-locate the database (maintenance window)
+
+The Container Apps run in **East US**; the PostgreSQL flexible server was
+created in **UK South**. Every query crosses regions (~76 ms/query, ~580 ms per
+fresh connection — measured from inside the web container), which makes the app
+feel slow even though both the app and the database are idle.
+
+The fix is to move the database into the app's region. This is a maintenance
+window task (it briefly restarts web/worker/beat); `deploy.dev.env` is backed
+up automatically before any cutover.
+
+```bash
+cd app
+export PG_ADMIN_PASSWORD='<password for the new server admin>'
+
+# 1. Create the target server + schema and copy the data (production untouched)
+bash infra/move-postgres-region.sh dev --yes
+
+# 2. After reviewing the copy, repoint the app and restart it
+bash infra/move-postgres-region.sh dev --yes --cutover
+```
+
+Verify the win from inside the container:
+
+```bash
+az containerapp exec -g rg-riskapp-dev -n riskapp-dev-web \
+  --command "python -c \"import os,time,psycopg;u=os.environ['RISKAPP_DATABASE_URL'].replace('+psycopg','');c=psycopg.connect(u);cur=c.cursor();[ (lambda s:(cur.execute('select 1'),print('query_ms',round((time.time()-s)*1000))))(time.time()) for _ in range(5)]\""
+```
+
+Rollback (the old server is left running):
+
+```bash
+cp infra/deploy.dev.env.bak.<timestamp> infra/deploy.dev.env
+bash infra/deploy-service.sh dev --service web,worker,beat --stage apps
+```
+
+Once satisfied, decommission the old server:
+`az postgres flexible-server delete -g rg-riskapp-dev -n riskapp-dev-postgres --yes`
+
+> Note: the target admin password is not retrievable from Azure; set
+> `PG_ADMIN_PASSWORD` (or reuse the existing one) when running the script.
