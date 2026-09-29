@@ -1,4 +1,4 @@
-import { authHeaders } from '../auth/authStore';
+import { authHeaders, whenAuthReady } from '../auth/authStore';
 
 // Relative URLs go through the Vite dev proxy in development. Set
 // VITE_API_BASE_URL to an absolute URL when the API lives elsewhere.
@@ -15,6 +15,10 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  // Never fire before the session is resolved: in Entra mode an early request
+  // would go out token-less and 401 (and could race the sign-in flow).
+  await whenAuthReady();
+
   const headers = new Headers(init.headers);
   const hasBody = init.body !== undefined && init.body !== null;
 

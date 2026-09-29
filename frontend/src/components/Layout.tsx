@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 
 import { DEV_ROLES, useAuth } from '../auth/AuthContext';
@@ -39,10 +39,14 @@ const ICONS: Record<string, ReactNode> = {
 export function Layout() {
   const auth = useAuth();
 
+  // While an Entra session resolves we render the app shell with a placeholder
+  // so it paints immediately, instead of a blank screen then a sign-in flash.
+  const resolvingSession = !auth.isDevMode && !auth.authReady;
+
   // Unauthenticated users get the dedicated sign-in layout. The application
   // shell (sidebar, topbar, navigation, page data) must never be rendered
   // before a session exists.
-  if (!auth.isDevMode && !auth.isAuthenticated) {
+  if (!auth.isDevMode && !auth.isAuthenticated && !resolvingSession) {
     return <SignInPage />;
   }
 
@@ -128,7 +132,13 @@ export function Layout() {
           </div>
         </header>
         <main className="content">
-          <Outlet key={outletKey} />
+          {resolvingSession ? (
+            <div className="loading">Loading your session…</div>
+          ) : (
+            <Suspense fallback={<div className="loading">Loading…</div>}>
+              <Outlet key={outletKey} />
+            </Suspense>
+          )}
         </main>
       </div>
     </div>

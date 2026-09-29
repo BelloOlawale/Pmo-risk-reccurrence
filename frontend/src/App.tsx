@@ -1,14 +1,24 @@
+import { lazy } from 'react';
 import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 
 import { Layout } from './components/Layout';
 import { ActiveRiskRegisterPage } from './pages/ActiveRiskRegisterPage';
 import { CreateRiskPage } from './pages/CreateRiskPage';
 import { IssueDetailPage } from './pages/IssueDetailPage';
-import { PortfolioDashboardPage } from './pages/PortfolioDashboardPage';
-import { ProjectDashboardPage } from './pages/ProjectDashboardPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { RiskDetailPage } from './pages/RiskDetailPage';
 import { RiskRegistersPage } from './pages/RiskRegistersPage';
+
+// Chart-heavy dashboards pull in ECharts (~1 MB). Load them on demand so the
+// first paint (register pages) ships a much smaller bundle. The Suspense
+// boundary lives inside the app shell (see Layout), so the sidebar/topbar stay
+// mounted while a page chunk downloads.
+const PortfolioDashboardPage = lazy(() =>
+  import('./pages/PortfolioDashboardPage').then((m) => ({ default: m.PortfolioDashboardPage })),
+);
+const ProjectDashboardPage = lazy(() =>
+  import('./pages/ProjectDashboardPage').then((m) => ({ default: m.ProjectDashboardPage })),
+);
 
 function LegacyProjectRedirect() {
   const { projectId } = useParams();

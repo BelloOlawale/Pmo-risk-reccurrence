@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 
 import App from './App';
 import { AuthProvider } from './auth/AuthContext';
+import { setAuthState } from './auth/authStore';
 import { isEntraConfigured, msalInstance } from './auth/msal';
 import './index.css';
 
@@ -22,24 +23,21 @@ function render() {
 /**
  * Bootstrap.
  *
- * msal-browser v3 refuses every API call until `initialize()` has resolved
- * (`blockAPICallsBeforeInitialize`). `MsalProvider` does call it, but from an
- * effect — and React runs child effects before parent effects, so
- * `EntraAuthGate.handleRedirectPromise()` always won that race and threw
- * `uninitialized_public_client_application`, breaking the SSO redirect flow.
- *
- * Awaiting initialize() here, before the tree mounts, makes every later call
- * (including MsalProvider's own) a safe no-op.
+ * We render immediately rather than awaiting `msalInstance.initialize()` first:
+ * waiting produced a blank screen on every load. The auth gate awaits the same
+ * (idempotent) initialize promise before resolving a session, which keeps the
+ * original fix for the child-before-parent effect race that used to break the
+ * SSO redirect. Until resolution finishes the API client defers requests.
  */
 if (isEntraConfigured) {
-  msalInstance
-    .initialize()
-    .catch((err: unknown) => {
-      // Render anyway: MsalProvider retries initialize() and surfaces the
-      // failure through the sign-in screen's error banner.
-      console.error('MSAL initialize() failed', err);
-    })
-    .finally(render);
+  void msalInstance.initialize().catch((err: unknown) => {
+    // Non-fatal: the gate retries initialize() and surfaces the failure via the
+    // sign-in screen's error banner.
+    console.error('MSAL initialize() failed', err);
+  });
 } else {
-  render();
+  // Dev mode has no session to resolve — unblock API requests right away.
+  setAuthState({ entra: false, ready: true });
 }
+
+render();

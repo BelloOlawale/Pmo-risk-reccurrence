@@ -14,6 +14,12 @@ export interface AuthState {
    * would mask "not signed in yet" as a confusing 401.
    */
   entra: boolean;
+  /**
+   * True once session/token resolution has finished (successfully, with no
+   * session, or with an error). Until then the API client defers requests so a
+   * page never fires an unauthenticated call during sign-in.
+   */
+  ready: boolean;
 }
 
 let state: AuthState = {
@@ -21,10 +27,26 @@ let state: AuthState = {
   devUserId: null,
   devRole: 'System Admin',
   entra: false,
+  ready: false,
 };
+
+let readyResolvers: Array<() => void> = [];
 
 export function setAuthState(next: Partial<AuthState>): void {
   state = { ...state, ...next };
+  if (state.ready && readyResolvers.length > 0) {
+    const resolvers = readyResolvers;
+    readyResolvers = [];
+    for (const resolve of resolvers) resolve();
+  }
+}
+
+/** Resolves once auth resolution has finished (immediately when already ready). */
+export function whenAuthReady(): Promise<void> {
+  if (state.ready) return Promise.resolve();
+  return new Promise((resolve) => {
+    readyResolvers.push(resolve);
+  });
 }
 
 export function getAuthState(): AuthState {

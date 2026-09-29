@@ -7,7 +7,6 @@ import type { LoginOptions } from '../api/types';
 import { isEntraConfigured, loginRequest, msalInstance } from './msal';
 import { setAuthState } from './authStore';
 import { useApi } from '../hooks/useApi';
-import { AuthShell } from '../components/auth/AuthShell';
 
 export interface AuthUser {
   upn: string;
@@ -17,6 +16,11 @@ export interface AuthUser {
 export interface AuthContextValue {
   isAuthenticated: boolean;
   isDevMode: boolean;
+  /**
+   * False only while an Entra session/token is being resolved. The app shell
+   * renders during this window and data fetching is deferred by the API client.
+   */
+  authReady: boolean;
   user: AuthUser | null;
   userId: number | null;
   role: string;
@@ -84,6 +88,7 @@ function DevAuthProvider({ children }: { children: ReactNode }) {
     () => ({
       isAuthenticated: true,
       isDevMode: true,
+      authReady: true,
       user: {
         upn: identity.userId !== null ? `user-${identity.userId}@local` : 'dev-admin@local',
         displayName: identity.userId !== null ? `Dev User ${identity.userId}` : 'Dev Admin',
@@ -110,21 +115,27 @@ function EntraAuthGate({ children }: { children: ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [testIdentity, setTestIdentity] = useState<AuthUser | null>(null);
+  const [authReady, setAuthReady] = useState(false);
   // Public endpoint: which non-Microsoft sign-in methods are offered.
   const { data: loginOptions } = useApi(
     () => api.get<LoginOptions>('/api/auth/login-options'),
     [],
   );
 
-  // Resolve the redirect response on load, then acquire a token. Crucially we
-  // do NOT render the app until a token exists, otherwise child pages fire
-  // /api requests with no bearer token ("Missing bearer token").
+  // Resolve the redirect response on load, then acquire a token. The app shell
+  // renders immediately (see Layout); the API client defers requests until
+  // authReady so pages never fire token-less calls during sign-in.
   useEffect(() => {
     setAuthState({ entra: true, devUserId: null });
     let cancelled = false;
 
     async function initialise() {
       try {
+        // Idempotent (MsalProvider also calls it). Awaiting it here fixes the
+        // ordering race where a child effect ran handleRedirectPromise before
+        // the provider's effect had initialized MSAL, which threw
+        // uninitialized_public_client_application and broke SSO.
+        await instance.initialize();
         const result = await instance.handleRedirectPromise();
         if (result?.account) {
           instance.setActiveAccount(result.account);
@@ -133,24 +144,36 @@ function EntraAuthGate({ children }: { children: ReactNode }) {
         if (!cancelled) setTokenError(err instanceof Error ? err.message : String(err));
       }
 
-      const account = instance.getActiveAccount() ?? instance.getAllAccounts()[0];
-      if (!account) {
-        return; // no session — the layout shows the Sign in prompt
-      }
-
       try {
-        const silent = await instance.acquireTokenSilent({ ...loginRequest, account });
-        if (!cancelled) {
-          setAccessToken(silent.accessToken);
-          setTokenError(null);
+        const account = instance.getActiveAccount() ?? instance.getAllAccounts()[0];
+        if (!account) {
+          return; // no session — the layout shows the Sign in prompt
         }
-      } catch {
-        // Consent/MFA/expired session: fall back to an interactive redirect,
-        // which navigates away rather than leaving the app token-less.
         try {
-          await instance.acquireTokenRedirect({ ...loginRequest, account });
-        } catch (err) {
-          if (!cancelled) setTokenError(err instanceof Error ? err.message : String(err));
+          const silent = await instance.acquireTokenSilent({ ...loginRequest, account });
+          if (!cancelled) {
+            setAccessToken(silent.accessToken);
+            setTokenError(null);
+          }
+        } catch {
+          // Consent/MFA/expired session: fall back to an interactive redirect,
+          // which navigates away rather than leaving the app token-less.
+          try {
+            await instance.acquireTokenRedirect({ ...loginRequest, account });
+          } catch (err) {
+            if (!cancelled) setTokenError(err instanceof Error ? err.message : String(err));
+          }
+        }
+      } catch (err) {
+        // MSAL threw while reading accounts (e.g. initialize failed). Surface
+        // it on the sign-in screen rather than leaving the app stuck loading.
+        if (!cancelled) setTokenError(err instanceof Error ? err.message : String(err));
+      } finally {
+        // Resolution is done either way; unblock deferred API calls (they 401
+        // only if the user genuinely has no session).
+        if (!cancelled) {
+          setAuthReady(true);
+          setAuthState({ ready: true });
         }
       }
     }
@@ -192,6 +215,7 @@ function EntraAuthGate({ children }: { children: ReactNode }) {
     () => ({
       isAuthenticated,
       isDevMode: false,
+      authReady,
       user,
       userId: null,
       role: '',
@@ -222,40 +246,9 @@ function EntraAuthGate({ children }: { children: ReactNode }) {
       testIdentity,
       loginOptions,
       tokenError,
+      authReady,
     ],
   );
-
-  // Hold the app back until we have a token (or there is no session to resolve).
-  // Rendered in the dedicated auth layout so a half-established session never
-  // flashes the application shell.
-  if (accounts.length > 0 && !accessToken && !tokenError) {
-    return (
-      <AuthContext.Provider value={value}>
-        <AuthShell>
-          <section className="auth-card auth-card-status" aria-live="polite">
-            <div className={tokenError ? 'auth-status-icon auth-status-error' : 'auth-status-icon'} aria-hidden="true">
-              {tokenError ? '!' : <span className="auth-spinner" />}
-            </div>
-            <h1 className="auth-card-heading">
-              {tokenError ? 'Sign-in failed' : 'Signing you in…'}
-            </h1>
-            <p className="auth-card-sub">
-              {tokenError ?? 'Acquiring your Microsoft access token…'}
-            </p>
-            {tokenError ? (
-              <button
-                type="button"
-                className="auth-primary-btn"
-                onClick={() => instance.acquireTokenRedirect(loginRequest)}
-              >
-                Retry sign-in
-              </button>
-            ) : null}
-          </section>
-        </AuthShell>
-      </AuthContext.Provider>
-    );
-  }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
