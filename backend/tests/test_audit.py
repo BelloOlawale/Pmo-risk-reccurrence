@@ -27,18 +27,18 @@ def _create_risk(client: TestClient, project_id: int, **overrides: object) -> An
 def test_transition_writes_audit(client: TestClient) -> None:
     project = _create_project(client)
     risk = _create_risk(client, project["id"])
-    assert risk["status"] == "Suggested"
+    assert risk["status"] == "Open"
 
-    resp = client.patch(f"/api/risks/{risk['id']}", json={"status": "Open"})
+    resp = client.patch(f"/api/risks/{risk['id']}", json={"status": "In Progress"})
     assert resp.status_code == 200
-    assert resp.json()["status"] == "Open"
+    assert resp.json()["status"] == "In Progress"
 
     history = client.get(f"/api/risks/{risk['id']}/history").json()
     assert len(history) == 1
     assert history[0]["action"] == "status_change"
     assert history[0]["field"] == "status"
-    assert history[0]["old_value"] == "Suggested"
-    assert history[0]["new_value"] == "Open"
+    assert history[0]["old_value"] == "Open"
+    assert history[0]["new_value"] == "In Progress"
 
 
 def test_invalid_transition_rejected(client: TestClient) -> None:

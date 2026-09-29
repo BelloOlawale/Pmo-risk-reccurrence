@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api, ApiError } from '../api/client';
 import type { SuggestedRisk, SuggestionResult } from '../api/types';
@@ -8,27 +8,6 @@ interface SuggestionsPanelProps {
   projectId: number;
   /** Called after any accept/dismiss so the parent can refresh the register preview. */
   onChanged?: () => void;
-}
-
-/** Matches the Markdown links the backend `linkify` step writes for citations. */
-const LINK_RE = /\[([^\]]+)\]\(([^)]+)\)/g;
-
-/** Render text, turning `[label](url)` citations into real links. */
-function LinkedText({ text }: { text: string }) {
-  const parts: ReactNode[] = [];
-  let last = 0;
-  for (const match of text.matchAll(LINK_RE)) {
-    const index = match.index ?? 0;
-    if (index > last) parts.push(text.slice(last, index));
-    parts.push(
-      <a key={`${index}-${match[1]}`} href={match[2]} target="_blank" rel="noreferrer">
-        {match[1]}
-      </a>,
-    );
-    last = index + match[0].length;
-  }
-  if (last < text.length) parts.push(text.slice(last));
-  return <>{parts}</>;
 }
 
 /**
@@ -44,13 +23,11 @@ function LinkedText({ text }: { text: string }) {
  * `evaluation`, which the panel surfaces as a banner.
  *
  * Only the information a PMO manager needs to review a suggestion is shown:
- * description, rating and actions. Technical retrieval metadata (risk id,
- * match type, source file, similarity) stays internal.
+ * description, rating and actions. The AI-generated landscape overview,
+ * recommendations and per-risk analysis are deliberately not surfaced here.
  */
 export function SuggestionsPanel({ projectId, onChanged }: SuggestionsPanelProps) {
   const [suggestions, setSuggestions] = useState<SuggestedRisk[]>([]);
-  const [overview, setOverview] = useState<string | null>(null);
-  const [recommendations, setRecommendations] = useState<string[]>([]);
   const [llmError, setLlmError] = useState<string | null>(null);
   const [semanticError, setSemanticError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -71,8 +48,6 @@ export function SuggestionsPanel({ projectId, onChanged }: SuggestionsPanelProps
       // no second route to reconcile against.
       const result = await api.post<SuggestionResult>(`/api/projects/${projectId}/suggest`);
       setSuggestions(result.suggested_risks);
-      setOverview(result.overview);
-      setRecommendations(result.recommendations);
       setLlmError(result.evaluation.llm_error ?? null);
       setSemanticError(result.evaluation.semantic_error ?? null);
     } catch (err) {
@@ -199,8 +174,6 @@ export function SuggestionsPanel({ projectId, onChanged }: SuggestionsPanelProps
     [suggestions, selected],
   );
 
-  const hasAnalysis = Boolean(overview) || recommendations.length > 0;
-
   return (
     <SectionCard
       title={`Suggested risks (${suggestions.length})`}
@@ -226,25 +199,6 @@ export function SuggestionsPanel({ projectId, onChanged }: SuggestionsPanelProps
         <div className="loading">Analysing historical risks…</div>
       ) : (
         <>
-          {hasAnalysis ? (
-            <div className="suggestion-overview">
-              {overview ? (
-                <p className="suggestion-overview-text">
-                  <LinkedText text={overview} />
-                </p>
-              ) : null}
-              {recommendations.length > 0 ? (
-                <ul className="suggestion-recommendations">
-                  {recommendations.map((item, index) => (
-                    <li key={index}>
-                      <LinkedText text={item} />
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-          ) : null}
-
           {suggestions.length === 0 ? (
             <div className="empty-state">
               No suggested risks remain for this register. You can still add risks manually with
@@ -309,11 +263,6 @@ export function SuggestionsPanel({ projectId, onChanged }: SuggestionsPanelProps
                           <span className="suggested-desc" title={s.description}>
                             {s.description}
                           </span>
-                          {s.analysis ? (
-                            <span className="suggested-analysis">
-                              <LinkedText text={s.analysis} />
-                            </span>
-                          ) : null}
                         </td>
                         <td className="suggested-rating-cell">
                           {s.risk_rating ? (

@@ -60,9 +60,9 @@ def _open_risk(client: TestClient, project: dict, *, user_id: int) -> dict:
         },
         headers=_headers(user_id, "Project Manager"),
     ).json()
-    accepted = client.post(f"/api/risks/{risk['id']}/accept").json()
-    assert accepted["status"] == "Open"
-    return accepted
+    # Manually added risks are already Open; no acceptance step needed.
+    assert risk["status"] == "Open"
+    return risk
 
 
 def _materialize(client: TestClient, db: Session, risk_id: int) -> dict:

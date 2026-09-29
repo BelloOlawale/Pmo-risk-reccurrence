@@ -537,7 +537,9 @@ def accept_suggestion(
 
     # Enrich the accepted risk from the matched historical record. Dates follow
     # the existing business rules: a start date is only copied when it is not in
-    # the past, and the end date stays SLA-calculated (never invented).
+    # the past, and the end date stays SLA-calculated (never invented). The
+    # owner is deliberately *not* copied: every risk gets its owner assigned
+    # manually by a human, never inherited or auto-filled from history.
     source_start = None
     if source.risk_start_date is not None and source.risk_start_date >= dt.date.today():
         source_start = source.risk_start_date
@@ -554,7 +556,7 @@ def accept_suggestion(
         risk_rating=final_rating,
         response_strategy=source.response_strategy,
         response_plan=source.response_plan,
-        owner_user_id=source.owner_user_id,
+        owner_user_id=None,
         identified_during=source.identified_during,
         risk_start_date=source_start,
         risk_end_date=(

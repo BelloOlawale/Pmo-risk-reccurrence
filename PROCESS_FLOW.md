@@ -182,7 +182,7 @@ actually retrieved — a groundedness check rejects any hallucinated reference.
 flowchart TD
     A["Suggested risks listed"] --> B{"PM action?"}
     B -->|"Accept"| C["Risk created as<br/>source = Historical"]
-    C --> D["Status → Open<br/>owner = PM (default)"]
+    C --> D["Status → Open<br/>owner = Unassigned (assigned manually)"]
     D --> E["Traceability kept:<br/>source_file_name/url, source_risk_id"]
     E --> F["Owner-assignment notification<br/>(owner + PM + PMO Lead + Practice Lead)"]
     B -->|"Dismiss"| G["suggestion_dismissal recorded<br/>(per-project exclusion)"]
@@ -194,10 +194,12 @@ flowchart TD
 ```
 
 - **Accept** creates an `Open` risk carrying traceability back to the original
-  register file and row.
+  register file and row. No owner is auto-assigned — every risk's owner is
+  chosen manually afterwards.
 - **Dismiss** writes a per-project exclusion (`suggestion_dismissal`) so the
   same suggestion never resurfaces for that project.
-- **Quick Add** lets a PM capture a brand-new risk not in the historical corpus.
+- **Quick Add** lets a PM capture a brand-new risk not in the historical corpus;
+  it is created directly as `Open` (no acceptance step) with no owner.
 
 ---
 

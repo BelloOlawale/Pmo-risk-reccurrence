@@ -127,8 +127,8 @@ Suggested ──► Open ──► In Progress ──► Escalated ──► Eve
 
 | Status | Meaning |
 |---|---|
-| Suggested | Created by LLM suggestion or Quick Add; not yet accepted |
-| Open | Accepted and live; owner + SLA assigned; awaiting first action |
+| Suggested | Created by an LLM/historical suggestion; not yet accepted |
+| Open | Live (accepted or manually added); SLA assigned, owner assigned manually; awaiting first action |
 | In Progress | Owner acknowledged / working |
 | Escalated | SLA breached (no activity before deadline) |
 | Event | Risk materialised (displays as "Materialized"); set **automatically** when the Risk End Date passes with the risk still unresolved, or **deliberately** when the owner/PM changes the status to Event |

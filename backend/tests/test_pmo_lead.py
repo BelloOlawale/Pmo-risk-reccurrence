@@ -45,7 +45,7 @@ def _resolved_risk(client: TestClient, project: dict, *, pm_user_id: int) -> dic
         },
         headers=_headers(pm_user_id, "Project Manager"),
     ).json()
-    assert client.post(f"/api/risks/{risk['id']}/accept").status_code == 200
+    assert risk["status"] == "Open"
     resp = client.patch(
         f"/api/risks/{risk['id']}",
         json={"status": "Resolved"},

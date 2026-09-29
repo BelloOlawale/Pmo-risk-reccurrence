@@ -1,10 +1,11 @@
 """Risk enrichment on suggestion acceptance + form option sets.
 
 When a suggested risk is accepted the matched historical record is used to
-populate the full risk (category, risk source, response strategy/plan, owner,
+populate the full risk (category, risk source, response strategy/plan,
 lifecycle, dates) — exact-match enrichment grounded in the source data, never
 invented. Dates keep the existing business rules (no past start dates; end
-date stays SLA-calculated).
+date stays SLA-calculated). The owner is deliberately not enriched: owners are
+always assigned manually.
 """
 
 from __future__ import annotations
@@ -87,7 +88,8 @@ def test_accept_suggestion_copies_enriched_fields(db_session: Session) -> None:
         "Run the migration over the weekend and keep a rollback plan."
     )
     assert accepted.identified_during == "Execution"
-    assert accepted.owner_user_id == owner.id
+    # Owner comes from neither history nor the project PM — it is set manually.
+    assert accepted.owner_user_id is None
     assert accepted.risk_start_date == dt.date.today()
     # End date remains governed by the existing SLA calculation, not invented.
     assert accepted.risk_end_date is not None

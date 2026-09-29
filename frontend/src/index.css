@@ -418,6 +418,17 @@ a:hover {
   min-width: 0;
 }
 
+.card-footer {
+  padding: 14px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.register-done-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .card-header-title {
   display: inline-flex;
   align-items: center;
@@ -1117,37 +1128,6 @@ input:disabled {
   border-radius: var(--radius-sm);
   padding: 12px 14px;
   margin-bottom: 16px;
-}
-
-.suggestion-overview {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 14px 16px;
-  margin-bottom: 14px;
-}
-
-.suggestion-overview-text {
-  margin: 0;
-  color: var(--text);
-}
-
-.suggestion-recommendations {
-  margin: 8px 0 0;
-  padding-left: 18px;
-  color: var(--text);
-}
-
-.suggestion-recommendations li {
-  margin-bottom: 4px;
-}
-
-.suggested-analysis {
-  display: block;
-  margin-top: 4px;
-  color: var(--text-muted);
-  font-size: 12px;
-  white-space: normal;
 }
 
 .tone-danger {

@@ -208,7 +208,22 @@ def close_project(
     return project
 
 
-def create_risk(db: Session, payload: schemas.RiskCreate) -> models.Risk:
+def create_risk(
+    db: Session,
+    payload: schemas.RiskCreate,
+    *,
+    status: str = RiskStatus.OPEN.value,
+) -> models.Risk:
+    """Create a risk for a register.
+
+    Manually added risks start life as ``Open`` — they are already accepted by
+    the person capturing them, so there is no suggestion/acceptance step. The
+    status is overridable so tests and internal callers can still create a
+    ``Suggested`` risk (the state the accept/dismiss lifecycle operates on).
+
+    No owner is assigned implicitly: ``owner_user_id`` is only ever the value
+    the caller explicitly supplied, and owners are always assigned by a human.
+    """
     rating = compute_risk_rating(payload.likelihood, payload.impact)
     now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
     risk = models.Risk(
@@ -228,7 +243,7 @@ def create_risk(db: Session, payload: schemas.RiskCreate) -> models.Risk:
         risk_end_date=compute_end_date(payload.risk_start_date, rating),
         source=payload.source or "Custom",
         identified_during=payload.identified_during,
-        status=RiskStatus.SUGGESTED.value,
+        status=status,
         created_at=now,
         updated_at=now,
         sla_deadline=compute_deadline(
@@ -359,21 +374,18 @@ def ensure_issue_for_risk(
 def accept_risk(
     db: Session, risk: models.Risk, actor_user_id: int | None = None
 ) -> models.Risk:
-    """Accept a Suggested risk: transition to Open, assign owner, start SLA.
+    """Accept a Suggested risk: transition to Open and start the SLA clock.
 
-    The owner defaults to the project's PM when the risk has no explicit owner.
-    Raises :class:`InvalidTransitionError` if the risk is not Suggested.
+    Ownership is never assigned implicitly — the accepted risk keeps whatever
+    explicit ``owner_user_id`` it already had (usually none), and a human
+    assigns the owner afterwards. Raises :class:`InvalidTransitionError` if the
+    risk is not Suggested.
     """
     target = ensure_transition(risk.status, RiskStatus.OPEN.value)
     now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
     old_status = risk.status
     risk.status = target.value
     risk.accepted_date = now
-
-    owner_changed = False
-    if risk.owner_user_id is None and risk.project.pm_user_id is not None:
-        risk.owner_user_id = risk.project.pm_user_id
-        owner_changed = True
 
     if risk.sla_deadline is None:
         risk.sla_deadline = compute_deadline(
@@ -390,16 +402,6 @@ def accept_risk(
         new_value=target.value,
         actor_user_id=actor_user_id,
     )
-    if owner_changed:
-        record_change(
-            db,
-            risk,
-            action="field_edit",
-            field="owner_user_id",
-            old_value=None,
-            new_value=risk.owner_user_id,
-            actor_user_id=actor_user_id,
-        )
 
     db.commit()
     db.refresh(risk)

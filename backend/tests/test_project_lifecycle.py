@@ -187,7 +187,7 @@ def test_close_allowed_after_all_risks_resolved(client: TestClient) -> None:
         },
         headers=_headers(9, "Project Manager"),
     ).json()
-    assert client.post(f"/api/risks/{risk['id']}/accept").status_code == 200
+    assert risk["status"] == "Open"
     assert (
         client.patch(
             f"/api/risks/{risk['id']}",
@@ -223,7 +223,6 @@ def test_risk_status_does_not_change_project_status(client: TestClient) -> None:
             headers=_headers(6, "Project Manager"),
         ).json()
         risk_ids.append(risk["id"])
-        assert client.post(f"/api/risks/{risk['id']}/accept").status_code == 200
         assert (
             client.patch(
                 f"/api/risks/{risk['id']}",

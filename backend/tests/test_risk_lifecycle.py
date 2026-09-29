@@ -40,11 +40,14 @@ def _suggested_risk(db: Session, project: models.Project) -> models.Risk:
             likelihood="High",
             impact="High",
         ),
+        status=RiskStatus.SUGGESTED.value,
     )
 
 
 class TestAccept:
-    def test_accept_transitions_to_open_and_assigns_owner(self, db_session: Session) -> None:
+    def test_accept_transitions_to_open_without_assigning_owner(
+        self, db_session: Session
+    ) -> None:
         user = models.User(upn="pm@example.com", display_name="PM")
         db_session.add(user)
         db_session.flush()
@@ -54,7 +57,8 @@ class TestAccept:
 
         accepted = accept_risk(db_session, risk)
         assert accepted.status == RiskStatus.OPEN.value
-        assert accepted.owner_user_id == user.id
+        # Owners are assigned manually; acceptance never auto-fills one.
+        assert accepted.owner_user_id is None
         assert accepted.accepted_date is not None
         assert accepted.sla_deadline is not None
 
@@ -123,7 +127,7 @@ class TestQuickAdd:
                 source="Kickoff",
             ),
         )
-        assert risk.status == RiskStatus.SUGGESTED.value
+        assert risk.status == RiskStatus.OPEN.value
         assert risk.risk_rating == "Medium"  # Low x High -> Medium
         assert risk.source == "Kickoff"
         assert risk.category is None

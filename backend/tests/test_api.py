@@ -63,7 +63,9 @@ def test_create_risk_computes_rating(client: TestClient) -> None:
     assert resp.status_code == 201
     data = resp.json()
     assert data["risk_rating"] == "High"  # High x Medium -> High (3x3 matrix)
-    assert data["status"] == "Suggested"
+    # Manually added risks are already accepted: they start as Open.
+    assert data["status"] == "Open"
+    assert data["owner_user_id"] is None
     assert data["risk_code"].startswith("RSK-")
 
 

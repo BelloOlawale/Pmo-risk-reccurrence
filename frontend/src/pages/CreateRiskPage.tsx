@@ -310,11 +310,6 @@ function RegisterBuilder({ project }: { project: Project }) {
             risk register.
           </div>
         </div>
-        <div className="page-header-actions">
-          <button className="btn btn-primary" onClick={() => navigate(`/active-risk/${project.id}`)}>
-            Done
-          </button>
-        </div>
       </div>
 
       <div className="stack">
@@ -366,6 +361,14 @@ function RegisterBuilder({ project }: { project: Project }) {
                 </table>
               </div>
             )}
+          </div>
+          <div className="card-footer register-done-actions">
+            <button
+              className="btn btn-primary"
+              onClick={() => navigate(`/active-risk/${project.id}`)}
+            >
+              Done
+            </button>
           </div>
         </div>
       </div>
