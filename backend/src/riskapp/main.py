@@ -26,6 +26,7 @@ from riskapp.auth import (
     require_roles,
 )
 from riskapp.blob import AzureBlobStorage, BlobStorageProvider, register_blob_name
+from riskapp.cache import TtlCache
 from riskapp.config import settings
 from riskapp.db import get_db
 from riskapp.domain.status import InvalidTransitionError, RiskStatus
@@ -78,6 +79,11 @@ app.add_middleware(
 )
 
 DbDep = Annotated[Session, Depends(get_db)]
+
+# Small, slow-changing option sets that every register/form page loads. Caching
+# them removes a cross-region DB round-trip from the common page load.
+_users_cache = TtlCache(ttl_seconds=60)
+_risk_meta_cache = TtlCache(ttl_seconds=300)
 
 
 def get_chat_provider() -> ChatProvider:
@@ -278,9 +284,14 @@ def list_directory_users(db: DbDep) -> list[schemas.UserRead]:
 
     Any authenticated caller may read it (it is an internal colleague list);
     rows are created automatically on first sign-in, so a brand-new user only
-    appears after they have logged in at least once.
+    appears after they have logged in at least once. The list is stable for the
+    life of a page, so it is served from a short TTL cache.
     """
-    return [schemas.UserRead.model_validate(user) for user in list_users(db)]
+
+    def load() -> list[schemas.UserRead]:
+        return [schemas.UserRead.model_validate(user) for user in list_users(db)]
+
+    return _users_cache.get_or_set(load)
 
 
 @app.get("/api/risk-meta")
@@ -289,8 +300,13 @@ def risk_meta(db: DbDep) -> dict[str, object]:
 
     Categories and project-life-cycle values come from the values already used
     in the database (no invented taxonomy). Risk sources and response
-    strategies are the application's existing literals.
+    strategies are the application's existing literals. Derived from the whole
+    register, so it changes slowly and is served from a TTL cache.
     """
+    return _risk_meta_cache.get_or_set(lambda: _compute_risk_meta(db))
+
+
+def _compute_risk_meta(db: Session) -> dict[str, object]:
     categories = sorted(
         {str(category) for category in db.scalars(
             select(models.Risk.category).where(

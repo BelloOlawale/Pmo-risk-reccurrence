@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from riskapp import models
+from riskapp.cache import clear_caches
 from riskapp.config import settings
 from riskapp.db import get_db
 from riskapp.main import app
@@ -32,6 +33,14 @@ def _force_dev_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "acs_endpoint", "")
     monkeypatch.setattr(settings, "acs_access_key", "")
     monkeypatch.setattr(settings, "acs_sender_email", "")
+
+
+@pytest.fixture(autouse=True)
+def _clear_api_caches() -> Iterator[None]:
+    """Start each test with empty in-process caches (no cross-test leakage)."""
+    clear_caches()
+    yield
+    clear_caches()
 
 
 @pytest.fixture()
