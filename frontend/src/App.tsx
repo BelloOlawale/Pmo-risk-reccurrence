@@ -4,6 +4,7 @@ import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ActiveRiskRegisterPage } from './pages/ActiveRiskRegisterPage';
 import { CreateRiskPage } from './pages/CreateRiskPage';
+import { ExternalAcknowledgePage } from './pages/ExternalAcknowledgePage';
 import { IssueDetailPage } from './pages/IssueDetailPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { RiskDetailPage } from './pages/RiskDetailPage';
@@ -28,6 +29,9 @@ function LegacyProjectRedirect() {
 export default function App() {
   return (
     <Routes>
+      {/* Public, token-scoped route for external owners (no app shell/auth). */}
+      <Route path="/acknowledge/:token" element={<ExternalAcknowledgePage />} />
+
       <Route element={<Layout />}>
         <Route path="/" element={<Navigate to="/active-risk" replace />} />
         <Route path="/create-risk" element={<CreateRiskPage />} />

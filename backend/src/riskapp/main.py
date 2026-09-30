@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session, selectinload
@@ -34,6 +34,15 @@ from riskapp.db import get_db
 from riskapp.domain.sla import as_naive_utc
 from riskapp.domain.status import InvalidTransitionError, RiskStatus
 from riskapp.embeddings import AzureOpenAIEmbeddings, EmbeddingProvider
+from riskapp.excel_export import (
+    build_risk_register_workbook,
+    risk_register_filename,
+)
+from riskapp.external import (
+    EXTERNAL,
+    decode_acknowledgement_token,
+    get_or_create_external_owner,
+)
 from riskapp.import_api import (
     create_import_job,
     get_import_job,
@@ -72,7 +81,7 @@ from riskapp.suggestions import (
     list_suggestions,
 )
 
-app = FastAPI(title="Risk Recurrence Predictor")
+app = FastAPI(title="WRAGBY Risk Intell — PMO Risk Management")
 
 app.add_middleware(
     CORSMiddleware,
@@ -80,6 +89,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Let the browser read the download filename on the Excel export.
+    expose_headers=["Content-Disposition"],
 )
 
 DbDep = Annotated[Session, Depends(get_db)]
@@ -201,6 +212,89 @@ def login_options() -> schemas.LoginOptions:
     )
 
 
+def _resolve_external_risk(db: Session, token: str) -> models.Risk:
+    """Resolve a signed acknowledgement token to its single external-owner risk.
+
+    Any failure (bad signature, expiry, wrong owner, non-external or inactive
+    owner) is reported as a 404 so the link leaks nothing about the risk.
+    """
+    claims = decode_acknowledgement_token(token)
+    if claims is None:
+        raise HTTPException(
+            status_code=404, detail="This acknowledgement link is invalid or has expired."
+        )
+    try:
+        owner_id = int(claims["sub"])
+        risk_id = int(claims["risk_id"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=404, detail="This acknowledgement link is invalid or has expired."
+        ) from exc
+
+    risk = db.scalar(
+        select(models.Risk)
+        .options(selectinload(models.Risk.owner), selectinload(models.Risk.project))
+        .where(models.Risk.id == risk_id)
+    )
+    owner = risk.owner if risk is not None else None
+    if (
+        risk is None
+        or risk.owner_user_id != owner_id
+        or owner is None
+        or owner.owner_type != EXTERNAL
+        or not owner.is_active
+    ):
+        raise HTTPException(
+            status_code=404, detail="This acknowledgement link is invalid or has expired."
+        )
+    return risk
+
+
+def _external_ack_read(risk: models.Risk) -> schemas.ExternalAcknowledgeRead:
+    owner = risk.owner
+    return schemas.ExternalAcknowledgeRead(
+        risk_code=risk.risk_code,
+        description=risk.description,
+        project_name=risk.project.name if risk.project else "",
+        risk_rating=risk.risk_rating,
+        likelihood=risk.likelihood,
+        impact=risk.impact,
+        status=risk.status,
+        response_strategy=risk.response_strategy,
+        response_plan=risk.response_plan,
+        risk_start_date=risk.risk_start_date,
+        risk_end_date=risk.risk_end_date,
+        sla_deadline=risk.sla_deadline,
+        owner_name=owner.display_name if owner else "",
+        owner_email=owner.upn if owner else "",
+        acknowledged=risk.sla_acknowledged,
+        acknowledged_at=risk.acknowledged_at,
+    )
+
+
+@app.get(
+    "/api/external/acknowledge/{token}",
+    response_model=schemas.ExternalAcknowledgeRead,
+)
+def external_acknowledge_info(
+    token: str, db: DbDep
+) -> schemas.ExternalAcknowledgeRead:
+    """Public: show the single risk behind an external acknowledgement link."""
+    return _external_ack_read(_resolve_external_risk(db, token))
+
+
+@app.post(
+    "/api/external/acknowledge/{token}",
+    response_model=schemas.ExternalAcknowledgeRead,
+)
+def external_acknowledge(token: str, db: DbDep) -> schemas.ExternalAcknowledgeRead:
+    """Public: acknowledge the assigned risk (idempotent) for an external owner."""
+    risk = _resolve_external_risk(db, token)
+    if not risk.sla_acknowledged:
+        risk = acknowledge_risk(db, risk, actor_user_id=risk.owner_user_id)
+    return _external_ack_read(risk)
+
+
 @app.post("/api/auth/login", response_model=schemas.TestLoginToken)
 def password_login(
     payload: schemas.PasswordLoginRequest, db: DbDep
@@ -261,6 +355,11 @@ def set_user_credentials(
     user = db.get(models.User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
+    if user.owner_type == EXTERNAL:
+        raise HTTPException(
+            status_code=409,
+            detail="External risk owners cannot be granted application access.",
+        )
     user.password_hash = hash_password(payload.password)
     if payload.role is not None:
         user.role = payload.role
@@ -297,6 +396,33 @@ def list_directory_users(db: DbDep) -> list[schemas.UserRead]:
         return [schemas.UserRead.model_validate(user) for user in list_users(db)]
 
     return _users_cache.get_or_set(load)
+
+
+@app.post(
+    "/api/external-owners",
+    response_model=schemas.UserRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_external_owner(
+    payload: schemas.ExternalOwnerCreate, principal: ProjectManagerDep, db: DbDep
+) -> schemas.UserRead:
+    """Capture an external Risk Owner (a non-Wragby person) for assignment.
+
+    PM / PMO Lead / System Admin only. Email is normalized and validated, and a
+    repeat email returns the existing external owner instead of duplicating it.
+    """
+    try:
+        owner = get_or_create_external_owner(
+            db,
+            full_name=payload.full_name,
+            email=payload.email,
+            organization=payload.organization,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # The owner directory is TTL-cached; drop it so the new person is pickable.
+    _users_cache.clear()
+    return schemas.UserRead.model_validate(owner)
 
 
 @app.get("/api/risk-meta")
@@ -497,7 +623,7 @@ def list_risks(principal: PrincipalDep, db: DbDep) -> list[schemas.RiskRead]:
     risks; owners see the risks assigned to them; PMs see the risks of their
     own projects.
     """
-    stmt = select(models.Risk)
+    stmt = select(models.Risk).options(selectinload(models.Risk.owner))
     if not principal.is_pmo_or_admin:
         stmt = stmt.where(
             or_(
@@ -744,10 +870,44 @@ def list_project_risks(
         raise HTTPException(status_code=403, detail="Forbidden")
     risks = db.scalars(
         select(models.Risk)
+        .options(selectinload(models.Risk.owner))
         .where(models.Risk.project_id == project_id)
         .order_by(models.Risk.created_at.desc(), models.Risk.id.desc())
     ).all()
     return [schemas.RiskRead.model_validate(r) for r in risks]
+
+
+@app.get("/api/projects/{project_id}/risks/export")
+def export_project_risks(
+    project_id: int, principal: PrincipalDep, db: DbDep
+) -> Response:
+    """Download this Risk Register as a formatted .xlsx workbook.
+
+    Exports the current database rows for the register (never mocked data),
+    including internal/external owner details and acknowledgement state.
+    """
+    project = get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not can_access_project(principal, project):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    risks = list(
+        db.scalars(
+            select(models.Risk)
+            .options(selectinload(models.Risk.owner))
+            .where(models.Risk.project_id == project_id)
+            .order_by(models.Risk.created_at.desc(), models.Risk.id.desc())
+        ).all()
+    )
+    content = build_risk_register_workbook(project, risks)
+    filename = risk_register_filename(project.name)
+    return Response(
+        content=content,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.post(

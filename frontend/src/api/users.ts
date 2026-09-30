@@ -1,12 +1,14 @@
-import { api } from './client';
-import type { User } from './types';
-import { useApi } from '../hooks/useApi';
+import { useCallback, useEffect, useState } from 'react';
 
-// Users are created on first sign-in, so the directory is small and stable for
-// the life of a session. Cache it at module scope so every picker/table shares
-// one request instead of refetching per component.
+import { api } from './client';
+import type { ExternalOwnerCreatePayload, User } from './types';
+
+// External owners are captured by PMs mid-workflow, so the directory can change
+// during a session (we refresh it after creating one). Cache it at module scope
+// so every picker/table shares one request, and notify subscribers on refresh.
 let cache: User[] | null = null;
 let inflight: Promise<User[]> | null = null;
+const listeners = new Set<() => void>();
 
 export function fetchUsers(): Promise<User[]> {
   if (cache) return Promise.resolve(cache);
@@ -24,10 +26,55 @@ export function fetchUsers(): Promise<User[]> {
   return inflight;
 }
 
-/** The user directory. Returns [] until loaded (and on failure). */
+/** Force a reload of the directory (after creating an external owner). */
+export async function refreshUsers(): Promise<User[]> {
+  cache = null;
+  inflight = null;
+  const users = await fetchUsers();
+  for (const listener of listeners) listener();
+  return users;
+}
+
+/** The user directory (internal + external). Returns [] until loaded. */
 export function useUsers(): User[] {
-  const { data } = useApi(fetchUsers, []);
-  return data ?? cache ?? [];
+  const [users, setUsers] = useState<User[]>(() => cache ?? []);
+
+  const sync = useCallback(() => {
+    if (cache) setUsers(cache);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    fetchUsers()
+      .then((loaded) => {
+        if (active) setUsers(loaded);
+      })
+      .catch(() => {
+        // Directory is best-effort for display; pickers just stay empty.
+      });
+    listeners.add(sync);
+    return () => {
+      active = false;
+      listeners.delete(sync);
+    };
+  }, [sync]);
+
+  return users;
+}
+
+/** Capture a new external Risk Owner and refresh the shared directory. */
+export async function createExternalOwner(
+  payload: ExternalOwnerCreatePayload,
+): Promise<User> {
+  const owner = await api.post<User>('/api/external-owners', payload);
+  // Refresh is best-effort: the owner exists even if the directory refetch
+  // fails, and the picker falls back to the row it already holds.
+  try {
+    await refreshUsers();
+  } catch {
+    // Ignore: selection still works via the returned owner.
+  }
+  return owner;
 }
 
 /** Build a human-readable name from an email/UPN local part. */
@@ -55,6 +102,11 @@ export function userDisplayName(user: User): string {
 /** The person's email address (their UPN). */
 export function userEmail(user: User): string {
   return user.upn;
+}
+
+/** True when the directory row is an external (non-Wragby) owner. */
+export function isExternalUser(user: User | null | undefined): boolean {
+  return user?.owner_type === 'External';
 }
 
 /** Display name for a risk/issue owner, falling back to `User #id`. */

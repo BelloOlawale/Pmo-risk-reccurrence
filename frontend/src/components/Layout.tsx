@@ -126,7 +126,10 @@ export function Layout() {
         <header className="topbar">
           <div className="topbar-title">
             <div className="topbar-brand">
-              <span className="topbar-title-main">WRAGBY RISK INTELL</span>
+              <span className="topbar-title-main">
+                <span className="brand-wragby">WRAGBY</span>{' '}
+                <span className="brand-intell">Risk Intell</span>
+              </span>
               <span className="topbar-subtitle">PMO Risk Management</span>
             </div>
           </div>

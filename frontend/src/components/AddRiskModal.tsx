@@ -235,6 +235,7 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
               <label>Owner</label>
               <UserPicker
                 users={users}
+                includeExternal
                 selectedUserId={
                   form.owner_user_id === '' ? null : Number(form.owner_user_id)
                 }

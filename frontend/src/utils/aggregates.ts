@@ -239,12 +239,12 @@ export function categoryDistribution(risks: Risk[], topN = 10): NameValue[] {
   return [...top, { name: 'Other', value: other }];
 }
 
-/** Escalated vs non-escalated split for a compact donut. */
-export function escalatedSplit(risks: Risk[]): NameValue[] {
-  const escalated = risks.filter((r) => r.status === 'Escalated').length;
+/** Events vs non-events split for a compact donut (real Event risks). */
+export function eventSplit(risks: Risk[]): NameValue[] {
+  const events = risks.filter((r) => r.status === 'Event').length;
   return [
-    { name: 'Escalated', value: escalated },
-    { name: 'Not escalated', value: risks.length - escalated },
+    { name: 'Events', value: events },
+    { name: 'Not events', value: risks.length - events },
   ];
 }
 

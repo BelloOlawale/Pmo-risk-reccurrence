@@ -1,4 +1,4 @@
-"""PMO Risk Recurrence Predictor — backend package."""
+"""WRAGBY Risk Intell — PMO Risk Management backend package."""
 
 from riskapp.celery_app import celery_app
 

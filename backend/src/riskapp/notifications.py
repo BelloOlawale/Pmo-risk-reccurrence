@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from riskapp import models
 from riskapp.config import settings
+from riskapp.external import acknowledgement_url
 
 logger = logging.getLogger(__name__)
 
@@ -259,10 +260,19 @@ class NotificationService:
         if risk is None:
             return f"<p>{escaped}</p>"
         link = f"{settings.app_base_url}/risks/{risk.id}"
-        return (
-            f"<p>{escaped}</p>"
-            f'<p><a href="{link}">Open risk {risk.risk_code} in Risk Recurrence</a></p>'
-        )
+        code = html.escape(risk.risk_code)
+        parts = [
+            f"<p>{escaped}</p>",
+            f'<p><a href="{link}">Open risk {code} in Wragby Risk Intell</a></p>',
+        ]
+        # External owners have no Wragby account, so they get a signed, expiring
+        # link that grants access to this one risk only.
+        ack_link = acknowledgement_url(risk)
+        if ack_link:
+            parts.append(
+                f'<p><a href="{ack_link}">Acknowledge risk {code}</a></p>'
+            )
+        return "".join(parts)
 
     @staticmethod
     def _build_context(

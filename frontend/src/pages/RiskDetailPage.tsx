@@ -404,6 +404,7 @@ export function RiskDetailPage() {
                         <label>Owner</label>
                         <UserPicker
                           users={users}
+                          includeExternal
                           selectedUserId={
                             form.owner_user_id === '' ? null : Number(form.owner_user_id)
                           }
@@ -468,7 +469,15 @@ export function RiskDetailPage() {
                     <div>
                       <div className="kv-label">Owner</div>
                       <div className="kv-value">
-                        {ownerName(users, risk.owner_user_id)}
+                        <span className="owner-cell">
+                          {risk.owner_name ?? 'Unassigned'}
+                          {risk.owner_type === 'External' ? (
+                            <span className="owner-type-tag">External</span>
+                          ) : null}
+                        </span>
+                        {risk.owner_email ? (
+                          <div className="muted owner-email">{risk.owner_email}</div>
+                        ) : null}
                       </div>
                     </div>
                     <div>

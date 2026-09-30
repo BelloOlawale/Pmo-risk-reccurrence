@@ -20,6 +20,8 @@ export function ProjectDashboardPage() {
   const navigate = useNavigate();
   const id = Number(projectId);
   const [adding, setAdding] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const users = useUsers();
 
   const { data: me } = useApi(() => api.get<Me>('/api/me'), []);
@@ -77,6 +79,27 @@ export function ProjectDashboardPage() {
     }
   }
 
+  /** Download this register as a formatted .xlsx (current DB data). */
+  async function handleExport() {
+    setExporting(true);
+    setExportError(null);
+    try {
+      const { blob, filename } = await api.download(`/api/projects/${id}/risks/export`);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename ?? `Risk_Register_${project?.project_code ?? id}.xlsx`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <div>
       <div className="page-header">
@@ -102,11 +125,20 @@ export function ProjectDashboardPage() {
           </div>
         </div>
         <div className="page-header-actions">
+          <button
+            className="btn"
+            onClick={() => void handleExport()}
+            disabled={exporting || !project}
+          >
+            {exporting ? 'Exporting…' : 'Export to Excel'}
+          </button>
           <button className="btn btn-primary" onClick={() => setAdding(true)}>
             + Add New
           </button>
         </div>
       </div>
+
+      {exportError ? <div className="error-banner">{exportError}</div> : null}
 
       {projectError ? <div className="error-banner">{projectError}</div> : null}
       {risksError ? <div className="error-banner">{risksError}</div> : null}

@@ -39,7 +39,11 @@ export function AuthShell({ children }: { children: ReactNode }) {
       <header className="auth-brand">
         <img className="auth-logo" src="/wragby-logo.png" alt="Wragby" />
         <div className="auth-brand-rule" aria-hidden="true" />
-        <p className="auth-product-name">PMO Risk Management</p>
+        <h1 className="auth-product-name">
+          <span className="brand-wragby">WRAGBY</span>{' '}
+          <span className="brand-intell">Risk Intell</span>
+        </h1>
+        <p className="auth-product-subtitle">PMO Risk Management</p>
       </header>
 
       <main className="auth-main">{children}</main>

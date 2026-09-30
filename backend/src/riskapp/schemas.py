@@ -38,6 +38,37 @@ class UserRead(BaseModel):
     id: int
     upn: str
     display_name: str
+    # ``Internal`` (Entra directory) or ``External`` (PM-captured contact).
+    owner_type: str = "Internal"
+    organization: str | None = None
+    is_active: bool = True
+
+
+class ExternalOwnerCreate(BaseModel):
+    """Payload for capturing an external Risk Owner."""
+
+    full_name: str = Field(min_length=1, max_length=255)
+    email: str = Field(min_length=3, max_length=255)
+    organization: str | None = Field(default=None, max_length=200)
+
+    @field_validator("email")
+    @classmethod
+    def _valid_email(cls, value: str) -> str:
+        # Import here to avoid a module-level import cycle with external.
+        from riskapp.external import is_valid_email, normalize_email
+
+        normalized = normalize_email(value)
+        if not is_valid_email(normalized):
+            raise ValueError("Enter a valid email address.")
+        return normalized
+
+    @field_validator("full_name")
+    @classmethod
+    def _name_required(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Full name is required.")
+        return value
 
 
 class TestLoginStatus(BaseModel):
@@ -188,6 +219,9 @@ class RiskRead(BaseModel):
     response_strategy: str | None
     response_plan: str | None
     owner_user_id: int | None
+    owner_name: str | None = None
+    owner_email: str | None = None
+    owner_type: str | None = None
     status: str
     source: str | None
     raised_by: str | None = None
@@ -201,6 +235,7 @@ class RiskRead(BaseModel):
     sla_deadline: dt.datetime | None
     sla_acknowledged: bool
     sla_manual_override: bool
+    acknowledged_at: dt.datetime | None = None
     accepted_date: dt.datetime | None = None
     resolved_date: dt.datetime | None = None
     closed_date: dt.datetime | None = None
@@ -395,6 +430,32 @@ class EscalationTrendRead(BaseModel):
 
     months: list[str]
     values: list[int]
+
+
+class ExternalAcknowledgeRead(BaseModel):
+    """Minimal, single-risk view returned to an external owner's ack link.
+
+    Deliberately excludes anything not needed to acknowledge the assigned risk:
+    no other risks, registers, projects, users or reports are reachable with the
+    acknowledgement token.
+    """
+
+    risk_code: str
+    description: str
+    project_name: str
+    risk_rating: str
+    likelihood: str
+    impact: str
+    status: str
+    response_strategy: str | None
+    response_plan: str | None
+    risk_start_date: dt.date | None
+    risk_end_date: dt.date | None
+    sla_deadline: dt.datetime | None
+    owner_name: str
+    owner_email: str
+    acknowledged: bool
+    acknowledged_at: dt.datetime | None
 
 
 class ImportRowErrorRead(BaseModel):

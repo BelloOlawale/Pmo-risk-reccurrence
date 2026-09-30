@@ -67,6 +67,17 @@ class User(TimestampMixin, Base):
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
+    # Risk-owner classification. Internal users come from the Entra directory;
+    # external owners (partners, vendors, consultants) are captured by a PM and
+    # live only here — they never authenticate and have no app roles.
+    owner_type: Mapped[str] = mapped_column(String(20), default="Internal", nullable=False)
+    organization: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    @property
+    def is_external(self) -> bool:
+        return self.owner_type == "External"
+
 
 class Project(TimestampMixin, Base):
     __tablename__ = "projects"
@@ -149,6 +160,9 @@ class Risk(TimestampMixin, Base):
     sla_deadline: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     sla_acknowledged: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     sla_manual_override: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    acknowledged_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     risk_start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     risk_end_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
@@ -174,6 +188,20 @@ class Risk(TimestampMixin, Base):
     # At most one Issue is ever created for a risk (unique on source_risk_id):
     # a materialized (Event) risk generates exactly one Issue.
     issue: Mapped[Issue | None] = relationship(back_populates="source_risk", uselist=False)
+
+    # Denormalised owner info for read schemas / exports. Reads the relationship
+    # so callers should eager-load ``owner`` on list endpoints.
+    @property
+    def owner_name(self) -> str | None:
+        return self.owner.display_name if self.owner else None
+
+    @property
+    def owner_email(self) -> str | None:
+        return self.owner.upn if self.owner else None
+
+    @property
+    def owner_type(self) -> str | None:
+        return self.owner.owner_type if self.owner else None
 
 
 class RiskAuditLog(Base):

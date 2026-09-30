@@ -6,7 +6,7 @@ import type { Project, Risk } from '../api/types';
 import { SectionCard } from '../components/Badges';
 import {
   DonutChart,
-  EscalatedDonutChart,
+  EventsDonutChart,
   EscalationTrendChart,
   HeatmapChart,
   ProjectStackedBarChart,
@@ -15,7 +15,7 @@ import {
 import { KpiCard } from '../components/KpiCard';
 import {
   computePortfolioKpis,
-  escalatedSplit,
+  eventSplit,
   heatmapData,
   portfolioInsights,
   ratingDistribution,
@@ -277,8 +277,8 @@ export function PortfolioDashboardPage() {
             <SectionCard title="Risk status">
               <StatusDonutChart data={statusSplit(filteredRisks)} />
             </SectionCard>
-            <SectionCard title="Escalated vs not escalated">
-              <EscalatedDonutChart data={escalatedSplit(filteredRisks)} />
+            <SectionCard title="Events">
+              <EventsDonutChart data={eventSplit(filteredRisks)} />
             </SectionCard>
           </div>
 

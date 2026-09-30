@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 
-import type { Risk, User } from '../api/types';
-import { ownerName, useUsers } from '../api/users';
+import type { Risk } from '../api/types';
 import { ratingRank, statusRank } from '../utils/colors';
 import { formatDate } from '../utils/format';
 import { RatingBadge, StatusBadge } from './Badges';
@@ -68,7 +67,6 @@ export function RiskTable({
   onDelete,
   canDelete,
 }: RiskTableProps) {
-  const users = useUsers();
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [ratingFilter, setRatingFilter] = useState('');
@@ -207,7 +205,6 @@ export function RiskTable({
                 <RiskRow
                   key={risk.id}
                   risk={risk}
-                  users={users}
                   isOpen={isOpen}
                   onSelect={onSelect}
                   onToggle={() => toggleExpand(risk.id)}
@@ -277,14 +274,12 @@ function AcknowledgedBadge({ acknowledged }: { acknowledged: boolean }) {
 
 function RiskRow({
   risk,
-  users,
   isOpen,
   onSelect,
   onToggle,
   onDelete,
 }: {
   risk: Risk;
-  users: User[];
   isOpen: boolean;
   onSelect: (risk: Risk) => void;
   onToggle: () => void;
@@ -327,7 +322,14 @@ function RiskRow({
         <td>
           <StatusBadge status={risk.status} />
         </td>
-        <td className="col-hide-sm">{ownerName(users, risk.owner_user_id)}</td>
+        <td className="col-hide-sm">
+          <span className="owner-cell">
+            {risk.owner_name ?? 'Unassigned'}
+            {risk.owner_type === 'External' ? (
+              <span className="owner-type-tag">External</span>
+            ) : null}
+          </span>
+        </td>
         <td>
           <AcknowledgedBadge acknowledged={risk.sla_acknowledged} />
         </td>

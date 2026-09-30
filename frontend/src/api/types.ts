@@ -14,6 +14,10 @@ export interface User {
   id: number;
   upn: string;
   display_name: string;
+  /** "Internal" (Entra directory) or "External" (PM-captured contact). */
+  owner_type: string;
+  organization: string | null;
+  is_active: boolean;
 }
 
 export interface TestLoginStatus {
@@ -73,6 +77,9 @@ export interface Risk {
   response_strategy: string | null;
   response_plan: string | null;
   owner_user_id: number | null;
+  owner_name: string | null;
+  owner_email: string | null;
+  owner_type: string | null;
   status: string;
   source: string | null;
   raised_by: string | null;
@@ -86,6 +93,7 @@ export interface Risk {
   sla_deadline: string | null;
   sla_acknowledged: boolean;
   sla_manual_override: boolean;
+  acknowledged_at: string | null;
   accepted_date: string | null;
   resolved_date: string | null;
   closed_date: string | null;
@@ -223,4 +231,31 @@ export interface RiskMeta {
   lifecycle: string[];
   risk_sources: string[];
   response_strategies: string[];
+}
+
+/** POST /api/external-owners — capture a non-Wragby Risk Owner. */
+export interface ExternalOwnerCreatePayload {
+  full_name: string;
+  email: string;
+  organization?: string | null;
+}
+
+/** GET/POST /api/external/acknowledge/{token} — the single risk behind an ack link. */
+export interface ExternalAcknowledge {
+  risk_code: string;
+  description: string;
+  project_name: string;
+  risk_rating: string;
+  likelihood: string;
+  impact: string;
+  status: string;
+  response_strategy: string | null;
+  response_plan: string | null;
+  risk_start_date: string | null;
+  risk_end_date: string | null;
+  sla_deadline: string | null;
+  owner_name: string;
+  owner_email: string;
+  acknowledged: boolean;
+  acknowledged_at: string | null;
 }

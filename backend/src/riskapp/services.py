@@ -306,7 +306,9 @@ def acknowledge_risk(
     if risk.owner_user_id is None:
         raise ValueError("A risk must have an assigned owner before it can be acknowledged.")
     if not risk.sla_acknowledged:
+        now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
         risk.sla_acknowledged = True
+        risk.acknowledged_at = now
         record_change(
             db,
             risk,

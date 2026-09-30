@@ -12,15 +12,14 @@ import { AuthShell, MicrosoftLogo } from './AuthShell';
  *   3. Microsoft sign-in (the real authentication mechanism)
  *   4. Email + password sign-in (app-managed accounts), when enabled
  *   5. Development / test login (subordinate, only when enabled by the backend)
- */
-export function SignInPage() {
+ */export function SignInPage() {
   const auth = useAuth();
 
   return (
     <AuthShell>
       <section className="auth-card" aria-labelledby="auth-heading">
         <h1 id="auth-heading" className="auth-card-heading">
-          Welcome to PMO Risk Management
+          Welcome to Wragby Risk Intell
         </h1>
         <p className="auth-card-sub">
           {auth.passwordLoginEnabled

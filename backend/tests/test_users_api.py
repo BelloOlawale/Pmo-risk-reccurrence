@@ -50,7 +50,15 @@ class TestListUsers:
         assert resp.status_code == 200
         data = resp.json()
         assert [u["display_name"] for u in data] == ["Amy", "Zoe"]
-        assert set(data[0]) == {"id", "upn", "display_name"}
+        assert set(data[0]) == {
+            "id",
+            "upn",
+            "display_name",
+            "owner_type",
+            "organization",
+            "is_active",
+        }
+        assert data[0]["owner_type"] == "Internal"
 
     def test_requires_authentication(self, client: TestClient) -> None:
         # Dev mode defaults to System Admin, so the endpoint is reachable; this

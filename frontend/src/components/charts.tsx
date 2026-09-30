@@ -1,7 +1,7 @@
 import type { EChartsOption } from 'echarts';
 
 import { EChart } from './EChart';
-import { BRAND, RATING_COLORS, STATUS_GROUP_COLORS } from '../utils/colors';
+import { BRAND, RATING_COLORS, STATUS_COLORS, STATUS_GROUP_COLORS } from '../utils/colors';
 import type {
   EscalationTrend,
   HeatmapData,
@@ -137,15 +137,15 @@ export function StatusDonutChart({ data }: { data: NameValue[] }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Escalated vs non-escalated donut                                    */
+/* Events vs non-events donut (risk lifecycle "Event" status)          */
 /* ------------------------------------------------------------------ */
 
-export function EscalatedDonutChart({ data }: { data: NameValue[] }) {
+export function EventsDonutChart({ data }: { data: NameValue[] }) {
   const colors: Record<string, string> = {
-    Escalated: BRAND.red,    // Wragby Red for escalated
-    'Not escalated': '#E5E9F0',
+    Events: STATUS_COLORS.Event ?? '#F59E0B',
+    'Not events': '#E5E9F0',
   };
-  const escalated = data.find((d) => d.name === 'Escalated')?.value ?? 0;
+  const events = data.find((d) => d.name === 'Events')?.value ?? 0;
   const option: EChartsOption = {
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
     legend: ratingLegend('bottom'),
@@ -164,11 +164,11 @@ export function EscalatedDonutChart({ data }: { data: NameValue[] }) {
       },
     ],
     title: {
-      text: String(escalated),
-      subtext: 'escalated',
+      text: String(events),
+      subtext: 'events',
       left: 'center',
       top: '36%',
-      textStyle: { fontSize: 26, fontWeight: 700, color: BRAND.red },
+      textStyle: { fontSize: 26, fontWeight: 700, color: STATUS_COLORS.Event ?? '#F59E0B' },
       subtextStyle: { fontSize: 11, color: AXIS_LABEL },
     },
   };

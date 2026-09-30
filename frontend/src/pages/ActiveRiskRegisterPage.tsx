@@ -3,8 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 
 import { api } from '../api/client';
 import type { Me, Project, Risk } from '../api/types';
-import { ownerName, useUsers } from '../api/users';
-import { AddRiskModal } from '../components/AddRiskModal';
+import { ownerName, useUsers } from '../api/users';import { AddRiskModal } from '../components/AddRiskModal';
 import { RiskTable } from '../components/RiskTable';
 import { useApi } from '../hooks/useApi';
 import { isActiveStatus } from '../utils/status';
@@ -24,6 +23,7 @@ export function ActiveRiskRegisterPage() {
   const [blockedProject, setBlockedProject] = useState<Project | null>(null);
   const [closing, setClosing] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
+  const [exportingId, setExportingId] = useState<number | null>(null);
 
   // Active risks grouped by project id.
   const activeByProject = useMemo(() => {
@@ -67,6 +67,24 @@ export function ActiveRiskRegisterPage() {
     await api.del<void>(`/api/risks/${risk.id}`);
     reload();
     reloadProjects();
+  }
+
+  /** Download one register as a formatted .xlsx. */
+  async function handleExport(p: Project) {
+    setExportingId(p.id);
+    try {
+      const { blob, filename } = await api.download(`/api/projects/${p.id}/risks/export`);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename ?? `Risk_Register_${p.project_code}.xlsx`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExportingId(null);
+    }
   }
 
   /** PMs manage their own registers; PMO Lead / System Admin manage all. */
@@ -166,6 +184,16 @@ export function ActiveRiskRegisterPage() {
                   </div>
                   <div className="register-card-actions">
                     <span className="active-count-badge">{countLabel}</span>
+                    <button
+                      className="btn btn-sm"
+                      disabled={exportingId === p.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleExport(p);
+                      }}
+                    >
+                      {exportingId === p.id ? 'Exporting…' : 'Export to Excel'}
+                    </button>
                     <button
                       className="btn btn-sm btn-primary"
                       onClick={(e) => {

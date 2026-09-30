@@ -140,13 +140,11 @@ a:hover {
   color: var(--text);
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
 }
 
 /* Brand area — clean white strip */
 .brand {
   background: var(--wragby-white);
-  border-bottom: 2px solid var(--accent);
   padding: 14px 16px;
   display: flex;
   align-items: center;
@@ -320,7 +318,6 @@ a:hover {
 .topbar {
   height: 56px;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -347,7 +344,19 @@ a:hover {
 .topbar-title-main {
   font-weight: 700;
   font-size: 15px;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+
+/* Product-name lockup: "WRAGBY Risk Intell". */
+.brand-wragby {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+
+.brand-intell {
+  font-weight: 600;
   color: var(--text);
 }
 
@@ -1945,6 +1954,56 @@ input:disabled {
   cursor: default;
 }
 
+.user-picker-add {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.external-owner-form {
+  margin-top: 6px;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.external-owner-form-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+/* Small "External" tag shown next to a non-Wragby owner. */
+.owner-type-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--wragby-red);
+  background: var(--wragby-red-soft);
+  vertical-align: middle;
+}
+
+.owner-cell {
+  display: inline-flex;
+  align-items: center;
+}
+
+.owner-email {
+  font-size: 11px;
+}
+
 /* ================================================================
    TEST LOGIN (non-Microsoft, testing only)
    ================================================================ */
@@ -2011,8 +2070,16 @@ input:disabled {
 
 .auth-product-name {
   margin: 0;
-  font-size: 12px;
+  font-size: 20px;
   font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+
+.auth-product-subtitle {
+  margin: -6px 0 0;
+  font-size: 12px;
+  font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--wragby-red);
@@ -2402,4 +2469,34 @@ select:disabled {
 
 .link-btn-danger:hover {
   color: var(--wragby-red-dark);
+}
+
+/* ================================================================
+   EXTERNAL RISK OWNER — public acknowledgement page
+   ================================================================ */
+
+.ack-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ack-headline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ack-description {
+  margin: 0;
+  color: var(--text);
+}
+
+.ack-confirmed {
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: #dcfce7;
+  color: #15803d;
+  font-size: 13px;
 }
