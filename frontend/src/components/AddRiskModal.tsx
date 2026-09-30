@@ -5,7 +5,6 @@ import { api, ApiError } from '../api/client';
 import type { Project, ResponseStrategy, Risk, RiskMeta, RiskSource } from '../api/types';
 import { useUsers } from '../api/users';
 import { useApi } from '../hooks/useApi';
-import { computeRiskEndDate, computeRiskRating, todayISO } from '../utils/format';
 import { PickOrTypeField } from './PickOrTypeField';
 import { UserPicker } from './UserPicker';
 
@@ -28,6 +27,7 @@ interface FormState {
   response_plan: string;
   owner_user_id: string;
   risk_start_date: string;
+  risk_end_date: string;
   identified_during: string;
 }
 
@@ -42,6 +42,7 @@ const EMPTY: FormState = {
   response_plan: '',
   owner_user_id: '',
   risk_start_date: '',
+  risk_end_date: '',
   identified_during: '',
 };
 
@@ -56,9 +57,13 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
   const users = useUsers();
   const categoryOptions = meta?.categories ?? [];
   const lifecycleOptions = meta?.lifecycle ?? [];
-  const today = todayISO();
-  const rating = computeRiskRating(form.likelihood, form.impact);
-  const riskEndDate = computeRiskEndDate(form.risk_start_date, rating);
+
+  // When the modal is opened from a register, the project is fixed to that
+  // register — Quick Add can never place the risk elsewhere.
+  const fixedProject =
+    initialProjectId !== undefined
+      ? projects.find((p) => p.id === initialProjectId) ?? null
+      : null;
 
   function set<K extends keyof FormState>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -68,7 +73,7 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
     e.preventDefault();
     setError(null);
 
-    const projectId = Number(form.project_id);
+    const projectId = fixedProject ? fixedProject.id : Number(form.project_id);
     if (!Number.isFinite(projectId) || projectId <= 0) {
       setError('Select the project this risk belongs to.');
       return;
@@ -77,8 +82,12 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
       setError('Description is required.');
       return;
     }
-    if (form.risk_start_date && form.risk_start_date < today) {
-      setError('Risk start date cannot be in the past.');
+    if (
+      form.risk_start_date &&
+      form.risk_end_date &&
+      form.risk_end_date < form.risk_start_date
+    ) {
+      setError('Risk end date cannot be earlier than the risk start date.');
       return;
     }
 
@@ -95,6 +104,7 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
         response_plan: form.response_plan.trim() || null,
         owner_user_id: form.owner_user_id === '' ? null : Number(form.owner_user_id),
         risk_start_date: form.risk_start_date || null,
+        risk_end_date: form.risk_end_date || null,
         identified_during: form.identified_during.trim() || null,
         source: 'Custom',
       });
@@ -122,17 +132,24 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
           <div className="form-grid">
             <div className="field" style={{ gridColumn: '1 / -1' }}>
               <label>Project *</label>
-              <select
-                value={form.project_id}
-                onChange={(e) => set('project_id', e.target.value)}
-              >
-                <option value="">Select project…</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.project_code} — {p.name}
-                  </option>
-                ))}
-              </select>
+              {fixedProject ? (
+                <div className="readonly-field">
+                  <span className="mono">{fixedProject.project_code}</span>
+                  <span style={{ marginLeft: 8 }}>{fixedProject.name}</span>
+                </div>
+              ) : (
+                <select
+                  value={form.project_id}
+                  onChange={(e) => set('project_id', e.target.value)}
+                >
+                  <option value="">Select project…</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.project_code} — {p.name}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
             <div className="field" style={{ gridColumn: '1 / -1' }}>
@@ -192,7 +209,6 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
               <label>Risk start date</label>
               <input
                 type="date"
-                min={today}
                 value={form.risk_start_date}
                 onChange={(e) => set('risk_start_date', e.target.value)}
               />
@@ -201,12 +217,12 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
               <label>Risk end date</label>
               <input
                 type="date"
-                value={riskEndDate ?? ''}
-                readOnly
-                disabled
-                title="Automatically calculated based on risk rating and SLA."
+                value={form.risk_end_date}
+                onChange={(e) => set('risk_end_date', e.target.value)}
               />
-              <span className="field-hint">Automatically calculated based on risk rating and SLA.</span>
+              <span className="field-hint">
+                The risk end date is the SLA deadline.
+              </span>
             </div>
             <PickOrTypeField
               label="Project life cycle"

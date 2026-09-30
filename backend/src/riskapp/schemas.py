@@ -5,14 +5,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
-from riskapp.config import settings
-
-
-def _today() -> dt.date:
-    """Today's date in the application business timezone."""
-    return dt.datetime.now(settings.tz).date()
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class DepartmentCreate(BaseModel):
@@ -107,12 +100,18 @@ class ProjectCreate(BaseModel):
     end_date: dt.date | None = None
     stage_gate: str | None = None
 
-    @field_validator("start_date")
-    @classmethod
-    def _start_date_not_past(cls, v: dt.date | None) -> dt.date | None:
-        if v is not None and v < _today():
-            raise ValueError("Project start date cannot be in the past")
-        return v
+    @model_validator(mode="after")
+    def _end_date_not_before_start(self) -> ProjectCreate:
+        # Project start dates may be backdated; the only date rule is ordering.
+        if (
+            self.start_date is not None
+            and self.end_date is not None
+            and self.end_date < self.start_date
+        ):
+            raise ValueError(
+                "Project end date cannot be earlier than the project start date."
+            )
+        return self
 
     @field_validator("customer")
     @classmethod
@@ -160,12 +159,17 @@ class RiskCreate(BaseModel):
     source: Literal["Historical", "Custom", "Kickoff"] | None = None
     identified_during: str | None = None
 
-    @field_validator("risk_start_date")
-    @classmethod
-    def _risk_start_date_not_past(cls, v: dt.date | None) -> dt.date | None:
-        if v is not None and v < _today():
-            raise ValueError("Risk start date cannot be in the past")
-        return v
+    @model_validator(mode="after")
+    def _end_date_not_before_start(self) -> RiskCreate:
+        if (
+            self.risk_start_date is not None
+            and self.risk_end_date is not None
+            and self.risk_end_date < self.risk_start_date
+        ):
+            raise ValueError(
+                "Risk end date cannot be earlier than the risk start date."
+            )
+        return self
 
 
 class RiskRead(BaseModel):
@@ -222,18 +226,9 @@ class RiskUpdate(BaseModel):
     owner_upn: str | None = None
     risk_start_date: dt.date | None = None
     risk_end_date: dt.date | None = None
-    sla_deadline: dt.datetime | None = None
-    reset_sla_deadline: bool = False
     status: str | None = None
     actor_user_id: int | None = None
     identified_during: str | None = None
-
-    @field_validator("risk_start_date")
-    @classmethod
-    def _risk_start_date_not_past(cls, v: dt.date | None) -> dt.date | None:
-        if v is not None and v < _today():
-            raise ValueError("Risk start date cannot be in the past")
-        return v
 
 
 class RiskDismiss(BaseModel):
@@ -393,6 +388,13 @@ class ImportInitiatedRead(BaseModel):
 class ImportConfirm(BaseModel):
     mapping: dict[str, str]
     actor_user_id: int | None = None
+
+
+class EscalationTrendRead(BaseModel):
+    """Escalated-risk trend: month buckets (``YYYY-MM``) with counts."""
+
+    months: list[str]
+    values: list[int]
 
 
 class ImportRowErrorRead(BaseModel):

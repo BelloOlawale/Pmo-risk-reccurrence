@@ -13,7 +13,6 @@ move to Blob/Redis without changing the API contract (see issue #13).
 
 from __future__ import annotations
 
-import datetime as dt
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -22,9 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from riskapp import models
-from riskapp.config import settings
 from riskapp.domain.scoring import compute_risk_rating
-from riskapp.domain.sla import compute_deadline, deadline_anchor
 from riskapp.import_pipeline.field_mapper import (
     classify_response,
     map_hml_to_full,
@@ -151,7 +148,6 @@ def _cell(row: dict[str, str], mapping: dict[str, str], canonical: str) -> str:
 def run_import(db: Session, job: ImportJob, mapping: dict[str, str]) -> ImportReport:
     """Import the uploaded rows using the confirmed ``mapping``."""
     project = db.get(models.Project, job.project_id)
-    now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
     report = ImportReport()
 
     # Seed the counter once; rows are un-flushed until commit, so counting per
@@ -197,9 +193,6 @@ def run_import(db: Session, job: ImportJob, mapping: dict[str, str]) -> ImportRe
                 source_file_name=job.file_name,
                 source_file_url=job.source_file_url,
                 source_risk_id=_cell(row, mapping, "source_risk_id") or None,
-                sla_deadline=compute_deadline(
-                    rating, deadline_anchor(None, now, settings.tz)
-                ),
             )
         )
         report.imported += 1

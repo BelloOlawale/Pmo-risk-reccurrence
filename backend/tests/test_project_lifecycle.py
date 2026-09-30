@@ -90,18 +90,18 @@ def test_close_project_requires_assigned_project_manager(client: TestClient) -> 
     assert project["id"] in _active_project_ids(client)
 
 
-def test_pmo_lead_cannot_close_another_project(client: TestClient) -> None:
-    """Closing is reserved for the assigned Project Manager (not PMO Lead)."""
-    project = _create_project(client, "PMO cannot close", user_id=3, role="Project Manager")
+def test_pmo_lead_can_close_another_project(client: TestClient) -> None:
+    """The PMO Lead has system-admin-level authority across registers."""
+    project = _create_project(client, "PMO can close", user_id=3, role="Project Manager")
 
     resp = client.post(
         f"/api/projects/{project['id']}/close",
         headers=_headers(None, "PMO Lead"),
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "Closed"
 
-    # The project remains Active.
-    assert project["id"] in _active_project_ids(client)
+    assert project["id"] not in _active_project_ids(client)
 
 
 def test_closing_already_closed_project_conflicts(client: TestClient) -> None:

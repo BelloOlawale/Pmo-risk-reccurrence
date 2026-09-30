@@ -319,7 +319,7 @@ export function HeatmapChart({
         return `<b>${proj}</b><br/>${cat}: ${p.value[2]} risk${p.value[2] === 1 ? '' : 's'}`;
       },
     },
-    grid: { left: 8, right: 24, top: 16, bottom: 92, containLabel: true },
+    grid: { left: 8, right: 24, top: 16, bottom: 56, containLabel: true },
     xAxis: {
       type: 'category',
       data: data.categories,
@@ -345,18 +345,13 @@ export function HeatmapChart({
       data.projects.length > 12
         ? [{ type: 'inside', yAxisIndex: 0 }]
         : undefined,
+    // The colour mapping stays, but the highlighted scale/legend below the map
+    // is hidden (it duplicated the heat map without adding information).
     visualMap: {
+      show: false,
       min: 0,
       max,
-      calculable: true,
-      orient: 'horizontal',
-      left: 'center',
-      bottom: 0,
-      itemWidth: 140,
-      itemHeight: 12,
-      textGap: 10,
       inRange: { color: ['#F1F5F9', BRAND.grey, BRAND.red] },  // Grey → Red intensity scale
-      textStyle: { color: AXIS_LABEL, fontSize: 11 },
     },
     series: [
       {

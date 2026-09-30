@@ -6,13 +6,23 @@ import { ratingRank, statusRank } from '../utils/colors';
 import { formatDate } from '../utils/format';
 import { RatingBadge, StatusBadge } from './Badges';
 
-type SortKey = 'code' | 'rating' | 'status' | 'owner' | 'date';
+type SortKey = 'code' | 'rating' | 'status' | 'owner' | 'date' | 'acknowledged';
+
+const COLUMN_COUNT = 10;
 
 interface RiskTableProps {
   risks: Risk[];
   onSelect: (risk: Risk) => void;
   /** Show the search/filter toolbar. Hidden when the table is embedded per-register. */
   showToolbar?: boolean;
+  /**
+   * When provided, a Delete action is shown next to View and a confirmation
+   * dialog is required before the handler runs. The parent performs the API
+   * call and reload (so it can refresh whatever list it owns).
+   */
+  onDelete?: (risk: Risk) => Promise<void> | void;
+  /** Optional per-row gate; defaults to allowing delete whenever onDelete is set. */
+  canDelete?: (risk: Risk) => boolean;
 }
 
 function compare(a: Risk, b: Risk, key: SortKey, dir: 'asc' | 'desc'): number {
@@ -26,6 +36,10 @@ function compare(a: Risk, b: Risk, key: SortKey, dir: 'asc' | 'desc'): number {
     case 'status':
       va = statusRank(a.status);
       vb = statusRank(b.status);
+      break;
+    case 'acknowledged':
+      va = a.sla_acknowledged ? 1 : 0;
+      vb = b.sla_acknowledged ? 1 : 0;
       break;
     case 'owner':
       va = a.owner_user_id ?? 999_999;
@@ -47,7 +61,13 @@ function compare(a: Risk, b: Risk, key: SortKey, dir: 'asc' | 'desc'): number {
   return dir === 'asc' ? cmp : -cmp;
 }
 
-export function RiskTable({ risks, onSelect, showToolbar = true }: RiskTableProps) {
+export function RiskTable({
+  risks,
+  onSelect,
+  showToolbar = true,
+  onDelete,
+  canDelete,
+}: RiskTableProps) {
   const users = useUsers();
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -56,6 +76,9 @@ export function RiskTable({ risks, onSelect, showToolbar = true }: RiskTableProp
   const [sortKey, setSortKey] = useState<SortKey>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [pendingDelete, setPendingDelete] = useState<Risk | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const categories = useMemo(
     () =>
@@ -97,6 +120,20 @@ export function RiskTable({ risks, onSelect, showToolbar = true }: RiskTableProp
       else next.add(id);
       return next;
     });
+  }
+
+  async function confirmDelete() {
+    if (!pendingDelete || !onDelete) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await onDelete(pendingDelete);
+      setPendingDelete(null);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeleting(false);
+    }
   }
 
   const sortIndicator = (key: SortKey) => (sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '');
@@ -155,6 +192,9 @@ export function RiskTable({ risks, onSelect, showToolbar = true }: RiskTableProp
               <th className="sortable col-hide-sm" onClick={() => toggleSort('owner')}>
                 Owner{sortIndicator('owner')}
               </th>
+              <th className="sortable" onClick={() => toggleSort('acknowledged')}>
+                Acknowledged{sortIndicator('acknowledged')}
+              </th>
               <th className="col-hide-md">Risk start</th>
               <th className="col-hide-md">Risk end</th>
               <th>Actions</th>
@@ -171,12 +211,17 @@ export function RiskTable({ risks, onSelect, showToolbar = true }: RiskTableProp
                   isOpen={isOpen}
                   onSelect={onSelect}
                   onToggle={() => toggleExpand(risk.id)}
+                  onDelete={
+                    onDelete && (canDelete ? canDelete(risk) : true)
+                      ? () => setPendingDelete(risk)
+                      : undefined
+                  }
                 />
               );
             })}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={9} className="empty-state">
+                <td colSpan={COLUMN_COUNT} className="empty-state">
                   No risks match the current filters.
                 </td>
               </tr>
@@ -184,7 +229,49 @@ export function RiskTable({ risks, onSelect, showToolbar = true }: RiskTableProp
           </tbody>
         </table>
       </div>
+
+      {pendingDelete ? (
+        <div className="modal-overlay" onClick={() => setPendingDelete(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Delete Risk?</h2>
+              <button
+                className="btn btn-sm"
+                onClick={() => setPendingDelete(null)}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+            <p>
+              Are you sure you want to delete <strong>{pendingDelete.risk_code}</strong>? This
+              action cannot be undone.
+            </p>
+            {deleteError ? <div className="error-banner">{deleteError}</div> : null}
+            <div className="btn-group">
+              <button className="btn" onClick={() => setPendingDelete(null)}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-danger"
+                disabled={deleting}
+                onClick={() => void confirmDelete()}
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+function AcknowledgedBadge({ acknowledged }: { acknowledged: boolean }) {
+  return (
+    <span className={`ack-badge ${acknowledged ? 'ack-yes' : 'ack-no'}`}>
+      {acknowledged ? 'Acknowledged' : 'Not Acknowledged'}
+    </span>
   );
 }
 
@@ -194,12 +281,14 @@ function RiskRow({
   isOpen,
   onSelect,
   onToggle,
+  onDelete,
 }: {
   risk: Risk;
   users: User[];
   isOpen: boolean;
   onSelect: (risk: Risk) => void;
   onToggle: () => void;
+  onDelete?: () => void;
 }) {
   const secondary: { label: string; value: string }[] = [
     { label: 'Category', value: risk.category ?? '—' },
@@ -239,23 +328,39 @@ function RiskRow({
           <StatusBadge status={risk.status} />
         </td>
         <td className="col-hide-sm">{ownerName(users, risk.owner_user_id)}</td>
+        <td>
+          <AcknowledgedBadge acknowledged={risk.sla_acknowledged} />
+        </td>
         <td className="col-hide-md">{formatDate(risk.risk_start_date)}</td>
         <td className="col-hide-md">{formatDate(risk.risk_end_date)}</td>
         <td>
-          <button
-            className="link-btn"
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelect(risk);
-            }}
-          >
-            View
-          </button>
+          <div className="row-actions">
+            <button
+              className="link-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelect(risk);
+              }}
+            >
+              View
+            </button>
+            {onDelete ? (
+              <button
+                className="link-btn link-btn-danger"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete();
+                }}
+              >
+                Delete
+              </button>
+            ) : null}
+          </div>
         </td>
       </tr>
       {isOpen ? (
         <tr className="expanded-row">
-          <td colSpan={9}>
+          <td colSpan={COLUMN_COUNT}>
             <div className="risk-detail-panel">
               {secondary.map((item) => (
                 <div key={item.label}>

@@ -15,7 +15,6 @@ import {
 import { KpiCard } from '../components/KpiCard';
 import {
   computePortfolioKpis,
-  escalationTrend,
   escalatedSplit,
   heatmapData,
   portfolioInsights,
@@ -23,6 +22,7 @@ import {
   riskByProject,
   statusGroup,
   statusSplit,
+  type EscalationTrend,
 } from '../utils/aggregates';
 import { formatPercent } from '../utils/format';
 
@@ -50,6 +50,7 @@ export function PortfolioDashboardPage() {
   const [category, setCategory] = useState('');
   const [showAllHeatmap, setShowAllHeatmap] = useState(false);
   const [showAllBars, setShowAllBars] = useState(false);
+  const [trend, setTrend] = useState<EscalationTrend>({ months: [], values: [] });
 
   const load = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -78,6 +79,19 @@ export function PortfolioDashboardPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // The escalation trend is aggregated server-side from the real audit trail
+  // (every transition into Escalated), not from placeholder client data.
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (projectId) params.set('project_id', projectId);
+    if (period !== 'all') params.set('days', period);
+    const query = params.toString();
+    api
+      .get<EscalationTrend>(`/api/reports/escalation-trend${query ? `?${query}` : ''}`)
+      .then(setTrend)
+      .catch(() => setTrend({ months: [], values: [] }));
+  }, [projectId, period]);
 
   const categories = useMemo(() => {
     const set = new Set<string>();
@@ -121,8 +135,8 @@ export function PortfolioDashboardPage() {
     [filteredProjects, filteredRisks],
   );
 
-  const trend = escalationTrend(filteredRisks);
-  const hasTrend = trend.months.length >= 2;
+  const hasTrend = trend.months.length >= 1;
+  const events = filteredRisks.filter((r) => r.status === 'Event').length;
 
   const heatmapLimit = showAllHeatmap ? filteredProjects.length : 12;
   const barLimit = showAllBars ? filteredProjects.length : 10;
@@ -242,6 +256,7 @@ export function PortfolioDashboardPage() {
           tone="success"
         />
         <KpiCard label="High Risk" value={portfolioKpis.high} tone="danger" />
+        <KpiCard label="Events" value={events} tone="warning" />
         <KpiCard
           label="SLA Compliance"
           value={formatPercent(portfolioKpis.slaCompliance)}

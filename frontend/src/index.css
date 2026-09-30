@@ -338,6 +338,19 @@ a:hover {
   color: var(--text);
 }
 
+.topbar-brand {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.topbar-title-main {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+
 .topbar-subtitle {
   color: var(--text-faint);
   font-weight: 500;
@@ -655,6 +668,10 @@ tbody tr:hover {
 /* ================================================================
    RISK TABLE EXPANDABLE DETAIL
    ================================================================ */
+
+.risk-row {
+  cursor: pointer;
+}
 
 .risk-row td {
   border-bottom: 1px solid var(--border);
@@ -2294,4 +2311,95 @@ input:disabled {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
   color: #ffffff;
+}
+
+/* ================================================================
+   INPUT CURSOR BEHAVIOUR
+
+   Only genuinely editable fields may show the text I-beam / typing caret.
+   Read-only display surfaces (cards, tables, key/value pairs) use the default
+   arrow, so the cursor no longer looks like the user is about to type.
+   ================================================================ */
+body {
+  cursor: default;
+}
+
+input,
+textarea {
+  cursor: text;
+}
+
+input[type='checkbox'],
+input[type='radio'],
+select,
+button,
+a,
+[role='button'],
+.btn,
+.nav-link,
+.link-btn {
+  cursor: pointer;
+}
+
+input:disabled,
+input[readonly],
+textarea:disabled,
+textarea[readonly],
+select:disabled {
+  cursor: default;
+  caret-color: transparent;
+}
+
+/* Fields that are intentionally fixed after creation (Edit Details). */
+.readonly-field {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+.readonly-hint {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/* Acknowledgement column */
+.ack-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ack-yes {
+  color: #15803d;
+  background: #dcfce7;
+}
+
+.ack-no {
+  color: #b45309;
+  background: #fef3c7;
+}
+
+/* Register row actions (View / Delete) */
+.row-actions {
+  display: inline-flex;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.link-btn-danger {
+  color: var(--wragby-red);
+}
+
+.link-btn-danger:hover {
+  color: var(--wragby-red-dark);
 }

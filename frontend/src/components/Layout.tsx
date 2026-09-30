@@ -125,7 +125,10 @@ export function Layout() {
       <div className="main">
         <header className="topbar">
           <div className="topbar-title">
-            <span>PMO Risk Management</span>
+            <div className="topbar-brand">
+              <span className="topbar-title-main">WRAGBY RISK INTELL</span>
+              <span className="topbar-subtitle">PMO Risk Management</span>
+            </div>
           </div>
           <div className="topbar-actions">
             <NotificationBell />

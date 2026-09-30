@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { api } from '../api/client';
-import type { Project, Risk } from '../api/types';
+import type { Me, Project, Risk } from '../api/types';
 import { AddRiskModal } from '../components/AddRiskModal';
 import { RiskTable } from '../components/RiskTable';
 import { useApi } from '../hooks/useApi';
@@ -15,8 +15,24 @@ export function RiskRegistersPage() {
     () => api.get<Risk[]>('/api/risks'),
   );
   const { data: projects } = useApi(() => api.get<Project[]>('/api/projects'));
+  const { data: me } = useApi(() => api.get<Me>('/api/me'), []);
 
   const riskList = risks ?? [];
+
+  async function handleDeleteRisk(risk: Risk) {
+    await api.del<void>(`/api/risks/${risk.id}`);
+    reload();
+  }
+
+  function canDeleteRisk(risk: Risk): boolean {
+    if (!me) return false;
+    if (me.roles.some((role) => role === 'PMO Lead' || role === 'System Admin')) {
+      return true;
+    }
+    if (!me.roles.includes('Project Manager') || me.user_id === null) return false;
+    const project = (projects ?? []).find((p) => p.id === risk.project_id);
+    return project?.pm_user_id === me.user_id;
+  }
 
   return (
     <div>
@@ -53,7 +69,12 @@ export function RiskRegistersPage() {
         </div>
       ) : (
         <div className="card">
-          <RiskTable risks={riskList} onSelect={(r) => navigate(`/risks/${r.id}`)} />
+          <RiskTable
+            risks={riskList}
+            onSelect={(r) => navigate(`/risks/${r.id}`)}
+            onDelete={handleDeleteRisk}
+            canDelete={canDeleteRisk}
+          />
         </div>
       )}
 

@@ -1,8 +1,13 @@
-"""Issue #02: SLA deadline assignment + manual override."""
+"""SLA dates are set manually by the PM, never derived from the risk rating.
+
+The Risk Start Date is the SLA start and the Risk End Date *is* the SLA
+deadline. Both dates may be backdated; the only rule is that the end date must
+not be earlier than the start date.
+"""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -29,181 +34,122 @@ def _dt(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
-def test_default_deadline_by_rating(client: TestClient) -> None:
+def test_rating_does_not_determine_the_deadline(client: TestClient) -> None:
+    """High / Medium / Low with identical dates get identical deadlines."""
     project = _create_project(client)
-    high = _create_risk(client, project["id"], likelihood="High", impact="High")
-    medium = _create_risk(client, project["id"], likelihood="Medium", impact="Medium")
-    low = _create_risk(client, project["id"], likelihood="Low", impact="Low")
-
-    assert _dt(high["sla_deadline"]) - _dt(high["created_at"]) == timedelta(hours=24)
-    assert _dt(medium["sla_deadline"]) - _dt(medium["created_at"]) == timedelta(hours=48)
-    assert _dt(low["sla_deadline"]) - _dt(low["created_at"]) == timedelta(hours=120)
-
-
-def test_manual_override_sets_flag(client: TestClient) -> None:
-    project = _create_project(client)
-    risk = _create_risk(client, project["id"])
-    assert risk["sla_manual_override"] is False
-
-    resp = client.patch(
-        f"/api/risks/{risk['id']}", json={"sla_deadline": "2026-12-31T23:59:59"}
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["sla_manual_override"] is True
-    assert body["sla_deadline"].startswith("2026-12-31")
-
-
-def test_rating_change_recomputes_deadline(client: TestClient) -> None:
-    project = _create_project(client)
-    risk = _create_risk(client, project["id"], likelihood="High", impact="High")  # 24h
-
-    resp = client.patch(f"/api/risks/{risk['id']}", json={"likelihood": "Low"})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["risk_rating"] == "Medium"  # Low x High -> Medium
-    assert _dt(body["sla_deadline"]) - _dt(body["created_at"]) == timedelta(hours=48)
-
-
-def test_override_blocks_recompute(client: TestClient) -> None:
-    project = _create_project(client)
-    risk = _create_risk(client, project["id"], likelihood="High", impact="High")
-
-    client.patch(f"/api/risks/{risk['id']}", json={"sla_deadline": "2026-12-31T23:59:59"})
-    resp = client.patch(f"/api/risks/{risk['id']}", json={"likelihood": "Low"})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["risk_rating"] == "Medium"  # rating changed...
-    assert body["sla_deadline"].startswith("2026-12-31")  # ...but deadline untouched
-
-
-def test_reset_override_recomputes(client: TestClient) -> None:
-    project = _create_project(client)
-    risk = _create_risk(client, project["id"], likelihood="High", impact="High")
-
-    client.patch(f"/api/risks/{risk['id']}", json={"sla_deadline": "2026-12-31T23:59:59"})
-    resp = client.patch(f"/api/risks/{risk['id']}", json={"reset_sla_deadline": True})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["sla_manual_override"] is False
-    assert _dt(body["sla_deadline"]) - _dt(body["created_at"]) == timedelta(hours=24)
-
-
-def test_deadline_from_start_date(client: TestClient) -> None:
-    project = _create_project(client)
-    # High x High -> High -> 24h from midnight 2099-08-25 Africa/Lagos (= 23:00 UTC on the 24th).
-    risk = _create_risk(client, project["id"], risk_start_date="2099-08-25")
-    assert _dt(risk["sla_deadline"]) == datetime(2099, 8, 25, 23, 0, 0)
-
-
-def test_deadline_falls_back_to_created_at_when_no_start_date(client: TestClient) -> None:
-    project = _create_project(client)
-    risk = _create_risk(client, project["id"], likelihood="High", impact="High")
-    assert _dt(risk["sla_deadline"]) - _dt(risk["created_at"]) == timedelta(hours=24)
-
-
-def test_start_date_change_recomputes_deadline(client: TestClient) -> None:
-    project = _create_project(client)
-    risk = _create_risk(client, project["id"], risk_start_date="2099-08-25")
-    assert _dt(risk["sla_deadline"]) == datetime(2099, 8, 25, 23, 0, 0)
-
-    resp = client.patch(f"/api/risks/{risk['id']}", json={"risk_start_date": "2099-08-30"})
-    assert resp.status_code == 200
-    assert _dt(resp.json()["sla_deadline"]) == datetime(2099, 8, 30, 23, 0, 0)
-
-
-def test_override_blocks_start_date_recompute(client: TestClient) -> None:
-    project = _create_project(client)
-    risk = _create_risk(client, project["id"], risk_start_date="2099-08-25")
-
-    client.patch(f"/api/risks/{risk['id']}", json={"sla_deadline": "2026-12-31T23:59:59"})
-    resp = client.patch(f"/api/risks/{risk['id']}", json={"risk_start_date": "2099-08-30"})
-    assert resp.status_code == 200
-    assert resp.json()["sla_deadline"].startswith("2026-12-31")
-
-
-def test_clearing_start_date_falls_back_to_created_at(client: TestClient) -> None:
-    project = _create_project(client)
-    risk = _create_risk(client, project["id"], risk_start_date="2099-08-25")
-
-    resp = client.patch(f"/api/risks/{risk['id']}", json={"risk_start_date": None})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["risk_start_date"] is None
-    assert _dt(body["sla_deadline"]) - _dt(body["created_at"]) == timedelta(hours=24)
-
-
-def test_risk_end_date_from_start_date(client: TestClient) -> None:
-    project = _create_project(client)
-    high = _create_risk(client, project["id"], risk_start_date="2099-09-05")  # High -> 24h
+    kwargs = {"risk_start_date": "2099-08-25", "risk_end_date": "2099-09-05"}
+    high = _create_risk(client, project["id"], likelihood="High", impact="High", **kwargs)
     medium = _create_risk(
-        client, project["id"], risk_start_date="2099-09-05",
-        likelihood="Medium", impact="Medium",  # -> 48h
+        client, project["id"], likelihood="Medium", impact="Medium", **kwargs
     )
-    low = _create_risk(
-        client, project["id"], risk_start_date="2099-09-05",
-        likelihood="Low", impact="Low",  # -> 120h
+    low = _create_risk(client, project["id"], likelihood="Low", impact="Low", **kwargs)
+
+    assert high["sla_deadline"] == medium["sla_deadline"] == low["sla_deadline"]
+    assert high["risk_end_date"] == "2099-09-05"
+
+
+def test_deadline_is_end_of_the_risk_end_date_in_business_tz(client: TestClient) -> None:
+    project = _create_project(client)
+    risk = _create_risk(
+        client,
+        project["id"],
+        risk_start_date="2099-08-25",
+        risk_end_date="2099-08-30",
     )
-
-    assert high["risk_end_date"] == "2099-09-06"
-    assert medium["risk_end_date"] == "2099-09-07"
-    assert low["risk_end_date"] == "2099-09-10"
+    # End of 2099-08-30 in Africa/Lagos (UTC+1) == 2099-08-30 22:59:59.999999 UTC.
+    assert _dt(risk["sla_deadline"]) == datetime(2099, 8, 30, 22, 59, 59, 999999)
 
 
-def test_risk_end_date_recomputes_on_rating_change(client: TestClient) -> None:
+def test_no_end_date_means_no_deadline(client: TestClient) -> None:
     project = _create_project(client)
-    risk = _create_risk(client, project["id"], risk_start_date="2099-09-05")  # High -> +1 day
-    assert risk["risk_end_date"] == "2099-09-06"
-
-    resp = client.patch(f"/api/risks/{risk['id']}", json={"likelihood": "Low"})
-    assert resp.status_code == 200
-    assert resp.json()["risk_end_date"] == "2099-09-07"  # Low x High -> Medium (48h)
+    risk = _create_risk(client, project["id"], risk_start_date="2099-08-25")
+    assert risk["risk_end_date"] is None
+    assert risk["sla_deadline"] is None
 
 
-def test_risk_end_date_recomputes_on_start_date_change(client: TestClient) -> None:
+def test_risk_end_date_is_client_settable(client: TestClient) -> None:
     project = _create_project(client)
-    risk = _create_risk(client, project["id"], risk_start_date="2099-09-05")
-    assert risk["risk_end_date"] == "2099-09-06"
+    risk = _create_risk(client, project["id"], risk_end_date="2099-09-05")
+    assert risk["risk_end_date"] == "2099-09-05"
 
-    resp = client.patch(f"/api/risks/{risk['id']}", json={"risk_start_date": "2099-09-10"})
+    resp = client.patch(f"/api/risks/{risk['id']}", json={"risk_end_date": "2099-09-10"})
     assert resp.status_code == 200
-    assert resp.json()["risk_end_date"] == "2099-09-11"
+    body = resp.json()
+    assert body["risk_end_date"] == "2099-09-10"
+    assert _dt(body["sla_deadline"]) == datetime(2099, 9, 10, 22, 59, 59, 999999)
 
 
-def test_risk_end_date_is_not_client_settable(client: TestClient) -> None:
-    project = _create_project(client)
-    risk = _create_risk(client, project["id"], risk_start_date="2099-09-05")
-    assert risk["risk_end_date"] == "2099-09-06"
-
-    resp = client.patch(f"/api/risks/{risk['id']}", json={"risk_end_date": "2099-12-31"})
-    assert resp.status_code == 200
-    assert resp.json()["risk_end_date"] == "2099-09-06"  # ignored; stays derived
-
-
-def test_past_risk_start_date_rejected(client: TestClient) -> None:
+def test_end_before_start_rejected_on_create(client: TestClient) -> None:
     project = _create_project(client)
     resp = client.post(
         "/api/risks",
         json={
             "project_id": project["id"],
-            "description": "past risk",
+            "description": "bad dates",
             "likelihood": "High",
             "impact": "High",
-            "risk_start_date": "2000-01-01",
+            "risk_start_date": "2099-09-10",
+            "risk_end_date": "2099-09-05",
         },
     )
     assert resp.status_code == 422
 
 
-def test_past_project_start_date_rejected(client: TestClient) -> None:
+def test_end_before_start_rejected_on_update(client: TestClient) -> None:
+    project = _create_project(client)
+    risk = _create_risk(
+        client,
+        project["id"],
+        risk_start_date="2099-09-05",
+        risk_end_date="2099-09-10",
+    )
+    resp = client.patch(f"/api/risks/{risk['id']}", json={"risk_end_date": "2099-09-01"})
+    assert resp.status_code == 422
+
+
+def test_backdated_risk_start_date_allowed(client: TestClient) -> None:
+    project = _create_project(client)
+    resp = client.post(
+        "/api/risks",
+        json={
+            "project_id": project["id"],
+            "description": "historical risk",
+            "likelihood": "High",
+            "impact": "High",
+            "risk_start_date": "2000-01-01",
+            "risk_end_date": "2000-02-01",
+        },
+    )
+    assert resp.status_code == 201
+    assert resp.json()["risk_start_date"] == "2000-01-01"
+
+
+def test_backdated_project_start_date_allowed(client: TestClient) -> None:
     resp = client.post(
         "/api/projects",
         json={
-            "name": "P",
+            "name": "Backdated",
             "department": "D",
             "project_type": "T",
             "customer": "C",
             "start_date": "2000-01-01",
         },
     )
+    assert resp.status_code == 201
+    assert resp.json()["start_date"] == "2000-01-01"
+
+
+def test_project_end_before_start_rejected(client: TestClient) -> None:
+    resp = client.post(
+        "/api/projects",
+        json={
+            "name": "Bad dates",
+            "department": "D",
+            "project_type": "T",
+            "customer": "C",
+            "start_date": "2099-09-10",
+            "end_date": "2099-09-05",
+        },
+    )
     assert resp.status_code == 422
+    assert "end date cannot be earlier" in str(resp.json()).lower()

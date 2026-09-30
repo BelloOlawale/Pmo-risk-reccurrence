@@ -17,7 +17,8 @@ export function ActiveRiskRegisterPage() {
     api.get<Project[]>('/api/projects?status=Active'),
   );
   const { data: risks, error, loading, reload } = useApi(() => api.get<Risk[]>('/api/risks'));
-  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
+  // Registers start collapsed; the user expands one explicitly.
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [addingProject, setAddingProject] = useState<Project | null>(null);
   const [closingProject, setClosingProject] = useState<Project | null>(null);
   const [blockedProject, setBlockedProject] = useState<Project | null>(null);
@@ -54,7 +55,7 @@ export function ActiveRiskRegisterPage() {
   );
 
   function toggle(id: number) {
-    setCollapsed((prev) => {
+    setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -62,11 +63,22 @@ export function ActiveRiskRegisterPage() {
     });
   }
 
-  function canCloseProject(p: Project): boolean {
-    return Boolean(
-      me?.roles.some((role) => role === 'Project Manager' || role === 'System Admin') &&
-        me.user_id !== null &&
-        p.pm_user_id === me.user_id,
+  async function handleDeleteRisk(risk: Risk) {
+    await api.del<void>(`/api/risks/${risk.id}`);
+    reload();
+    reloadProjects();
+  }
+
+  /** PMs manage their own registers; PMO Lead / System Admin manage all. */
+  function canManageRegister(p: Project): boolean {
+    if (!me) return false;
+    if (me.roles.some((role) => role === 'PMO Lead' || role === 'System Admin')) {
+      return true;
+    }
+    return (
+      me.roles.includes('Project Manager') &&
+      me.user_id !== null &&
+      p.pm_user_id === me.user_id
     );
   }
 
@@ -126,13 +138,13 @@ export function ActiveRiskRegisterPage() {
         <div className="stack">
           {projectsWithActive.map((p) => {
             const activeRisks = activeByProject.get(p.id) ?? [];
-            const isCollapsed = collapsed.has(p.id);
+            const isExpanded = expanded.has(p.id);
             const countLabel = `${activeRisks.length} Active Risk${activeRisks.length === 1 ? '' : 's'}`;
             return (
               <div className="card" key={p.id}>
                 <div className="register-card-header" onClick={() => toggle(p.id)}>
                   <div className="register-card-main">
-                    <span className="expand-indicator">{isCollapsed ? '▸' : '▾'}</span>
+                    <span className="expand-indicator">{isExpanded ? '▾' : '▸'}</span>
                     <div className="register-card-text">
                       <Link
                         to={`/active-risk/${p.id}`}
@@ -163,7 +175,7 @@ export function ActiveRiskRegisterPage() {
                     >
                       + Add New
                     </button>
-                    {canCloseProject(p) ? (
+                    {canManageRegister(p) ? (
                       <button
                         className="btn btn-sm btn-danger-ghost"
                         onClick={(e) => {
@@ -177,11 +189,13 @@ export function ActiveRiskRegisterPage() {
                   </div>
                 </div>
 
-                {!isCollapsed ? (
+                {isExpanded ? (
                   <RiskTable
                     risks={activeRisks}
                     showToolbar={false}
                     onSelect={(risk) => navigate(`/risks/${risk.id}?from=active-risk`)}
+                    onDelete={handleDeleteRisk}
+                    canDelete={() => canManageRegister(p)}
                   />
                 ) : null}
               </div>

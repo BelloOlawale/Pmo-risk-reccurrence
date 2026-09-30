@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 
 def _create_project(client: TestClient) -> Any:
@@ -59,23 +60,38 @@ def test_field_edit_writes_audit(client: TestClient) -> None:
     assert any(e["action"] == "field_edit" and e["field"] == "description" for e in history)
 
 
-def test_rating_recomputed_on_likelihood_change(client: TestClient) -> None:
+def test_immutable_fields_rejected_on_edit(client: TestClient) -> None:
+    """Likelihood, Impact, Category, Response Strategy and Lifecycle are fixed."""
     project = _create_project(client)
-    risk = _create_risk(client, project["id"])  # High x Medium -> High
+    risk = _create_risk(client, project["id"], category="Technical")
     assert risk["risk_rating"] == "High"
 
     resp = client.patch(f"/api/risks/{risk['id']}", json={"likelihood": "Low"})
-    assert resp.status_code == 200
-    assert resp.json()["risk_rating"] == "Low"  # Low x Medium -> Low
+    assert resp.status_code == 422
 
-    fields = [e["field"] for e in client.get(f"/api/risks/{risk['id']}/history").json()]
-    assert "likelihood" in fields
-    assert "risk_rating" in fields
+    # Nothing changed: the rating still reflects the original likelihood x impact.
+    read = client.get(f"/api/risks/{risk['id']}").json()
+    assert read["likelihood"] == "High"
+    assert read["risk_rating"] == "High"
+    assert read["category"] == "Technical"
 
 
-def test_acknowledge_idempotent(client: TestClient) -> None:
+def test_acknowledge_requires_owner_and_is_idempotent(
+    client: TestClient, db_session: Session
+) -> None:
+    from riskapp import models
+
     project = _create_project(client)
     risk = _create_risk(client, project["id"])
+
+    # No owner -> the risk cannot be acknowledged.
+    resp = client.post(f"/api/risks/{risk['id']}/acknowledge")
+    assert resp.status_code == 422
+
+    owner = models.User(upn="ack-owner@example.com", display_name="Owner")
+    db_session.add(owner)
+    db_session.commit()
+    client.patch(f"/api/risks/{risk['id']}", json={"owner_user_id": owner.id})
 
     resp = client.post(f"/api/risks/{risk['id']}/acknowledge")
     assert resp.status_code == 200
@@ -88,12 +104,12 @@ def test_acknowledge_idempotent(client: TestClient) -> None:
 
 def test_clear_nullable_field(client: TestClient) -> None:
     project = _create_project(client)
-    risk = _create_risk(client, project["id"], category="Technical")
-    assert risk["category"] == "Technical"
+    risk = _create_risk(client, project["id"], subcategory="Vendor")
+    assert risk["subcategory"] == "Vendor"
 
-    resp = client.patch(f"/api/risks/{risk['id']}", json={"category": None})
+    resp = client.patch(f"/api/risks/{risk['id']}", json={"subcategory": None})
     assert resp.status_code == 200
-    assert resp.json()["category"] is None
+    assert resp.json()["subcategory"] is None
 
 
 def test_cannot_clear_non_nullable_field(client: TestClient) -> None:

@@ -3,9 +3,9 @@
 When a suggested risk is accepted the matched historical record is used to
 populate the full risk (category, risk source, response strategy/plan,
 lifecycle, dates) — exact-match enrichment grounded in the source data, never
-invented. Dates keep the existing business rules (no past start dates; end
-date stays SLA-calculated). The owner is deliberately not enriched: owners are
-always assigned manually.
+invented. Dates are copied from the source (past start dates are skipped; the
+end date is never rating-derived). The owner is deliberately not enriched:
+owners are always assigned manually.
 """
 
 from __future__ import annotations
@@ -44,6 +44,7 @@ def _enriched_historical_risk(
     *,
     owner: models.User | None,
     start: dt.date | None,
+    end: dt.date | None = None,
 ) -> models.Risk:
     risk = models.Risk(
         project_id=project.id,
@@ -60,6 +61,7 @@ def _enriched_historical_risk(
         owner_user_id=owner.id if owner else None,
         identified_during="Execution",
         risk_start_date=start,
+        risk_end_date=end,
         status="Closed",
         source="Historical",
     )
@@ -73,8 +75,9 @@ def test_accept_suggestion_copies_enriched_fields(db_session: Session) -> None:
     owner = models.User(upn="risk.owner@example.test", display_name="Risk Owner")
     db_session.add(owner)
     db_session.flush()
+    end = dt.date.today() + dt.timedelta(days=5)
     _enriched_historical_risk(
-        db_session, historical, owner=owner, start=dt.date.today()
+        db_session, historical, owner=owner, start=dt.date.today(), end=end
     )
 
     accepted = accept_suggestion(db_session, target, "RSK-ENRICH-1")
@@ -91,9 +94,8 @@ def test_accept_suggestion_copies_enriched_fields(db_session: Session) -> None:
     # Owner comes from neither history nor the project PM — it is set manually.
     assert accepted.owner_user_id is None
     assert accepted.risk_start_date == dt.date.today()
-    # End date remains governed by the existing SLA calculation, not invented.
-    assert accepted.risk_end_date is not None
-    assert accepted.risk_end_date >= accepted.risk_start_date
+    # The Risk End Date is copied from the source register, never rating-derived.
+    assert accepted.risk_end_date == end
 
 
 def test_accept_suggestion_never_copies_past_start_date(db_session: Session) -> None:

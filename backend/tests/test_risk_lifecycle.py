@@ -60,7 +60,9 @@ class TestAccept:
         # Owners are assigned manually; acceptance never auto-fills one.
         assert accepted.owner_user_id is None
         assert accepted.accepted_date is not None
-        assert accepted.sla_deadline is not None
+        # No Risk End Date was set, so there is no SLA deadline (it is never
+        # derived from the rating).
+        assert accepted.sla_deadline is None
 
     def test_accept_requires_suggested_status(self, db_session: Session) -> None:
         project = _seed_project(db_session)

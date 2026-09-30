@@ -47,8 +47,8 @@ def sla_state(
 ) -> str:
     """Return "satisfied" | "breach" | "warning" | "ok" for a stored deadline.
 
-    Unlike :func:`riskapp.domain.sla.evaluate_sla`, this works directly off the
-    stored ``sla_deadline`` so a manual override is respected.
+    Works directly off the stored ``sla_deadline`` (itself derived from the
+    PM-set Risk End Date). The rating only picks the warning window.
     """
     if owner_active:
         return "satisfied"
@@ -62,20 +62,13 @@ def sla_state(
 
 
 def _owner_active(db: Session, risk: models.Risk) -> bool:
-    """Whether the owner has responded (acknowledged or any audit entry)."""
-    if risk.sla_acknowledged:
-        return True
-    if risk.owner_user_id is None:
-        return False
-    count = db.scalar(
-        select(func.count())
-        .select_from(models.RiskAuditLog)
-        .where(
-            models.RiskAuditLog.risk_id == risk.id,
-            models.RiskAuditLog.user_id == risk.owner_user_id,
-        )
-    )
-    return (count or 0) > 0
+    """Whether the owner has acknowledged the risk.
+
+    Acknowledgement is the single signal that satisfies the escalation
+    requirement. General edits no longer stop the SLA clock: if the owner never
+    acknowledges before the deadline, the risk escalates.
+    """
+    return risk.sla_acknowledged
 
 
 @dataclass(frozen=True)
@@ -245,18 +238,22 @@ def run_weekly_summary(
 
 
 def find_overdue_risks(db: Session, today: dt.date) -> list[models.Risk]:
-    """Active risks whose Risk End Date has already passed (``end < today``).
+    """Acknowledged risks whose Risk End Date has already passed (``end < today``).
 
     ``today`` is the current date in the business timezone. A risk is overdue
     only after its end-date day has fully elapsed in that timezone, so risks are
-    never materialized early because of a timezone/midnight skew. Suggested
-    risks are excluded because the status machine forbids Suggested -> Event.
+    never materialized early because of a timezone/midnight skew. Only
+    acknowledged risks materialize: an *unacknowledged* risk past its deadline
+    is escalated (not turned into an Event), while an acknowledged-but-unresolved
+    risk becomes an Event. Suggested risks are excluded because the status
+    machine forbids Suggested -> Event.
     """
     return list(
         db.scalars(
             select(models.Risk)
             .where(
                 models.Risk.status.in_(_MATERIALIZABLE_STATUSES),
+                models.Risk.sla_acknowledged.is_(True),
                 models.Risk.risk_end_date.is_not(None),
                 models.Risk.risk_end_date < today,
             )
@@ -266,18 +263,21 @@ def find_overdue_risks(db: Session, today: dt.date) -> list[models.Risk]:
 
 
 def find_event_risks_without_issue(db: Session) -> list[models.Risk]:
-    """Event (materialized) risks that do not yet have an Issue.
+    """Escalated/Event risks that do not yet have an Issue.
 
-    Kept as a separate sweep so the invariant "one Issue per materialized risk"
-    holds even for risks that reached Event through a path other than this
-    monitor (e.g. a manual transition or rows created before Issues existed).
+    Kept as a separate sweep so the invariant "one Issue per escalated or
+    materialized risk" holds even for risks that reached those statuses through
+    a path other than this monitor (e.g. a manual transition or rows created
+    before Issues existed).
     """
     with_issue = select(models.Issue.source_risk_id)
     return list(
         db.scalars(
             select(models.Risk)
             .where(
-                models.Risk.status == RiskStatus.EVENT.value,
+                models.Risk.status.in_(
+                    (RiskStatus.EVENT.value, RiskStatus.ESCALATED.value)
+                ),
                 ~models.Risk.id.in_(with_issue),
             )
             .order_by(models.Risk.id)

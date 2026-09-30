@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
@@ -21,6 +22,7 @@ from riskapp.auth import (
     can_access_risk,
     can_close_project,
     can_close_risk,
+    can_delete_risk,
     create_local_token,
     get_principal,
     require_roles,
@@ -29,6 +31,7 @@ from riskapp.blob import AzureBlobStorage, BlobStorageProvider, register_blob_na
 from riskapp.cache import TtlCache
 from riskapp.config import settings
 from riskapp.db import get_db
+from riskapp.domain.sla import as_naive_utc
 from riskapp.domain.status import InvalidTransitionError, RiskStatus
 from riskapp.embeddings import AzureOpenAIEmbeddings, EmbeddingProvider
 from riskapp.import_api import (
@@ -52,6 +55,7 @@ from riskapp.services import (
     create_project,
     create_risk,
     de_escalate_risk,
+    delete_risk,
     dismiss_risk,
     get_or_create_department,
     get_or_create_project_type,
@@ -101,7 +105,8 @@ def get_blob_provider() -> BlobStorageProvider:
 # Role-gated dependencies (dev mode defaults to System Admin, so these are no-ops
 # locally; production resolves roles from the Entra token).
 ProjectManagerDep = Annotated[
-    Principal, Depends(require_roles(Role.PROJECT_MANAGER, Role.SYSTEM_ADMIN))
+    Principal,
+    Depends(require_roles(Role.PROJECT_MANAGER, Role.PMO_LEAD, Role.SYSTEM_ADMIN)),
 ]
 AdminDep = Annotated[
     Principal, Depends(require_roles(Role.SYSTEM_ADMIN, Role.PMO_LEAD))
@@ -615,7 +620,7 @@ def patch_risk(
     if payload.status == RiskStatus.CLOSED.value and not can_close_risk(principal):
         raise HTTPException(
             status_code=403,
-            detail="You are not authorized to close risks. Only a PMO Lead can close a risk.",
+            detail="You are not authorized to close risks.",
         )
     was_event = risk.status == RiskStatus.EVENT.value
     owner_before = risk.owner_user_id
@@ -652,11 +657,37 @@ def patch_risk(
 
 
 @app.post("/api/risks/{risk_id}/acknowledge", response_model=schemas.RiskRead)
-def acknowledge(risk_id: int, db: DbDep) -> schemas.RiskRead:
+def acknowledge(
+    risk_id: int, principal: PrincipalDep, db: DbDep
+) -> schemas.RiskRead:
     risk = get_risk(db, risk_id)
     if risk is None:
         raise HTTPException(status_code=404, detail="Risk not found")
-    return schemas.RiskRead.model_validate(acknowledge_risk(db, risk))
+    if not can_access_risk(principal, risk):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        acknowledged = acknowledge_risk(
+            db, risk, actor_user_id=principal.user_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return schemas.RiskRead.model_validate(acknowledged)
+
+
+@app.delete("/api/risks/{risk_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_risk(risk_id: int, principal: PrincipalDep, db: DbDep) -> None:
+    """Delete a risk and its related records (PM / PMO Lead / System Admin)."""
+    risk = get_risk(db, risk_id)
+    if risk is None:
+        raise HTTPException(status_code=404, detail="Risk not found")
+    if not can_access_risk(principal, risk):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not can_delete_risk(principal, risk):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the project PM, a PMO Lead, or a System Admin can delete a risk.",
+        )
+    delete_risk(db, risk)
 
 
 @app.post("/api/risks/{risk_id}/accept", response_model=schemas.RiskRead)
@@ -737,6 +768,55 @@ def de_escalate(
     except InvalidTransitionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return schemas.RiskRead.model_validate(updated)
+
+
+@app.get(
+    "/api/reports/escalation-trend",
+    response_model=schemas.EscalationTrendRead,
+)
+def escalation_trend_report(
+    principal: PrincipalDep,
+    db: DbDep,
+    project_id: int | None = None,
+    days: int | None = None,
+) -> schemas.EscalationTrendRead:
+    """Escalated-risk counts per month, derived from the real audit trail.
+
+    Every transition *into* ``Escalated`` is recorded in the append-only audit
+    log, so aggregating those entries by month yields the true escalation trend
+    (no mocked or rating-derived values). Scoped to the caller's visibility and
+    optionally to one project / a trailing number of days.
+    """
+    stmt = (
+        select(models.RiskAuditLog, models.Risk.project_id)
+        .join(models.Risk, models.Risk.id == models.RiskAuditLog.risk_id)
+        .join(models.Project, models.Project.id == models.Risk.project_id)
+        .where(models.RiskAuditLog.action == "status_change")
+    )
+    if project_id is not None:
+        stmt = stmt.where(models.Risk.project_id == project_id)
+    if not principal.is_pmo_or_admin:
+        stmt = stmt.where(models.Project.pm_user_id == principal.user_id)
+
+    cutoff = (
+        dt.datetime.now(dt.UTC).replace(tzinfo=None) - dt.timedelta(days=days)
+        if days is not None
+        else None
+    )
+    buckets: dict[str, int] = {}
+    for entry, _project_id in db.execute(stmt).all():
+        if str(entry.new_value) != RiskStatus.ESCALATED.value:
+            continue
+        escalated_at = as_naive_utc(entry.created_at)
+        if cutoff is not None and escalated_at < cutoff:
+            continue
+        key = f"{escalated_at.year:04d}-{escalated_at.month:02d}"
+        buckets[key] = buckets.get(key, 0) + 1
+
+    months = sorted(buckets)
+    return schemas.EscalationTrendRead(
+        months=months, values=[buckets[month] for month in months]
+    )
 
 
 @app.post(

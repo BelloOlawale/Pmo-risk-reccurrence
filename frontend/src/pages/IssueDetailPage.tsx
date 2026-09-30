@@ -51,10 +51,14 @@ export function IssueDetailPage() {
       {issue ? (
         <>
           <div className="materialized-banner">
-            <strong>Materialized risk</strong> — this issue was created automatically when risk{' '}
-            <span className="mono">{issue.source_risk_code}</span> passed its Risk End Date (
-            {formatDate(issue.risk_end_date)}) without being resolved. The originating risk remains
-            in the register as the historical record.
+            <strong>Issue raised</strong> — this issue was created automatically from risk{' '}
+            <span className="mono">{issue.source_risk_code}</span>{' '}
+            {issue.source_risk_status === 'Escalated'
+              ? 'when it was escalated (not acknowledged before its SLA deadline).'
+              : `when it passed its Risk End Date (${formatDate(
+                  issue.risk_end_date,
+                )}) without being resolved.`}{' '}
+            The originating risk remains in the register as the historical record.
           </div>
 
           <div className="detail-grid">

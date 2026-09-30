@@ -61,13 +61,9 @@ export const STATUS_ORDER = [
   'Dismissed',
 ] as const;
 
-/** User-facing label overrides (the backend renders "Event" as "Materialized"). */
-const STATUS_LABELS: Record<string, string> = {
-  Event: 'Materialized',
-};
-
+/** Statuses are shown with their canonical names (the state is "Event"). */
 export function statusLabel(status: string): string {
-  return STATUS_LABELS[status] ?? status;
+  return status;
 }
 
 export function statusColor(status: string): string {

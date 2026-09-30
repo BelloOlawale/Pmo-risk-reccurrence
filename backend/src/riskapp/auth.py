@@ -290,22 +290,44 @@ def can_access_project(principal: Principal, project: Any) -> bool:
 
 
 def can_close_project(principal: Principal, project: Any) -> bool:
-    """Only an assigned creator with PM or Admin authority can close a register."""
+    """An assigned PM, or any PMO Lead / System Admin, may close a register.
+
+    The PMO Lead has system-admin-level authority across the application.
+    """
+    if principal.is_pmo_or_admin:
+        return True
     return (
-        principal.has_role(Role.PROJECT_MANAGER, Role.SYSTEM_ADMIN)
+        principal.has_role(Role.PROJECT_MANAGER)
         and principal.user_id is not None
         and project.pm_user_id == principal.user_id
     )
 
 
 def can_close_risk(principal: Principal) -> bool:
-    """True for the PMO Lead (final risk-closure authority).
+    """True for the Project Manager of the risk, PMO Lead, or System Admin.
 
-    System Admin is the application's superuser and may also close a risk, but
-    Project Managers and ordinary users cannot — enforced server-side on any
-    transition to ``Closed``.
+    The PM of the risk's register may close it; PMO Lead / System Admin have
+    system-admin-level authority. Enforced server-side on any transition to
+    ``Closed`` (row-level access is separately checked before this).
     """
-    return principal.has_role(Role.PMO_LEAD, Role.SYSTEM_ADMIN)
+    return principal.has_role(
+        Role.PROJECT_MANAGER, Role.PMO_LEAD, Role.SYSTEM_ADMIN
+    )
+
+
+def can_delete_risk(principal: Principal, risk: Any) -> bool:
+    """A risk may be deleted by its project PM, a PMO Lead, or a System Admin.
+
+    Owners and unrelated users cannot delete risks. Row-level access is checked
+    separately, so a PM can only ever reach risks in their own register.
+    """
+    if principal.is_pmo_or_admin:
+        return True
+    return (
+        principal.has_role(Role.PROJECT_MANAGER)
+        and principal.user_id is not None
+        and risk.project.pm_user_id == principal.user_id
+    )
 
 
 def can_access_risk(principal: Principal, risk: Any) -> bool:

@@ -1,22 +1,22 @@
-"""SLA deadline, warning windows, and activity-based monitoring logic.
+"""SLA deadline and warning-window helpers.
 
-Datetimes here are UTC-normalized and naive, matching the application's
-storage convention. ``deadline_anchor`` is the single place a business
-``tz`` is applied to a date-only start date.
+The SLA is **PM-defined**: the Risk Start Date is the SLA start and the Risk End
+Date *is* the SLA deadline (see :func:`deadline_from_end_date`). The risk rating
+represents severity only and never drives the deadline.
+
+Risk rating is still used for one thing: how far ahead of the deadline the
+owner is warned. That warning window lives here.
+
+Datetimes are UTC-normalized and naive, matching the application's storage
+convention.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, time, timedelta, tzinfo
+from datetime import UTC, date, datetime, time, tzinfo
 
-# SLA response windows (hours) by rating.
-SLA_HOURS: dict[str, int] = {
-    "High": 24,
-    "Medium": 48,
-    "Low": 120,  # 5 days
-}
-
-# Warning window (hours before the deadline) by rating.
+# Warning window (hours before the deadline) by rating. This is the only place
+# the rating still influences monitoring cadence; it never moves the deadline.
 WARNING_HOURS: dict[str, int] = {
     "High": 4,
     "Medium": 12,
@@ -26,14 +26,9 @@ WARNING_HOURS: dict[str, int] = {
 
 def _normalize(rating: str) -> str:
     normalized = rating.strip().title()
-    if normalized not in SLA_HOURS:
+    if normalized not in WARNING_HOURS:
         raise ValueError(f"Unknown rating {rating!r}; expected Low / Medium / High")
     return normalized
-
-
-def sla_hours(rating: str) -> int:
-    """Return the SLA response window in hours for a rating."""
-    return SLA_HOURS[_normalize(rating)]
 
 
 def warning_hours(rating: str) -> int:
@@ -52,79 +47,15 @@ def as_naive_utc(value: datetime) -> datetime:
     return value.astimezone(UTC).replace(tzinfo=None)
 
 
-def deadline_anchor(
-    start_date: date | None, created_at: datetime, tz: tzinfo
-) -> datetime:
-    """Return the UTC-normalized datetime from which the SLA window starts.
+def deadline_from_end_date(end_date: date | None, tz: tzinfo) -> datetime | None:
+    """Return the SLA deadline for a manually-set Risk End Date.
 
-    The clock starts at midnight of ``start_date`` in the business timezone
-    ``tz``. When no start date is set, it falls back to the risk's creation
-    time. The result is always a naive UTC datetime.
+    The Risk End Date *is* the SLA deadline: a risk is due by the end of that
+    day in the business timezone. The result is a naive UTC datetime, matching
+    the application's storage convention. Returns ``None`` when no end date is
+    set (the risk then has no SLA deadline).
     """
-    if start_date is not None:
-        midnight_local = datetime.combine(start_date, time.min, tzinfo=tz)
-        return as_naive_utc(midnight_local)
-    return as_naive_utc(created_at)
-
-
-def compute_deadline(rating: str, start_at: datetime) -> datetime:
-    """Return the SLA deadline: the window start plus the rating's response window."""
-    return start_at + timedelta(hours=sla_hours(rating))
-
-
-def compute_end_date(start_date: date | None, rating: str) -> date | None:
-    """Return the Risk End Date: the start date plus the rating's SLA window.
-
-    Reuses the same SLA duration (``sla_hours``) that drives the deadline, so
-    ``Risk End Date = Risk Start Date + SLA duration`` stays consistent with the
-    monitoring logic. Returns ``None`` when there is no start date to anchor from.
-    """
-    if start_date is None:
+    if end_date is None:
         return None
-    return start_date + timedelta(hours=sla_hours(rating))
-
-
-def has_activity(
-    *,
-    owner_edited: bool = False,
-    status_changed: bool = False,
-    acknowledged: bool = False,
-) -> bool:
-    """Return True if any signal indicates the owner has responded.
-
-    Activity is any of: an owner field edit, a status change, or an explicit
-    acknowledge. Once activity occurs, the SLA is permanently satisfied.
-    """
-    return owner_edited or status_changed or acknowledged
-
-
-def evaluate_sla(
-    *,
-    rating: str,
-    start_at: datetime,
-    now: datetime,
-    owner_edited: bool = False,
-    status_changed: bool = False,
-    acknowledged: bool = False,
-) -> str:
-    """Determine the monitoring action for an active risk.
-
-    Returns one of:
-      "satisfied" — the owner already responded; SLA permanently met.
-      "breach"    — deadline passed with no activity; escalate.
-      "warning"   — within the warning window with no activity; remind.
-      "ok"        — still within SLA and before the warning window.
-    """
-    if has_activity(
-        owner_edited=owner_edited, status_changed=status_changed, acknowledged=acknowledged
-    ):
-        return "satisfied"
-
-    deadline = compute_deadline(rating, start_at)
-    if now >= deadline:
-        return "breach"
-
-    if now >= deadline - timedelta(hours=warning_hours(rating)):
-        return "warning"
-
-    return "ok"
+    end_of_day = datetime.combine(end_date, time.max, tzinfo=tz)
+    return as_naive_utc(end_of_day)

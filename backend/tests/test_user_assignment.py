@@ -121,10 +121,11 @@ class TestAddProjectEndpoint:
         users = client.get("/api/users").json()
         assert any(user["id"] == pm_id and user["upn"] == "dev@local" for user in users)
 
-    def test_pmo_lead_cannot_create_register(self, client: TestClient) -> None:
+    def test_pmo_lead_can_create_register(self, client: TestClient) -> None:
+        """The PMO Lead has system-admin-level authority and may create registers."""
         created = client.post(
             "/api/projects",
             json={"name": "PMO", "department": "D", "project_type": "T", "customer": "C"},
             headers={"X-User-Role": "PMO Lead"},
         )
-        assert created.status_code == 403
+        assert created.status_code == 201

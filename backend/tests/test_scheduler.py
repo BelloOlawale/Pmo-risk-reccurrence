@@ -110,7 +110,8 @@ class TestFindSlaActions:
         _risk(db_session, code="RSK-NODL", deadline=None)
         assert find_sla_actions(db_session, NOW) == []
 
-    def test_owner_activity_satisfies_sla(self, db_session: Session) -> None:
+    def test_owner_edits_do_not_satisfy_sla(self, db_session: Session) -> None:
+        """Only acknowledgement stops the escalation clock, not any edit."""
         owner = models.User(upn="o@example.com", display_name="O")
         db_session.add(owner)
         db_session.flush()
@@ -126,6 +127,17 @@ class TestFindSlaActions:
             )
         )
         db_session.commit()
+        actions = find_sla_actions(db_session, NOW)
+        assert [a.risk_code for a in actions] == ["RSK-EDIT"]
+        assert actions[0].action == "breach"
+
+    def test_acknowledged_risk_is_satisfied(self, db_session: Session) -> None:
+        _risk(
+            db_session,
+            code="RSK-ACKED",
+            acknowledged=True,
+            deadline=NOW - dt.timedelta(hours=1),
+        )
         assert find_sla_actions(db_session, NOW) == []
 
 

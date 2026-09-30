@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 
 import type { User } from '../api/types';
+import { userDisplayName, userEmail } from '../api/users';
 
 interface UserPickerProps {
   users: User[];
@@ -15,10 +16,15 @@ interface UserPickerProps {
 
 const MAX_RESULTS = 50;
 
+/** Everything a user can be searched by: full name, first/last name and email. */
+function searchText(user: User): string {
+  return `${userDisplayName(user)} ${user.display_name ?? ''} ${userEmail(user)}`.toLowerCase();
+}
+
 /**
  * Searchable single-select over the (large) Entra ID user directory. Used for
- * risk owners and project managers. A native `<select>` with 1000+ options is
- * unusable, so this filters as you type.
+ * risk owners and project managers. Every row shows the person's full name and
+ * email, and matching runs against the name, first/last name and email.
  */
 export function UserPicker({
   users,
@@ -33,9 +39,12 @@ export function UserPicker({
   const [open, setOpen] = useState(false);
 
   const matches = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const base = q
-      ? users.filter((u) => `${u.display_name} ${u.upn}`.toLowerCase().includes(q))
+    const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const base = tokens.length
+      ? users.filter((u) => {
+          const hay = searchText(u);
+          return tokens.every((token) => hay.includes(token));
+        })
       : users;
     return base.slice(0, MAX_RESULTS);
   }, [users, query]);
@@ -46,6 +55,10 @@ export function UserPicker({
     setOpen(false);
   }
 
+  const selectedLabel = selected
+    ? `${userDisplayName(selected)} (${userEmail(selected)})`
+    : '';
+
   return (
     <div className="user-picker">
       <input
@@ -55,7 +68,7 @@ export function UserPicker({
         aria-autocomplete="list"
         placeholder={placeholder}
         disabled={disabled}
-        value={open ? query : selected ? selected.display_name || selected.upn : ''}
+        value={open ? query : selectedLabel}
         onFocus={() => {
           setQuery('');
           setOpen(true);
@@ -85,8 +98,8 @@ export function UserPicker({
               aria-selected={user.id === selectedUserId}
               onMouseDown={() => pick(user)}
             >
-              <span className="user-picker-name">{user.display_name || user.upn}</span>
-              <span className="user-picker-upn">{user.upn}</span>
+              <span className="user-picker-name">{userDisplayName(user)}</span>
+              <span className="user-picker-upn">{userEmail(user)}</span>
             </li>
           ))}
           {matches.length === 0 ? <li className="user-picker-empty">No matches</li> : null}

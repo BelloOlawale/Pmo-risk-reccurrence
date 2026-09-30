@@ -8,7 +8,6 @@ import { AddRiskModal } from '../components/AddRiskModal';
 import { RatingBadge, StatusBadge } from '../components/Badges';
 import { SuggestionsPanel } from '../components/SuggestionsPanel';
 import { useApi } from '../hooks/useApi';
-import { todayISO } from '../utils/format';
 
 const DEPARTMENTS: string[] = [
   'Business Solutions',
@@ -138,7 +137,6 @@ function CreateRiskForm({ onCreate }: { onCreate: (project: Project) => void }) 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<Record<string, string>>({});
-  const today = todayISO();
 
   function set<K extends keyof FormState>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -154,8 +152,9 @@ function CreateRiskForm({ onCreate }: { onCreate: (project: Project) => void }) 
     if (!form.department.trim()) nextFieldError.department = 'Department is required.';
     if (!form.project_type.trim()) nextFieldError.project_type = 'Project type is required.';
     if (!form.customer.trim()) nextFieldError.customer = 'Customer is required.';
-    if (form.start_date && form.start_date < today) {
-      nextFieldError.start_date = 'Start date cannot be in the past.';
+    if (form.start_date && form.end_date && form.end_date < form.start_date) {
+      nextFieldError.end_date =
+        'Project end date cannot be earlier than the project start date.';
     }
 
     if (Object.keys(nextFieldError).length > 0) {
@@ -246,7 +245,6 @@ function CreateRiskForm({ onCreate }: { onCreate: (project: Project) => void }) 
                 <label>Start date</label>
                 <input
                   type="date"
-                  min={today}
                   value={form.start_date}
                   onChange={(e) => set('start_date', e.target.value)}
                 />
@@ -261,6 +259,9 @@ function CreateRiskForm({ onCreate }: { onCreate: (project: Project) => void }) 
                   value={form.end_date}
                   onChange={(e) => set('end_date', e.target.value)}
                 />
+                {fieldError.end_date ? (
+                  <span className="field-error">{fieldError.end_date}</span>
+                ) : null}
               </div>
               <div className="field">
                 <label>Stage gate</label>

@@ -3,30 +3,14 @@ import type { FormEvent } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 
 import { api, ApiError } from '../api/client';
-import type {
-  Issue,
-  Me,
-  ResponseStrategy,
-  Risk,
-  RiskAuditLog,
-  RiskMeta,
-  RiskSource,
-} from '../api/types';
+import type { Issue, Me, Risk, RiskAuditLog, RiskSource } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { ownerName, useUsers } from '../api/users';
 import { RatingBadge, SectionCard, StatusBadge } from '../components/Badges';
-import { PickOrTypeField } from '../components/PickOrTypeField';
 import { UserPicker } from '../components/UserPicker';
 import { useApi } from '../hooks/useApi';
 import { allowedTransitions } from '../utils/status';
-import {
-  computeRiskEndDate,
-  computeRiskRating,
-  countdownState,
-  formatDate,
-  formatDateTime,
-  todayISO,
-} from '../utils/format';
+import { countdownState, formatDate, formatDateTime } from '../utils/format';
 
 interface EditForm {
   description: string;
@@ -38,6 +22,7 @@ interface EditForm {
   response_plan: string;
   owner_user_id: string;
   risk_start_date: string;
+  risk_end_date: string;
   identified_during: string;
 }
 
@@ -51,6 +36,7 @@ const EMPTY_FORM: EditForm = {
   response_plan: '',
   owner_user_id: '',
   risk_start_date: '',
+  risk_end_date: '',
   identified_during: '',
 };
 
@@ -65,6 +51,7 @@ function toForm(risk: Risk): EditForm {
     response_plan: risk.response_plan ?? '',
     owner_user_id: risk.owner_user_id !== null ? String(risk.owner_user_id) : '',
     risk_start_date: risk.risk_start_date ?? '',
+    risk_end_date: risk.risk_end_date ?? '',
     identified_during: risk.identified_during ?? '',
   };
 }
@@ -166,10 +153,7 @@ export function RiskDetailPage() {
     [id],
   );
   const { data: me } = useApi(() => api.get<Me>('/api/me'), []);
-  const { data: meta } = useApi(() => api.get<RiskMeta>('/api/risk-meta'), []);
   const users = useUsers();
-  const categoryOptions = meta?.categories ?? [];
-  const lifecycleOptions = meta?.lifecycle ?? [];
 
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<EditForm>(EMPTY_FORM);
@@ -177,10 +161,6 @@ export function RiskDetailPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [statusTarget, setStatusTarget] = useState('');
   const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
-
-  const today = todayISO();
-  const editRating = computeRiskRating(form.likelihood, form.impact);
-  const editEndDate = computeRiskEndDate(form.risk_start_date, editRating);
 
   useEffect(() => {
     if (risk && !editing) {
@@ -206,24 +186,26 @@ export function RiskDetailPage() {
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
-    if (form.risk_start_date && form.risk_start_date < today) {
-      setActionError('Risk start date cannot be in the past.');
+    if (
+      form.risk_start_date &&
+      form.risk_end_date &&
+      form.risk_end_date < form.risk_start_date
+    ) {
+      setActionError('Risk end date cannot be earlier than the risk start date.');
       return;
     }
     setSaving(true);
     setActionError(null);
     try {
+      // Likelihood, Impact, Category, Response Strategy and Project Lifecycle
+      // are fixed at creation; only the still-editable fields are sent.
       await api.patch<Risk>(`/api/risks/${id}`, {
         description: form.description,
-        category: form.category || null,
         risk_source: (form.risk_source || null) as RiskSource | null,
-        likelihood: form.likelihood,
-        impact: form.impact,
-        response_strategy: (form.response_strategy || null) as ResponseStrategy | null,
         response_plan: form.response_plan || null,
         owner_user_id: form.owner_user_id === '' ? null : Number(form.owner_user_id),
         risk_start_date: form.risk_start_date || null,
-        identified_during: form.identified_during || null,
+        risk_end_date: form.risk_end_date || null,
         actor_user_id: auth.userId,
       });
       setEditing(false);
@@ -274,7 +256,8 @@ export function RiskDetailPage() {
   // superuser. Everyone else sees the lifecycle without the Closed transition
   // (the backend enforces the same rule regardless of what the UI shows).
   const canCloseRisk = (me?.roles ?? []).some(
-    (role) => role === 'PMO Lead' || role === 'System Admin',
+    (role) =>
+      role === 'Project Manager' || role === 'PMO Lead' || role === 'System Admin',
   );
   const statusOptions = canCloseRisk
     ? transitions
@@ -317,7 +300,7 @@ export function RiskDetailPage() {
       {risk ? (
         <>
           <div className="btn-group mb-20">
-            {!risk.sla_acknowledged && risk.sla_deadline ? (
+            {risk.owner_user_id !== null && !risk.sla_acknowledged ? (
               <button
                 className="btn btn-primary"
                 onClick={() =>
@@ -366,6 +349,10 @@ export function RiskDetailPage() {
               {editing ? (
                 <SectionCard title="Edit risk">
                   <form onSubmit={handleSave}>
+                    <p className="muted" style={{ marginTop: 0 }}>
+                      Likelihood, Impact, Category, Response strategy and Project life cycle are
+                      fixed when the risk is created and cannot be edited here.
+                    </p>
                     <div className="form-grid">
                       <div className="field" style={{ gridColumn: '1 / -1' }}>
                         <label>Description</label>
@@ -374,12 +361,26 @@ export function RiskDetailPage() {
                           onChange={(e) => setForm({ ...form, description: e.target.value })}
                         />
                       </div>
-                      <PickOrTypeField
-                        label="Category"
-                        value={form.category}
-                        onChange={(v) => setForm({ ...form, category: v })}
-                        options={categoryOptions}
-                      />
+                      <div className="field">
+                        <label>Category</label>
+                        <div className="readonly-field">{form.category || '—'}</div>
+                      </div>
+                      <div className="field">
+                        <label>Likelihood</label>
+                        <div className="readonly-field">{form.likelihood}</div>
+                      </div>
+                      <div className="field">
+                        <label>Impact</label>
+                        <div className="readonly-field">{form.impact}</div>
+                      </div>
+                      <div className="field">
+                        <label>Response strategy</label>
+                        <div className="readonly-field">{form.response_strategy || '—'}</div>
+                      </div>
+                      <div className="field">
+                        <label>Project life cycle</label>
+                        <div className="readonly-field">{form.identified_during || '—'}</div>
+                      </div>
                       <div className="field">
                         <label>Risk source</label>
                         <select
@@ -390,41 +391,6 @@ export function RiskDetailPage() {
                           <option value="Human">Human</option>
                           <option value="Environmental">Environmental</option>
                           <option value="Technical">Technical</option>
-                        </select>
-                      </div>
-                      <div className="field">
-                        <label>Likelihood</label>
-                        <select
-                          value={form.likelihood}
-                          onChange={(e) => setForm({ ...form, likelihood: e.target.value })}
-                        >
-                          <option value="Low">Low</option>
-                          <option value="Medium">Medium</option>
-                          <option value="High">High</option>
-                        </select>
-                      </div>
-                      <div className="field">
-                        <label>Impact</label>
-                        <select
-                          value={form.impact}
-                          onChange={(e) => setForm({ ...form, impact: e.target.value })}
-                        >
-                          <option value="Low">Low</option>
-                          <option value="Medium">Medium</option>
-                          <option value="High">High</option>
-                        </select>
-                      </div>
-                      <div className="field">
-                        <label>Response strategy</label>
-                        <select
-                          value={form.response_strategy}
-                          onChange={(e) => setForm({ ...form, response_strategy: e.target.value })}
-                        >
-                          <option value="">—</option>
-                          <option value="Mitigate">Mitigate</option>
-                          <option value="Transfer">Transfer</option>
-                          <option value="Avoid">Avoid</option>
-                          <option value="Accept">Accept</option>
                         </select>
                       </div>
                       <div className="field" style={{ gridColumn: '1 / -1' }}>
@@ -453,7 +419,6 @@ export function RiskDetailPage() {
                         <label>Risk start date</label>
                         <input
                           type="date"
-                          min={today}
                           value={form.risk_start_date}
                           onChange={(e) => setForm({ ...form, risk_start_date: e.target.value })}
                         />
@@ -462,22 +427,13 @@ export function RiskDetailPage() {
                         <label>Risk end date</label>
                         <input
                           type="date"
-                          value={editEndDate ?? ''}
-                          readOnly
-                          disabled
-                          title="Automatically calculated based on risk rating and SLA."
+                          value={form.risk_end_date}
+                          onChange={(e) => setForm({ ...form, risk_end_date: e.target.value })}
                         />
                         <span className="field-hint">
-                          Automatically calculated based on risk rating and SLA.
+                          The risk end date is the SLA deadline.
                         </span>
                       </div>
-                      <PickOrTypeField
-                        label="Project life cycle"
-                        value={form.identified_during}
-                        onChange={(v) => setForm({ ...form, identified_during: v })}
-                        options={lifecycleOptions}
-                        placeholder="e.g. Execution, Discovery…"
-                      />
                     </div>
                     <div className="btn-group">
                       <button className="btn btn-primary" type="submit" disabled={saving}>
@@ -627,8 +583,8 @@ export function RiskDetailPage() {
                     </>
                   ) : (
                     <p className="muted">
-                      This risk is Resolved and ready to close. Only a PMO Lead can perform the
-                      final closure to Closed.
+                      This risk is Resolved and ready to close. You do not have permission to
+                      close it.
                     </p>
                   )}
                 </SectionCard>

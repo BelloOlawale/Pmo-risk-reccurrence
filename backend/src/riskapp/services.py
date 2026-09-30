@@ -4,19 +4,14 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from riskapp import models, schemas
 from riskapp.audit import record_change
 from riskapp.config import settings
 from riskapp.domain.scoring import compute_risk_rating
-from riskapp.domain.sla import (
-    as_naive_utc,
-    compute_deadline,
-    compute_end_date,
-    deadline_anchor,
-)
+from riskapp.domain.sla import as_naive_utc, deadline_from_end_date
 from riskapp.domain.status import RiskStatus, ensure_transition
 
 
@@ -208,6 +203,14 @@ def close_project(
     return project
 
 
+def validate_risk_dates(start: dt.date | None, end: dt.date | None) -> None:
+    """Raise when a Risk End Date is earlier than its Risk Start Date."""
+    if start is not None and end is not None and end < start:
+        raise ValueError(
+            "Risk end date cannot be earlier than the risk start date."
+        )
+
+
 def create_risk(
     db: Session,
     payload: schemas.RiskCreate,
@@ -221,11 +224,16 @@ def create_risk(
     status is overridable so tests and internal callers can still create a
     ``Suggested`` risk (the state the accept/dismiss lifecycle operates on).
 
-    No owner is assigned implicitly: ``owner_user_id`` is only ever the value
-    the caller explicitly supplied, and owners are always assigned by a human.
+    The Risk Start Date and Risk End Date are set by the PM. The Risk End Date
+    *is* the SLA deadline (never derived from the risk rating). Assigning an
+    owner at creation moves the risk straight to ``In Progress``.
     """
     rating = compute_risk_rating(payload.likelihood, payload.impact)
+    validate_risk_dates(payload.risk_start_date, payload.risk_end_date)
     now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
+    initial_status = status
+    if payload.owner_user_id is not None and status == RiskStatus.OPEN.value:
+        initial_status = RiskStatus.IN_PROGRESS.value
     risk = models.Risk(
         project_id=payload.project_id,
         risk_code=next_risk_code(db),
@@ -240,15 +248,13 @@ def create_risk(
         response_plan=payload.response_plan,
         owner_user_id=payload.owner_user_id,
         risk_start_date=payload.risk_start_date,
-        risk_end_date=compute_end_date(payload.risk_start_date, rating),
+        risk_end_date=payload.risk_end_date,
         source=payload.source or "Custom",
         identified_during=payload.identified_during,
-        status=status,
+        status=initial_status,
         created_at=now,
         updated_at=now,
-        sla_deadline=compute_deadline(
-            rating, deadline_anchor(payload.risk_start_date, now, settings.tz)
-        ),
+        sla_deadline=deadline_from_end_date(payload.risk_end_date, settings.tz),
     )
     db.add(risk)
     db.commit()
@@ -279,10 +285,10 @@ def transition_risk(
         new_value=target_status.value,
         actor_user_id=actor_user_id,
     )
-    # Reaching Event materializes the risk: create its single Issue immediately
-    # (idempotent) whatever the caller — manual status change or the scheduler
-    # end-date monitor — instead of waiting for the next backfill sweep.
-    if target_status == RiskStatus.EVENT:
+    # Escalation and materialization both raise a tracked Issue. Creating it in
+    # the same transaction (idempotent) means an escalated or Event risk shows
+    # up in the Issues table immediately, not on the next backfill sweep.
+    if target_status in (RiskStatus.EVENT, RiskStatus.ESCALATED):
         ensure_issue_for_risk(db, risk, actor_user_id=actor_user_id)
     db.commit()
     db.refresh(risk)
@@ -297,6 +303,8 @@ def acknowledge_risk(
     Acknowledgement satisfies the SLA acknowledgement requirement only. It does
     NOT resolve the risk: the risk stays active until the owner resolves it.
     """
+    if risk.owner_user_id is None:
+        raise ValueError("A risk must have an assigned owner before it can be acknowledged.")
     if not risk.sla_acknowledged:
         risk.sla_acknowledged = True
         record_change(
@@ -323,11 +331,12 @@ def ensure_issue_for_risk(
     no matter how many times the automation runs.
 
     Raises:
-        ValueError: if ``risk`` is not in the ``Event`` (materialized) status.
+        ValueError: if ``risk`` is neither escalated nor in the ``Event``
+            (materialized) status.
     """
-    if risk.status != RiskStatus.EVENT.value:
+    if risk.status not in (RiskStatus.EVENT.value, RiskStatus.ESCALATED.value):
         raise ValueError(
-            f"Issues are only created for materialized (Event) risks; "
+            f"Issues are only created for escalated or materialized (Event) risks; "
             f"{risk.risk_code} is {risk.status!r}."
         )
     existing = db.scalar(
@@ -387,11 +396,9 @@ def accept_risk(
     risk.status = target.value
     risk.accepted_date = now
 
-    if risk.sla_deadline is None:
-        risk.sla_deadline = compute_deadline(
-            risk.risk_rating,
-            deadline_anchor(risk.risk_start_date, risk.created_at or now, settings.tz),
-        )
+    if risk.sla_deadline is None and risk.risk_end_date is not None:
+        # The Risk End Date is the SLA deadline; never derived from the rating.
+        risk.sla_deadline = deadline_from_end_date(risk.risk_end_date, settings.tz)
 
     record_change(
         db,
@@ -483,14 +490,18 @@ def de_escalate_risk(
     return risk
 
 
-def _set_auto_deadline(
+# Fields that are fixed at creation. The Edit Details form shows them
+# read-only; the API rejects any attempt to change them.
+_IMMUTABLE_RISK_FIELDS = frozenset(
+    {"likelihood", "impact", "category", "response_strategy", "identified_during"}
+)
+
+
+def _refresh_sla_deadline(
     db: Session, risk: models.Risk, actor_user_id: int | None = None
 ) -> None:
-    """Recompute the SLA deadline from the rating and start date, auditing if changed."""
-    new_deadline = compute_deadline(
-        risk.risk_rating,
-        deadline_anchor(risk.risk_start_date, risk.created_at, settings.tz),
-    )
+    """Derive the SLA deadline from the (PM-set) Risk End Date, auditing changes."""
+    new_deadline = deadline_from_end_date(risk.risk_end_date, settings.tz)
     current_deadline = (
         as_naive_utc(risk.sla_deadline) if risk.sla_deadline is not None else None
     )
@@ -507,23 +518,17 @@ def _set_auto_deadline(
         )
 
 
-def _set_auto_end_date(
-    db: Session, risk: models.Risk, actor_user_id: int | None = None
-) -> None:
-    """Recompute the Risk End Date from the start date and rating, auditing if changed."""
-    new_end = compute_end_date(risk.risk_start_date, risk.risk_rating)
-    old_end = risk.risk_end_date
-    if new_end != old_end:
-        risk.risk_end_date = new_end
-        record_change(
-            db,
-            risk,
-            action="field_edit",
-            field="risk_end_date",
-            old_value=old_end,
-            new_value=new_end,
-            actor_user_id=actor_user_id,
-        )
+def _reject_immutable_edits(data: dict[str, object], risk: models.Risk) -> None:
+    """Drop immutable fields whose value is unchanged; reject actual changes."""
+    for field in list(data):
+        if field not in _IMMUTABLE_RISK_FIELDS:
+            continue
+        if data[field] != getattr(risk, field):
+            raise ValueError(
+                f"{field.replace('_', ' ').title()} cannot be edited after the risk "
+                "is created."
+            )
+        data.pop(field)
 
 
 def update_risk(
@@ -534,9 +539,14 @@ def update_risk(
 ) -> models.Risk:
     """Apply a partial update, auditing each changed field.
 
+    Likelihood, Impact, Category, Response Strategy and Project Lifecycle are
+    fixed at creation and rejected here (not only disabled in the UI). The Risk
+    End Date is PM-set and *is* the SLA deadline.
+
     Raises:
         InvalidTransitionError: if ``status`` requests an invalid transition.
-        ValueError: if a non-nullable field is cleared, or status is unknown.
+        ValueError: if a non-nullable field is cleared, an immutable field is
+            changed, the dates are inconsistent, or the status is unknown.
     """
     data = payload.model_dump(exclude_unset=True)
     data.pop("actor_user_id", None)
@@ -545,10 +555,10 @@ def update_risk(
     if owner_upn:
         data["owner_user_id"] = get_or_create_user(db, owner_upn).id
     target_status = data.pop("status", None)
-    manual_deadline = data.pop("sla_deadline", None)
-    reset_deadline = data.pop("reset_sla_deadline", False)
-    # Risk End Date is always derived; never trust a client-supplied value.
-    data.pop("risk_end_date", None)
+
+    _reject_immutable_edits(data, risk)
+
+    owner_before = risk.owner_user_id
 
     for field, new_value in data.items():
         if new_value is None and field in _NON_NULLABLE_FIELDS:
@@ -567,67 +577,18 @@ def update_risk(
             actor_user_id=actor_user_id,
         )
 
-    # Recompute the rating whenever likelihood or impact changed.
-    if "likelihood" in data or "impact" in data:
-        new_rating = compute_risk_rating(risk.likelihood, risk.impact)
-        if new_rating != risk.risk_rating:
-            old_rating = risk.risk_rating
-            risk.risk_rating = new_rating
-            record_change(
-                db,
-                risk,
-                action="field_edit",
-                field="risk_rating",
-                old_value=old_rating,
-                new_value=new_rating,
-                actor_user_id=actor_user_id,
-            )
+    if "risk_start_date" in data or "risk_end_date" in data:
+        validate_risk_dates(risk.risk_start_date, risk.risk_end_date)
+        _refresh_sla_deadline(db, risk, actor_user_id)
 
-    # Recompute the deadline when the rating or the start date changed,
-    # unless manually overridden.
-    if any(key in data for key in ("likelihood", "impact", "risk_start_date")):
-        if not risk.sla_manual_override:
-            _set_auto_deadline(db, risk, actor_user_id)
-        _set_auto_end_date(db, risk, actor_user_id)
-
-    # Manual deadline override (PM / PMO Lead).
-    if manual_deadline is not None:
-        old_deadline = risk.sla_deadline
-        risk.sla_deadline = manual_deadline
-        record_change(
-            db,
-            risk,
-            action="field_edit",
-            field="sla_deadline",
-            old_value=old_deadline,
-            new_value=manual_deadline,
-            actor_user_id=actor_user_id,
-        )
-        if not risk.sla_manual_override:
-            risk.sla_manual_override = True
-            record_change(
-                db,
-                risk,
-                action="field_edit",
-                field="sla_manual_override",
-                old_value=False,
-                new_value=True,
-                actor_user_id=actor_user_id,
-            )
-
-    # Reset the override back to the auto-computed deadline.
-    if reset_deadline and risk.sla_manual_override:
-        risk.sla_manual_override = False
-        record_change(
-            db,
-            risk,
-            action="field_edit",
-            field="sla_manual_override",
-            old_value=True,
-            new_value=False,
-            actor_user_id=actor_user_id,
-        )
-        _set_auto_deadline(db, risk, actor_user_id)
+    # Assigning an owner moves a live, unowned Open risk into the workflow.
+    newly_assigned = risk.owner_user_id is not None and owner_before is None
+    if (
+        newly_assigned
+        and target_status is None
+        and risk.status == RiskStatus.OPEN.value
+    ):
+        target_status = RiskStatus.IN_PROGRESS.value
 
     if target_status is not None and target_status != risk.status:
         target = ensure_transition(risk.status, target_status)
@@ -643,11 +604,30 @@ def update_risk(
             actor_user_id=actor_user_id,
         )
 
-    # A manual status change to Event materializes the risk immediately; later
-    # edits of an already-Event risk backfill the same invariant. Idempotent.
-    if risk.status == RiskStatus.EVENT.value:
+    # Escalation and materialization both raise the single tracked Issue;
+    # repeated edits of an already-escalated/Event risk are idempotent.
+    if risk.status in (RiskStatus.EVENT.value, RiskStatus.ESCALATED.value):
         ensure_issue_for_risk(db, risk, actor_user_id=actor_user_id)
 
     db.commit()
     db.refresh(risk)
     return risk
+
+
+def delete_risk(db: Session, risk: models.Risk) -> None:
+    """Delete a risk and every record that points at it, leaving no orphans.
+
+    The originating risk is normally retained for audit; an explicit PM delete
+    is the one sanctioned exception. Its auto-created Issue, audit log entries
+    and notification references are removed (or unlinked) in the same
+    transaction so no dangling foreign keys remain.
+    """
+    db.execute(delete(models.Issue).where(models.Issue.source_risk_id == risk.id))
+    db.execute(delete(models.RiskAuditLog).where(models.RiskAuditLog.risk_id == risk.id))
+    db.execute(
+        update(models.Notification)
+        .where(models.Notification.risk_id == risk.id)
+        .values(risk_id=None)
+    )
+    db.delete(risk)
+    db.commit()

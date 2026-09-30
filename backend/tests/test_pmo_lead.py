@@ -1,10 +1,8 @@
-"""PMO Lead role: risk closure authority.
+"""Risk closure permissions.
 
-The PMO Lead (final closure authority) — and System Admin (app superuser) — may
-transition a risk to ``Closed``. Project Managers and other users must be
-rejected server-side even if they try to set ``status = Closed`` directly.
-Risk Register (project) closure stays with the assigned PM and is out of scope
-here.
+The Project Manager who owns the register may close a risk, as may the PMO Lead
+and System Admin. The backend still enforces row-level access, so an unrelated
+PM cannot close someone else's risk even though PM is a permitted role.
 """
 
 from __future__ import annotations
@@ -66,21 +64,20 @@ def test_me_returns_role(client: TestClient) -> None:
     assert "Project Manager" in resp.json()["roles"]
 
 
-def test_pm_cannot_close_a_risk(client: TestClient) -> None:
+def test_pm_can_close_own_risk(client: TestClient) -> None:
     project = _create_project(client, user_id=7)
     risk = _resolved_risk(client, project, pm_user_id=7)
 
     resp = client.patch(
         f"/api/risks/{risk['id']}",
-        json={"status": "Closed"},
+        json={"status": "Closed", "actor_user_id": 7},
         headers=_headers(7, "Project Manager"),
     )
-    assert resp.status_code == 403
-    assert "PMO Lead" in resp.json()["detail"]
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "Closed"
 
-    # The risk is still Resolved — nothing changed.
     read = client.get(f"/api/risks/{risk['id']}", headers=_headers(None, "System Admin")).json()
-    assert read["status"] == "Resolved"
+    assert read["status"] == "Closed"
 
 
 def test_other_pm_cannot_close_someone_elses_risk(client: TestClient) -> None:

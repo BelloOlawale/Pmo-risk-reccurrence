@@ -33,7 +33,7 @@ def _risk(
     code: str,
     status: str = "Open",
     end_date: dt.date | None = PAST,
-    acknowledged: bool = False,
+    acknowledged: bool = True,
     owner: models.User | None = None,
     description: str = "Unavailability of key project stakeholders",
     category: str | None = "Project Management",
@@ -122,6 +122,14 @@ class TestFindOverdueRisks:
 
     def test_missing_end_date_is_excluded(self, db_session: Session) -> None:
         _risk(db_session, code="RSK-NOEND", end_date=None)
+        assert find_overdue_risks(db_session, TODAY) == []
+
+    def test_unacknowledged_overdue_risk_is_not_materialized(
+        self, db_session: Session
+    ) -> None:
+        # An unacknowledged risk past its deadline escalates; it does not
+        # silently become an Event.
+        _risk(db_session, code="RSK-UNACK", acknowledged=False)
         assert find_overdue_risks(db_session, TODAY) == []
 
     def test_in_progress_and_escalated_are_materializable(self, db_session: Session) -> None:

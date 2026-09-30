@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { api } from '../api/client';
-import type { Issue, Project, Risk } from '../api/types';
+import type { Issue, Me, Project, Risk } from '../api/types';
 import { ownerName, useUsers } from '../api/users';
 import { AddRiskModal } from '../components/AddRiskModal';
 import { SectionCard, StatusBadge } from '../components/Badges';
@@ -22,6 +22,7 @@ export function ProjectDashboardPage() {
   const [adding, setAdding] = useState(false);
   const users = useUsers();
 
+  const { data: me } = useApi(() => api.get<Me>('/api/me'), []);
   const { data: project, error: projectError, reload: reloadProject } = useApi(
     () => api.get<Project>(`/api/projects/${id}`),
     [id],
@@ -44,6 +45,25 @@ export function ProjectDashboardPage() {
   const isClosed = project?.status === 'Closed';
   const backTo = isClosed ? '/risk-history' : '/active-risk';
   const backLabel = isClosed ? '← Risk History' : '← Active Risk';
+
+  async function handleDeleteRisk(risk: Risk) {
+    await api.del<void>(`/api/risks/${risk.id}`);
+    reloadRisks();
+    reloadIssues();
+    reloadProject();
+  }
+
+  function canManageRisks(): boolean {
+    if (!me || !project) return false;
+    if (me.roles.some((role) => role === 'PMO Lead' || role === 'System Admin')) {
+      return true;
+    }
+    return (
+      me.roles.includes('Project Manager') &&
+      me.user_id !== null &&
+      project.pm_user_id === me.user_id
+    );
+  }
 
   function handleRiskCreated() {
     setAdding(false);
@@ -139,6 +159,8 @@ export function ProjectDashboardPage() {
                 onSelect={(r) =>
                   navigate(`/risks/${r.id}?from=${isClosed ? 'risk-history' : 'active-risk'}`)
                 }
+                onDelete={handleDeleteRisk}
+                canDelete={canManageRisks}
               />
             </SectionCard>
           </div>

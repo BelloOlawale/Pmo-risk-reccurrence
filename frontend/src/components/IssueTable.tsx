@@ -119,8 +119,9 @@ export function IssueTable({ issues, onSelect }: IssueTableProps) {
           {rows.length === 0 ? (
             <tr>
               <td colSpan={9} className="empty-state">
-                No issues yet. Risks that pass their Risk End Date without being resolved
-                materialize into Issues automatically.
+                No issues yet. Risks that are escalated (not acknowledged before the SLA
+                deadline) or that pass their Risk End Date without being resolved are raised as
+                Issues automatically.
               </td>
             </tr>
           ) : null}

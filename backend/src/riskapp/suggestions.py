@@ -20,6 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from riskapp import models, schemas
+from riskapp.config import settings
 from riskapp.domain.retrieval import (
     ExactMatch,
     KeywordMatch,
@@ -28,7 +29,7 @@ from riskapp.domain.retrieval import (
     merge_candidates,
 )
 from riskapp.domain.scoring import compute_risk_rating
-from riskapp.domain.sla import compute_end_date
+from riskapp.domain.sla import deadline_from_end_date
 from riskapp.domain.status import RiskStatus
 from riskapp.embeddings import EmbeddingProvider
 from riskapp.llm.chat import ChatProvider
@@ -535,14 +536,18 @@ def accept_suggestion(
     final_impact = impact or source.impact
     final_rating = compute_risk_rating(final_likelihood, final_impact)
 
-    # Enrich the accepted risk from the matched historical record. Dates follow
-    # the existing business rules: a start date is only copied when it is not in
-    # the past, and the end date stays SLA-calculated (never invented). The
-    # owner is deliberately *not* copied: every risk gets its owner assigned
-    # manually by a human, never inherited or auto-filled from history.
+    # Enrich the accepted risk from the matched historical record. Dates are
+    # copied only when they are not in the past (the PM can always set them
+    # explicitly on the accepted risk). The end date is never derived from the
+    # rating: it is copied from the source register as-is. The owner is
+    # deliberately *not* copied: every risk gets its owner assigned manually.
     source_start = None
     if source.risk_start_date is not None and source.risk_start_date >= dt.date.today():
         source_start = source.risk_start_date
+    source_end = source.risk_end_date
+    if source_end is not None and source_start is not None and source_end < source_start:
+        # Never copy an inconsistent pair from history.
+        source_end = None
 
     risk = models.Risk(
         project_id=project.id,
@@ -559,9 +564,8 @@ def accept_suggestion(
         owner_user_id=None,
         identified_during=source.identified_during,
         risk_start_date=source_start,
-        risk_end_date=(
-            compute_end_date(source_start, final_rating) if source_start else None
-        ),
+        risk_end_date=source_end,
+        sla_deadline=deadline_from_end_date(source_end, settings.tz),
         status=RiskStatus.SUGGESTED.value,
         source=HISTORICAL_SOURCE,
         source_file_name=source.source_file_name,

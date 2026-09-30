@@ -70,6 +70,9 @@ def _materialize(client: TestClient, db: Session, risk_id: int) -> dict:
     risk = db.get(models.Risk, risk_id)
     assert risk is not None
     risk.risk_end_date = PAST
+    # Only an acknowledged risk materializes into an Event; an unacknowledged
+    # one escalates instead.
+    risk.sla_acknowledged = True
     db.commit()
 
     run_end_date_monitor(db, NotificationService(), TODAY)

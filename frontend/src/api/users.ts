@@ -30,9 +30,36 @@ export function useUsers(): User[] {
   return data ?? cache ?? [];
 }
 
+/** Build a human-readable name from an email/UPN local part. */
+function nameFromUpn(upn: string): string {
+  const local = (upn.split('@')[0] ?? upn).trim();
+  const words = local.split(/[._+-]+/).filter(Boolean);
+  if (words.length === 0) return upn;
+  return words
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+/**
+ * The person's full name, falling back to a name derived from their email
+ * local part when the directory row has no usable display name. This keeps
+ * owners/PMs from ever showing as an email address only.
+ */
+export function userDisplayName(user: User): string {
+  const name = (user.display_name ?? '').trim();
+  const isUsableName =
+    name.length > 0 && !name.includes('@') && name.toLowerCase() !== user.upn.toLowerCase();
+  return isUsableName ? name : nameFromUpn(user.upn);
+}
+
+/** The person's email address (their UPN). */
+export function userEmail(user: User): string {
+  return user.upn;
+}
+
 /** Display name for a risk/issue owner, falling back to `User #id`. */
 export function ownerName(users: User[], ownerUserId: number | null): string {
   if (ownerUserId === null) return 'Unassigned';
   const user = users.find((u) => u.id === ownerUserId);
-  return user ? user.display_name || user.upn : `User #${ownerUserId}`;
+  return user ? userDisplayName(user) : `User #${ownerUserId}`;
 }
