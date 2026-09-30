@@ -30,7 +30,6 @@ interface FormState {
   customer: string;
   start_date: string;
   end_date: string;
-  stage_gate: string;
 }
 
 const EMPTY: FormState = {
@@ -40,7 +39,6 @@ const EMPTY: FormState = {
   customer: '',
   start_date: '',
   end_date: '',
-  stage_gate: '',
 };
 
 function DepartmentField({
@@ -169,7 +167,6 @@ function CreateRiskForm({ onCreate }: { onCreate: (project: Project) => void }) 
       customer: form.customer.trim(),
       start_date: form.start_date || null,
       end_date: form.end_date || null,
-      stage_gate: form.stage_gate.trim() || null,
     };
 
     setSaving(true);
@@ -262,14 +259,6 @@ function CreateRiskForm({ onCreate }: { onCreate: (project: Project) => void }) 
                 {fieldError.end_date ? (
                   <span className="field-error">{fieldError.end_date}</span>
                 ) : null}
-              </div>
-              <div className="field">
-                <label>Stage gate</label>
-                <input
-                  value={form.stage_gate}
-                  onChange={(e) => set('stage_gate', e.target.value)}
-                  placeholder="e.g. Discovery"
-                />
               </div>
             </div>
             <div className="btn-group create-register-actions">

@@ -7,7 +7,7 @@ import { RatingBadge, StatusBadge } from './Badges';
 
 type SortKey = 'code' | 'rating' | 'status' | 'owner' | 'date' | 'acknowledged';
 
-const COLUMN_COUNT = 10;
+const COLUMN_COUNT = 9;
 
 interface RiskTableProps {
   risks: Risk[];
@@ -73,7 +73,6 @@ export function RiskTable({
   const [categoryFilter, setCategoryFilter] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [pendingDelete, setPendingDelete] = useState<Risk | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -109,15 +108,6 @@ export function RiskTable({
       setSortKey(key);
       setSortDir('asc');
     }
-  }
-
-  function toggleExpand(id: number) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   }
 
   async function confirmDelete() {
@@ -176,7 +166,6 @@ export function RiskTable({
         <table>
           <thead>
             <tr>
-              <th className="expand-cell" aria-label="Expand" />
               <th className="sortable" onClick={() => toggleSort('code')}>
                 Code{sortIndicator('code')}
               </th>
@@ -199,23 +188,18 @@ export function RiskTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((risk) => {
-              const isOpen = expanded.has(risk.id);
-              return (
-                <RiskRow
-                  key={risk.id}
-                  risk={risk}
-                  isOpen={isOpen}
-                  onSelect={onSelect}
-                  onToggle={() => toggleExpand(risk.id)}
-                  onDelete={
-                    onDelete && (canDelete ? canDelete(risk) : true)
-                      ? () => setPendingDelete(risk)
-                      : undefined
-                  }
-                />
-              );
-            })}
+            {rows.map((risk) => (
+              <RiskRow
+                key={risk.id}
+                risk={risk}
+                onSelect={onSelect}
+                onDelete={
+                  onDelete && (canDelete ? canDelete(risk) : true)
+                    ? () => setPendingDelete(risk)
+                    : undefined
+                }
+              />
+            ))}
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={COLUMN_COUNT} className="empty-state">
@@ -274,106 +258,62 @@ function AcknowledgedBadge({ acknowledged }: { acknowledged: boolean }) {
 
 function RiskRow({
   risk,
-  isOpen,
   onSelect,
-  onToggle,
   onDelete,
 }: {
   risk: Risk;
-  isOpen: boolean;
   onSelect: (risk: Risk) => void;
-  onToggle: () => void;
   onDelete?: () => void;
 }) {
-  const secondary: { label: string; value: string }[] = [
-    { label: 'Category', value: risk.category ?? '—' },
-    { label: 'Likelihood', value: risk.likelihood },
-    { label: 'Impact', value: risk.impact },
-    { label: 'Project life cycle', value: risk.identified_during ?? '—' },
-    { label: 'Response strategy', value: risk.response_strategy ?? '—' },
-    { label: 'Response plan', value: risk.response_plan ?? '—' },
-    { label: 'Source', value: risk.source ?? '—' },
-  ];
-
   return (
-    <>
-      <tr className="risk-row" onClick={() => onSelect(risk)}>
-        <td className="expand-cell">
+    <tr className="risk-row" onClick={() => onSelect(risk)}>
+      <td className="mono">{risk.risk_code}</td>
+      <td className="cell-ellipsis risk-desc-cell" title={risk.description}>
+        {risk.description}
+      </td>
+      <td>
+        <RatingBadge rating={risk.risk_rating} />
+      </td>
+      <td>
+        <StatusBadge status={risk.status} />
+      </td>
+      <td className="col-hide-sm">
+        <span className="owner-cell">
+          {risk.owner_name ?? 'Unassigned'}
+          {risk.owner_type === 'External' ? (
+            <span className="owner-type-tag">External</span>
+          ) : null}
+        </span>
+      </td>
+      <td>
+        <AcknowledgedBadge acknowledged={risk.sla_acknowledged} />
+      </td>
+      <td className="col-hide-md">{formatDate(risk.risk_start_date)}</td>
+      <td className="col-hide-md">{formatDate(risk.risk_end_date)}</td>
+      <td>
+        <div className="row-actions">
           <button
-            className="expand-btn"
+            className="link-btn"
             onClick={(e) => {
               e.stopPropagation();
-              onToggle();
+              onSelect(risk);
             }}
-            aria-label={isOpen ? 'Hide details' : 'Show details'}
-            aria-expanded={isOpen}
-            title={isOpen ? 'Hide details' : 'Show details'}
           >
-            {isOpen ? '▾' : '▸'}
+            View
           </button>
-        </td>
-        <td className="mono">{risk.risk_code}</td>
-        <td className="cell-ellipsis risk-desc-cell" title={risk.description}>
-          {risk.description}
-        </td>
-        <td>
-          <RatingBadge rating={risk.risk_rating} />
-        </td>
-        <td>
-          <StatusBadge status={risk.status} />
-        </td>
-        <td className="col-hide-sm">
-          <span className="owner-cell">
-            {risk.owner_name ?? 'Unassigned'}
-            {risk.owner_type === 'External' ? (
-              <span className="owner-type-tag">External</span>
-            ) : null}
-          </span>
-        </td>
-        <td>
-          <AcknowledgedBadge acknowledged={risk.sla_acknowledged} />
-        </td>
-        <td className="col-hide-md">{formatDate(risk.risk_start_date)}</td>
-        <td className="col-hide-md">{formatDate(risk.risk_end_date)}</td>
-        <td>
-          <div className="row-actions">
+          {onDelete ? (
             <button
-              className="link-btn"
+              className="link-btn link-btn-danger"
               onClick={(e) => {
                 e.stopPropagation();
-                onSelect(risk);
+                onDelete();
               }}
             >
-              View
+              Delete
             </button>
-            {onDelete ? (
-              <button
-                className="link-btn link-btn-danger"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete();
-                }}
-              >
-                Delete
-              </button>
-            ) : null}
-          </div>
-        </td>
-      </tr>
-      {isOpen ? (
-        <tr className="expanded-row">
-          <td colSpan={COLUMN_COUNT}>
-            <div className="risk-detail-panel">
-              {secondary.map((item) => (
-                <div key={item.label}>
-                  <div className="kv-label">{item.label}</div>
-                  <div className="kv-value">{item.value}</div>
-                </div>
-              ))}
-            </div>
-          </td>
-        </tr>
-      ) : null}
-    </>
+          ) : null}
+        </div>
+      </td>
+    </tr>
   );
 }

@@ -463,7 +463,6 @@ a:hover {
 }
 
 .card-header-toggle {
-  cursor: pointer;
   user-select: none;
 }
 
@@ -626,16 +625,8 @@ th {
   white-space: nowrap;
 }
 
-th.sortable {
-  cursor: pointer;
-}
-
 th.sortable:hover {
   color: var(--text);
-}
-
-tbody tr {
-  cursor: pointer;
 }
 
 tbody tr:hover {
@@ -675,12 +666,8 @@ tbody tr:hover {
 }
 
 /* ================================================================
-   RISK TABLE EXPANDABLE DETAIL
+   RISK TABLE
    ================================================================ */
-
-.risk-row {
-  cursor: pointer;
-}
 
 .risk-row td {
   border-bottom: 1px solid var(--border);
@@ -694,7 +681,6 @@ tbody tr:hover {
 .expand-btn {
   background: none;
   border: none;
-  cursor: pointer;
   color: var(--text-muted);
   width: 26px;
   height: 26px;
@@ -884,7 +870,6 @@ textarea {
 input:disabled {
   background: var(--bg-elevated);
   color: var(--text-muted);
-  cursor: not-allowed;
 }
 
 .form-grid {
@@ -923,7 +908,6 @@ input:disabled {
   border-radius: var(--radius-sm);
   font-size: 13px;
   font-weight: 600;
-  cursor: pointer;
   white-space: nowrap;
   transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
@@ -936,7 +920,6 @@ input:disabled {
 
 .btn:disabled {
   opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* Primary — Wragby Red */
@@ -1103,7 +1086,6 @@ input:disabled {
   gap: 10px;
   padding: 10px 4px;
   border-bottom: 1px solid var(--border);
-  cursor: pointer;
 }
 
 .sla-row:hover {
@@ -1224,7 +1206,6 @@ input:disabled {
   height: 34px;
   display: grid;
   place-items: center;
-  cursor: pointer;
   transition: border-color 0.15s ease, color 0.15s ease;
 }
 
@@ -1271,7 +1252,6 @@ input:disabled {
 .notification-item {
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
-  cursor: pointer;
 }
 
 .notification-item:hover {
@@ -1344,7 +1324,6 @@ input:disabled {
   background: none;
   border: none;
   color: var(--accent);
-  cursor: pointer;
   font-size: inherit;
   font-family: inherit;
   padding: 0;
@@ -1357,10 +1336,6 @@ input:disabled {
 /* ================================================================
    EXPANDABLE HISTORY ROWS
    ================================================================ */
-
-.row-expandable {
-  cursor: pointer;
-}
 
 .expand-indicator {
   display: inline-block;
@@ -1413,7 +1388,6 @@ input:disabled {
   justify-content: space-between;
   gap: 16px;
   padding: 14px 16px;
-  cursor: pointer;
   border-bottom: 1px solid var(--border);
 }
 
@@ -1732,7 +1706,6 @@ input:disabled {
 .combobox-option {
   padding: 8px 10px;
   border-radius: 4px;
-  cursor: pointer;
   font-size: 13px;
   color: var(--text);
 }
@@ -1820,7 +1793,6 @@ input:disabled {
   gap: 6px;
   font-size: 13px;
   color: var(--text);
-  cursor: pointer;
 }
 
 .checkbox-label input,
@@ -1858,7 +1830,6 @@ input:disabled {
   justify-content: center;
   border: 1px solid transparent;
   background: transparent;
-  cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
@@ -1869,7 +1840,6 @@ input:disabled {
 
 .icon-btn:disabled {
   opacity: 0.45;
-  cursor: not-allowed;
 }
 
 .icon-btn:focus-visible,
@@ -1929,7 +1899,6 @@ input:disabled {
   padding: 7px 12px;
   font-size: 13px;
   color: var(--text);
-  cursor: pointer;
 }
 
 .user-picker-list li:hover,
@@ -2139,7 +2108,6 @@ input:disabled {
   font-family: inherit;
   font-size: 14px;
   font-weight: 600;
-  cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -2155,7 +2123,6 @@ input:disabled {
 
 .auth-primary-btn:disabled {
   opacity: 0.55;
-  cursor: not-allowed;
 }
 
 /* White tile keeps the multi-colour Microsoft mark legible on blue. */
@@ -2383,9 +2350,9 @@ input:disabled {
 /* ================================================================
    INPUT CURSOR BEHAVIOUR
 
-   Only genuinely editable fields may show the text I-beam / typing caret.
-   Read-only display surfaces (cards, tables, key/value pairs) use the default
-   arrow, so the cursor no longer looks like the user is about to type.
+   Only genuinely editable fields show the text I-beam / typing caret.
+   Every other surface (buttons, links, clickable rows, selects, checkboxes)
+   keeps the default arrow, so nothing looks like it is about to be typed in.
    ================================================================ */
 body {
   cursor: default;
@@ -2394,18 +2361,6 @@ body {
 input,
 textarea {
   cursor: text;
-}
-
-input[type='checkbox'],
-input[type='radio'],
-select,
-button,
-a,
-[role='button'],
-.btn,
-.nav-link,
-.link-btn {
-  cursor: pointer;
 }
 
 input:disabled,
