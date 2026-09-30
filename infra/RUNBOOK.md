@@ -218,7 +218,10 @@ feel slow even though both the app and the database are idle.
 
 The fix is to move the database into the app's region. This is a maintenance
 window task (it briefly restarts web/worker/beat); `deploy.dev.env` is backed
-up automatically before any cutover.
+up automatically before any cutover. See the prepared, step-by-step plan in
+[`MAINTENANCE-window-postgres-move.md`](./MAINTENANCE-window-postgres-move.md).
+
+Measure the current round-trip before/after with `bash infra/check-db-latency.sh dev`.
 
 ```bash
 cd app

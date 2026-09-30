@@ -46,6 +46,19 @@ def main() -> int:
     target = create_engine(_require_env("TARGET_DATABASE_URL"), future=True)
 
     tables = list(Base.metadata.sorted_tables)
+
+    # Refuse to append into a database that already has rows: re-running against
+    # a populated target would duplicate data or violate keys. The target must
+    # be a freshly migrated (empty) schema.
+    populated = [table.name for table in tables if _count_rows(target, table.name) > 0]
+    if populated:
+        print(
+            "error: target already contains rows in: " + ", ".join(populated),
+            file=sys.stderr,
+        )
+        print("       recreate the target schema (alembic upgrade head) first.", file=sys.stderr)
+        return 1
+
     print(f"Copying {len(tables)} tables in dependency order...")
 
     with source.connect() as src, target.begin() as dst:
