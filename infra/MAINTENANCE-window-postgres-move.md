@@ -78,12 +78,13 @@ The source server and the live app keep serving throughout.
 
 ### T+12 — Verify the copy
 ```bash
-# Row counts on both sides (uses the copy tool's own check — re-running is safe
-# because it refuses a populated target, so use a direct comparison instead)
+# Compares every table's row count between the source and the target.
+SOURCE_DATABASE_URL="$(grep -E '^RISKAPP_DATABASE_URL=' infra/deploy.dev.env | cut -d= -f2-)" \
+TARGET_DATABASE_URL="postgresql+psycopg://riskappadmin:<pw>@riskapp-dev-postgres-eastus.postgres.database.azure.com:5432/riskapp?sslmode=require" \
+PYTHONPATH=backend/src python infra/copy_postgres.py --verify
 ```
-Compare a few counts manually with `psql`/your client, or trust the tool's
-"Copy complete; row counts match." confirmation. Spot-check in the target:
-users, projects, risks, issues, and that `risks.embedding` has 1536 dims.
+Exits non-zero and flags `MISMATCH` for any table that differs. (The `--verify`
+mode only compares — it never writes.)
 
 ### T+15 — Cutover
 ```bash
@@ -140,6 +141,7 @@ and low-traffic to minimise this.
   parseable) and a dry run when `--yes` is omitted.
 - `infra/copy_postgres.py` — copies `riskapp.models.Base.metadata.sorted_tables`
   (FK order) via SQLAlchemy, resets identity sequences, and fails if row counts
-  differ or the target is already populated.
+  differ or the target is already populated. `--verify` compares row counts
+  between two databases without writing anything.
 - `infra/check-db-latency.sh` — measures connect + query round-trips from inside
   the running web container.

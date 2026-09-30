@@ -15,12 +15,16 @@ Configuration is read from the environment so secrets never appear in argv:
     SOURCE_DATABASE_URL=postgresql+psycopg://... \
     TARGET_DATABASE_URL=postgresql+psycopg://... \
     PYTHONPATH=backend/src python infra/copy_postgres.py
+
+Pass ``--verify`` to compare row counts between the two databases without
+copying anything (useful before and after a cutover).
 """
 
 from __future__ import annotations
 
 import os
 import sys
+from typing import Any
 
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import Engine
@@ -41,11 +45,33 @@ def _count_rows(engine: Engine, table_name: str) -> int:
         return int(conn.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar_one())
 
 
+def _compare(source: Engine, target: Engine, tables: list[Any]) -> int:
+    """Print source/target row counts; return non-zero if any differ."""
+    print(f"{'table':<28} {'source':>8} {'target':>8}")
+    mismatches = []
+    for table in tables:
+        src_count = _count_rows(source, table.name)
+        dst_count = _count_rows(target, table.name)
+        flag = "" if src_count == dst_count else "  <-- MISMATCH"
+        print(f"{table.name:<28} {src_count:>8} {dst_count:>8}{flag}")
+        if src_count != dst_count:
+            mismatches.append(table.name)
+    if mismatches:
+        print(f"error: row-count mismatch: {', '.join(mismatches)}", file=sys.stderr)
+        return 1
+    print("Row counts match.")
+    return 0
+
+
 def main() -> int:
+    verify_only = "--verify" in sys.argv[1:]
     source = create_engine(_require_env("SOURCE_DATABASE_URL"), future=True)
     target = create_engine(_require_env("TARGET_DATABASE_URL"), future=True)
 
     tables = list(Base.metadata.sorted_tables)
+
+    if verify_only:
+        return _compare(source, target, tables)
 
     # Refuse to append into a database that already has rows: re-running against
     # a populated target would duplicate data or violate keys. The target must
@@ -81,18 +107,8 @@ def main() -> int:
                         {"t": table.name},
                     )
 
-    # Sanity check: row counts must match on both sides.
-    mismatches = [
-        table.name
-        for table in tables
-        if _count_rows(source, table.name) != _count_rows(target, table.name)
-    ]
-    if mismatches:
-        print(f"error: row-count mismatch after copy: {', '.join(mismatches)}", file=sys.stderr)
-        return 1
-
-    print("Copy complete; row counts match.")
-    return 0
+    # Final sanity check: row counts must match on both sides.
+    return _compare(source, target, tables)
 
 
 if __name__ == "__main__":
