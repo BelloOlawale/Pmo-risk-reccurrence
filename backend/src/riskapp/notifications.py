@@ -263,7 +263,7 @@ class NotificationService:
         code = html.escape(risk.risk_code)
         parts = [
             f"<p>{escaped}</p>",
-            f'<p><a href="{link}">Open risk {code} in Wragby Risk Intell</a></p>',
+            f'<p><a href="{link}">Open risk {code} in WRAGBY RiskIntel</a></p>',
         ]
         # External owners have no Wragby account, so they get a signed, expiring
         # link that grants access to this one risk only.

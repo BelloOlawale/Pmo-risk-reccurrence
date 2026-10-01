@@ -41,7 +41,7 @@ export function AuthShell({ children }: { children: ReactNode }) {
         <div className="auth-brand-rule" aria-hidden="true" />
         <h1 className="auth-product-name">
           <span className="brand-wragby">WRAGBY</span>{' '}
-          <span className="brand-intell">Risk Intell</span>
+          <span className="brand-intell">RiskIntel</span>
         </h1>
         <p className="auth-product-subtitle">PMO Risk Management</p>
       </header>

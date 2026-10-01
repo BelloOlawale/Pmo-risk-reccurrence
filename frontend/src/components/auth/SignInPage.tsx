@@ -19,7 +19,7 @@ import { AuthShell, MicrosoftLogo } from './AuthShell';
     <AuthShell>
       <section className="auth-card" aria-labelledby="auth-heading">
         <h1 id="auth-heading" className="auth-card-heading">
-          Welcome to Wragby Risk Intell
+          Welcome to WRAGBY RiskIntel
         </h1>
         <p className="auth-card-sub">
           {auth.passwordLoginEnabled

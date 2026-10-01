@@ -128,7 +128,7 @@ export function Layout() {
             <div className="topbar-brand">
               <span className="topbar-title-main">
                 <span className="brand-wragby">WRAGBY</span>{' '}
-                <span className="brand-intell">Risk Intell</span>
+                <span className="brand-intell">RiskIntel</span>
               </span>
               <span className="topbar-subtitle">PMO Risk Management</span>
             </div>

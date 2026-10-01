@@ -348,7 +348,7 @@ a:hover {
   color: var(--text);
 }
 
-/* Product-name lockup: "WRAGBY Risk Intell". */
+/* Product-name lockup: "WRAGBY RiskIntel". */
 .brand-wragby {
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -2348,18 +2348,38 @@ input:disabled {
 }
 
 /* ================================================================
-   INPUT CURSOR BEHAVIOUR
+   TEXT CARET & CURSOR BEHAVIOUR
 
-   Only genuinely editable fields show the text I-beam / typing caret.
-   Every other surface (buttons, links, clickable rows, selects, checkboxes)
-   keeps the default arrow, so nothing looks like it is about to be typed in.
+   A blinking text caret must only ever appear inside a genuinely editable
+   element. Making the caret transparent at the document root means every
+   non-editable surface (headings, paragraphs, cards, table cells, KPI cards,
+   charts, navigation, read-only text) inherits "no caret" — without
+   disabling it for real inputs, which opt back in below.
+
+   This is deliberately NOT a blanket `* { caret-color: transparent }`.
    ================================================================ */
+html {
+  caret-color: transparent;
+}
+
+input,
+textarea,
+[contenteditable='true'],
+[contenteditable='plaintext-only'] {
+  caret-color: auto;
+}
+
+/* Cursor shape: the default arrow everywhere, the I-beam only over editable
+   text. (The browser's `auto` shows an I-beam over any static text, which
+   reads as a text field that is not actually there.) */
 body {
   cursor: default;
 }
 
 input,
-textarea {
+textarea,
+[contenteditable='true'],
+[contenteditable='plaintext-only'] {
   cursor: text;
 }
 

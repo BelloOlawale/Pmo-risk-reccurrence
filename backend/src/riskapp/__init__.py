@@ -1,4 +1,4 @@
-"""WRAGBY Risk Intell — PMO Risk Management backend package."""
+"""WRAGBY RiskIntel — PMO Risk Management backend package."""
 
 from riskapp.celery_app import celery_app
 

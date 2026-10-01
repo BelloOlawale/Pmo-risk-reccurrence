@@ -81,7 +81,7 @@ from riskapp.suggestions import (
     list_suggestions,
 )
 
-app = FastAPI(title="WRAGBY Risk Intell — PMO Risk Management")
+app = FastAPI(title="WRAGBY RiskIntel — PMO Risk Management")
 
 app.add_middleware(
     CORSMiddleware,
