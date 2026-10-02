@@ -8,6 +8,7 @@ a pure function so it is exhaustively unit-tested.
 
 from __future__ import annotations
 
+import datetime as dt
 import html
 import logging
 from dataclasses import dataclass
@@ -18,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from riskapp import models
 from riskapp.config import settings
-from riskapp.external import acknowledgement_url
+from riskapp.external import ACK_TTL_DAYS, acknowledgement_url
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,83 @@ def resolve_recipients(event: str, ctx: RecipientContext) -> Recipients:
             cc_emails=(),
         )
     raise ValueError(f"Unknown notification event {event!r}")
+
+
+def _fmt_date(value: dt.date | dt.datetime | None) -> str:
+    """Format a ``date``/``datetime`` for an email, tolerating ``None``."""
+    if value is None:
+        return "—"
+    if isinstance(value, dt.datetime):
+        return value.strftime("%d %b %Y, %H:%M UTC")
+    return value.strftime("%d %b %Y")
+
+
+def _email_row(label: str, value: str) -> str:
+    label_td = (
+        '<td style="padding:6px 12px 6px 0;color:#64748B;'
+        f'font-size:13px;">{html.escape(label)}</td>'
+    )
+    value_td = (
+        '<td style="padding:6px 0;color:#111827;font-size:13px;'
+        f'font-weight:600;">{html.escape(value)}</td>'
+    )
+    return f"<tr>{label_td}{value_td}</tr>"
+
+
+def _external_ack_email(risk: models.Risk, ack_link: str) -> str:
+    """A professional, self-contained email for an external Risk Owner.
+
+    It never links to the internal application and only exposes the single risk
+    the token grants access to.
+    """
+    owner = risk.owner
+    owner_name = html.escape((owner.display_name if owner else "") or "there")
+    project_name = risk.project.name if risk.project else "—"
+    code = html.escape(risk.risk_code)
+    description = html.escape(risk.description or "")
+    rows = "".join(
+        [
+            _email_row("Risk", f"{risk.risk_code} — {risk.description or ''}"),
+            _email_row("Project", project_name),
+            _email_row("Severity", risk.risk_rating),
+            _email_row("Risk start date", _fmt_date(risk.risk_start_date)),
+            _email_row("SLA deadline", _fmt_date(risk.sla_deadline)),
+        ]
+    )
+    link = html.escape(ack_link, quote=True)
+    return f"""\
+<div style="font-family:Inter,Segoe UI,Arial,sans-serif;max-width:600px;
+            margin:0 auto;color:#111827;">
+  <div style="border-top:4px solid #ED1C2E;padding:20px 24px 0;">
+    <div style="font-size:20px;font-weight:800;letter-spacing:0.04em;">
+      <span style="color:#ED1C2E;">WRAGBY</span> RiskIntel
+    </div>
+    <div style="color:#64748B;font-size:13px;margin-top:2px;">PMO Risk Management</div>
+  </div>
+  <div style="padding:20px 24px 24px;">
+    <p style="font-size:15px;">Dear {owner_name},</p>
+    <p style="font-size:14px;line-height:1.55;">
+      You have been assigned as the Risk Owner for the risk below. Please review
+      it and confirm that you accept ownership by acknowledging it.
+    </p>
+    <h2 style="font-size:16px;margin:18px 0 6px;">{code}</h2>
+    <p style="font-size:14px;color:#374151;margin:0 0 12px;">{description}</p>
+    <table style="border-collapse:collapse;margin:8px 0 18px;">{rows}</table>
+    <p style="font-size:14px;line-height:1.55;">
+      This secure link is personal to you and expires after {ACK_TTL_DAYS} days.
+      It only shows the risk assigned to you.
+    </p>
+    <p style="margin:22px 0;">
+      <a href="{link}"
+         style="background:#ED1C2E;color:#ffffff;text-decoration:none;padding:12px 22px;
+                border-radius:6px;font-weight:700;font-size:14px;display:inline-block;"
+        >View &amp; Acknowledge Risk</a>
+    </p>
+    <p style="font-size:13px;color:#64748B;line-height:1.55;">
+      If you were not expecting this email, you can safely ignore it.
+    </p>
+  </div>
+</div>"""
 
 
 class AzureCommunicationEmail:
@@ -259,20 +337,18 @@ class NotificationService:
         escaped = html.escape(body)
         if risk is None:
             return f"<p>{escaped}</p>"
-        link = f"{settings.app_base_url}/risks/{risk.id}"
-        code = html.escape(risk.risk_code)
-        parts = [
-            f"<p>{escaped}</p>",
-            f'<p><a href="{link}">Open risk {code} in WRAGBY RiskIntel</a></p>',
-        ]
         # External owners have no Wragby account, so they get a signed, expiring
-        # link that grants access to this one risk only.
+        # link that grants access to this one risk only — and never the internal
+        # application link, which they are not permitted to open.
         ack_link = acknowledgement_url(risk)
         if ack_link:
-            parts.append(
-                f'<p><a href="{ack_link}">Acknowledge risk {code}</a></p>'
-            )
-        return "".join(parts)
+            return _external_ack_email(risk, ack_link)
+        link = f"{settings.app_base_url}/risks/{risk.id}"
+        code = html.escape(risk.risk_code)
+        return (
+            f"<p>{escaped}</p>"
+            f'<p><a href="{link}">Open risk {code} in WRAGBY RiskIntel</a></p>'
+        )
 
     @staticmethod
     def _build_context(

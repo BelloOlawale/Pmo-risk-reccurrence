@@ -53,19 +53,20 @@ def get_or_create_external_owner(
     *,
     full_name: str,
     email: str,
-    organization: str | None = None,
 ) -> models.User:
     """Return the external owner for ``email``, creating one if needed.
 
-    The email is normalized before matching so the same person entered twice is
-    never duplicated. Raises :class:`ValueError` when the email is invalid or
-    already belongs to an internal user.
+    An external owner needs only a name and an email. The email is normalized
+    before matching so the same person entered twice is never duplicated.
+    Raises :class:`ValueError` when the email is invalid or already belongs to
+    an internal user.
     """
     normalized = normalize_email(email)
     if not is_valid_email(normalized):
         raise ValueError("Enter a valid email address.")
-    name = (full_name or "").strip() or normalized
-    org = (organization or "").strip() or None
+    name = (full_name or "").strip()
+    if not name:
+        raise ValueError("Full name is required.")
 
     existing = db.scalar(
         select(models.User).where(func.lower(models.User.upn) == normalized)
@@ -74,10 +75,8 @@ def get_or_create_external_owner(
         if existing.owner_type != EXTERNAL:
             raise ValueError("This email address belongs to an internal user.")
         # Refresh the display details from the latest submission.
-        if name and existing.display_name != name:
+        if existing.display_name != name:
             existing.display_name = name
-        if org and existing.organization != org:
-            existing.organization = org
         db.commit()
         db.refresh(existing)
         return existing
@@ -86,7 +85,6 @@ def get_or_create_external_owner(
         upn=normalized,
         display_name=name,
         owner_type=EXTERNAL,
-        organization=org,
         is_active=True,
     )
     db.add(owner)

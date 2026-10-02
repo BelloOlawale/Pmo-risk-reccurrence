@@ -71,7 +71,6 @@ class User(TimestampMixin, Base):
     # external owners (partners, vendors, consultants) are captured by a PM and
     # live only here — they never authenticate and have no app roles.
     owner_type: Mapped[str] = mapped_column(String(20), default="Internal", nullable=False)
-    organization: Mapped[str | None] = mapped_column(String(200), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     @property

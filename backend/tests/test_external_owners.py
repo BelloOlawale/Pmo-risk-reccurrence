@@ -42,11 +42,10 @@ def _external_owner(
     *,
     name: str = "Jane Smith",
     email: str = "jane.smith@abc.com",
-    organization: str = "ABC Consulting",
 ) -> dict:
     resp = client.post(
         "/api/external-owners",
-        json={"full_name": name, "email": email, "organization": organization},
+        json={"full_name": name, "email": email},
     )
     assert resp.status_code == 201, resp.text
     return resp.json()
@@ -58,8 +57,20 @@ class TestCreateExternalOwner:
         assert owner["owner_type"] == "External"
         assert owner["display_name"] == "Jane Smith"
         assert owner["upn"] == "jane.smith@abc.com"
-        assert owner["organization"] == "ABC Consulting"
+        assert "organization" not in owner
         assert owner["is_active"] is True
+
+    def test_name_is_required(self, client: TestClient) -> None:
+        for blank in ("", "   "):
+            resp = client.post(
+                "/api/external-owners",
+                json={"full_name": blank, "email": "someone@abc.com"},
+            )
+            assert resp.status_code == 422
+
+    def test_email_is_normalized(self, client: TestClient) -> None:
+        owner = _external_owner(client, email="  Jane.Smith@ABC.com ")
+        assert owner["upn"] == "jane.smith@abc.com"
 
     def test_duplicate_email_returns_existing_owner(self, client: TestClient) -> None:
         first = _external_owner(client)
@@ -183,6 +194,48 @@ class TestExternalAcknowledgement:
         stored = db_session.get(models.Risk, risk["id"])
         assert stored is not None
         assert acknowledgement_url(stored) is None
+
+
+class TestExternalOwnerEmail:
+    def test_email_contains_secure_link_and_risk_details(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        from riskapp.notifications import NotificationService
+
+        project = _project(client, "Vendor migration")
+        risk = _risk(client, project["id"])
+        owner = _external_owner(client, email="jane@ext.com")
+        client.patch(f"/api/risks/{risk['id']}", json={"owner_user_id": owner["id"]})
+
+        stored = db_session.get(models.Risk, risk["id"])
+        assert stored is not None
+        body = NotificationService._email_body("You have been assigned a risk.", stored)
+
+        assert "WRAGBY" in body and "RiskIntel" in body
+        assert "View &amp; Acknowledge Risk" in body
+        assert "/acknowledge/" in body
+        assert "Vendor migration" in body
+        assert "SLA deadline" in body
+        # An external owner must never be handed the internal app link.
+        assert f"/risks/{risk['id']}" not in body
+
+    def test_internal_owner_email_has_no_external_link(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        from riskapp.notifications import NotificationService
+
+        project = _project(client)
+        risk = _risk(client, project["id"])
+        owner = models.User(upn="internal@wragby.com", display_name="Internal")
+        db_session.add(owner)
+        db_session.commit()
+        client.patch(f"/api/risks/{risk['id']}", json={"owner_user_id": owner.id})
+
+        stored = db_session.get(models.Risk, risk["id"])
+        assert stored is not None
+        body = NotificationService._email_body("Update", stored)
+        assert "/risks/" in body
+        assert "/acknowledge/" not in body
 
 
 class TestExternalOwnerWorkflow:

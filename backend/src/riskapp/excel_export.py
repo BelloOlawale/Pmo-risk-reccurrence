@@ -31,7 +31,7 @@ HEADERS: tuple[str, ...] = (
     "Project",
     "Risk Owner",
     "Risk Owner Email",
-    "Owner Type",
+    "Risk Owner Type",
     "Risk Category",
     "Likelihood",
     "Impact",
@@ -126,6 +126,9 @@ def build_risk_register_workbook(
     rows = [_row(project, risk) for risk in risks]
 
     workbook = Workbook()
+    workbook.properties.title = "WRAGBY RiskIntel — Risk Register"
+    workbook.properties.subject = "PMO Risk Management"
+    workbook.properties.creator = "WRAGBY RiskIntel"
     sheet = workbook.active
     sheet.title = "Risk Register"
     sheet.append(list(HEADERS))

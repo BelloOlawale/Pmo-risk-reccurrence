@@ -16,7 +16,6 @@ export interface User {
   display_name: string;
   /** "Internal" (Entra directory) or "External" (PM-captured contact). */
   owner_type: string;
-  organization: string | null;
   is_active: boolean;
 }
 
@@ -233,11 +232,10 @@ export interface RiskMeta {
   response_strategies: string[];
 }
 
-/** POST /api/external-owners — capture a non-Wragby Risk Owner. */
+/** POST /api/external-owners — capture a non-Wragby Risk Owner (name + email only). */
 export interface ExternalOwnerCreatePayload {
   full_name: string;
   email: string;
-  organization?: string | null;
 }
 
 /** GET/POST /api/external/acknowledge/{token} — the single risk behind an ack link. */
@@ -245,6 +243,7 @@ export interface ExternalAcknowledge {
   risk_code: string;
   description: string;
   project_name: string;
+  category: string | null;
   risk_rating: string;
   likelihood: string;
   impact: string;

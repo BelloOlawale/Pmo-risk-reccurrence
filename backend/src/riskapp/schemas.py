@@ -40,7 +40,6 @@ class UserRead(BaseModel):
     display_name: str
     # ``Internal`` (Entra directory) or ``External`` (PM-captured contact).
     owner_type: str = "Internal"
-    organization: str | None = None
     is_active: bool = True
 
 
@@ -49,7 +48,6 @@ class ExternalOwnerCreate(BaseModel):
 
     full_name: str = Field(min_length=1, max_length=255)
     email: str = Field(min_length=3, max_length=255)
-    organization: str | None = Field(default=None, max_length=200)
 
     @field_validator("email")
     @classmethod
@@ -443,6 +441,7 @@ class ExternalAcknowledgeRead(BaseModel):
     risk_code: str
     description: str
     project_name: str
+    category: str | None
     risk_rating: str
     likelihood: str
     impact: str

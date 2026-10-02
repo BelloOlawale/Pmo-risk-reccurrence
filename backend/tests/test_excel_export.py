@@ -88,7 +88,6 @@ class TestExportEndpoint:
             json={
                 "full_name": "Jane Smith",
                 "email": "jane.smith@abc.com",
-                "organization": "ABC",
             },
         ).json()
         client.patch(f"/api/risks/{risk['id']}", json={"owner_user_id": owner["id"]})
@@ -98,7 +97,7 @@ class TestExportEndpoint:
         row = [cell.value for cell in sheet[2]]
         assert row[HEADERS.index("Risk Owner")] == "Jane Smith"
         assert row[HEADERS.index("Risk Owner Email")] == "jane.smith@abc.com"
-        assert row[HEADERS.index("Owner Type")] == "External"
+        assert row[HEADERS.index("Risk Owner Type")] == "External"
         assert row[HEADERS.index("Acknowledged")] == "Not Acknowledged"
 
     def test_export_only_contains_this_register(self, client: TestClient) -> None:

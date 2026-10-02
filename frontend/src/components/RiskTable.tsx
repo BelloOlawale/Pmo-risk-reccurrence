@@ -5,9 +5,16 @@ import { ratingRank, statusRank } from '../utils/colors';
 import { formatDate } from '../utils/format';
 import { RatingBadge, StatusBadge } from './Badges';
 
-type SortKey = 'code' | 'rating' | 'status' | 'owner' | 'date' | 'acknowledged';
+type SortKey =
+  | 'code'
+  | 'rating'
+  | 'status'
+  | 'owner'
+  | 'ownerType'
+  | 'date'
+  | 'acknowledged';
 
-const COLUMN_COUNT = 9;
+const COLUMN_COUNT = 10;
 
 interface RiskTableProps {
   risks: Risk[];
@@ -43,6 +50,10 @@ function compare(a: Risk, b: Risk, key: SortKey, dir: 'asc' | 'desc'): number {
     case 'owner':
       va = a.owner_user_id ?? 999_999;
       vb = b.owner_user_id ?? 999_999;
+      break;
+    case 'ownerType':
+      va = a.owner_type ?? '';
+      vb = b.owner_type ?? '';
       break;
     case 'date':
       va = new Date(a.created_at).getTime();
@@ -179,6 +190,9 @@ export function RiskTable({
               <th className="sortable col-hide-sm" onClick={() => toggleSort('owner')}>
                 Owner{sortIndicator('owner')}
               </th>
+              <th className="sortable col-hide-sm" onClick={() => toggleSort('ownerType')}>
+                Risk Owner Type{sortIndicator('ownerType')}
+              </th>
               <th className="sortable" onClick={() => toggleSort('acknowledged')}>
                 Acknowledged{sortIndicator('acknowledged')}
               </th>
@@ -248,6 +262,21 @@ export function RiskTable({
   );
 }
 
+function OwnerTypeBadge({ type }: { type: string | null }) {
+  if (type !== 'Internal' && type !== 'External') {
+    return <span className="muted">—</span>;
+  }
+  return (
+    <span
+      className={`owner-type-tag ${
+        type === 'External' ? 'owner-type-external' : 'owner-type-internal'
+      }`}
+    >
+      {type}
+    </span>
+  );
+}
+
 function AcknowledgedBadge({ acknowledged }: { acknowledged: boolean }) {
   return (
     <span className={`ack-badge ${acknowledged ? 'ack-yes' : 'ack-no'}`}>
@@ -284,6 +313,10 @@ function RiskRow({
             <span className="owner-type-tag">External</span>
           ) : null}
         </span>
+        {risk.owner_email ? <div className="owner-email">{risk.owner_email}</div> : null}
+      </td>
+      <td className="col-hide-sm">
+        <OwnerTypeBadge type={risk.owner_type} />
       </td>
       <td>
         <AcknowledgedBadge acknowledged={risk.sla_acknowledged} />

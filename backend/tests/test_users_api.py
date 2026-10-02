@@ -55,7 +55,6 @@ class TestListUsers:
             "upn",
             "display_name",
             "owner_type",
-            "organization",
             "is_active",
         }
         assert data[0]["owner_type"] == "Internal"

@@ -256,6 +256,7 @@ def _external_ack_read(risk: models.Risk) -> schemas.ExternalAcknowledgeRead:
         risk_code=risk.risk_code,
         description=risk.description,
         project_name=risk.project.name if risk.project else "",
+        category=risk.category,
         risk_rating=risk.risk_rating,
         likelihood=risk.likelihood,
         impact=risk.impact,
@@ -416,7 +417,6 @@ def add_external_owner(
             db,
             full_name=payload.full_name,
             email=payload.email,
-            organization=payload.organization,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

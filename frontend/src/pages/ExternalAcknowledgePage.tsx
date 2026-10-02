@@ -7,6 +7,9 @@ import { formatDate, formatDateTime } from '../utils/format';
 
 const API_BASE: string = import.meta.env.VITE_API_BASE_URL ?? '';
 
+/** Shown for bad, expired or already-revoked links — leaks nothing internal. */
+const LINK_INVALID_MESSAGE = 'This risk link has expired or is no longer valid.';
+
 /**
  * Public, token-scoped acknowledgement page for an external Risk Owner.
  *
@@ -24,14 +27,14 @@ export function ExternalAcknowledgePage() {
 
   const load = useCallback(async () => {
     if (!token) {
-      setError('This acknowledgement link is invalid or has expired.');
+      setError(LINK_INVALID_MESSAGE);
       setLoading(false);
       return;
     }
     try {
       const res = await fetch(`${API_BASE}/api/external/acknowledge/${token}`);
       if (!res.ok) {
-        throw new Error('This acknowledgement link is invalid or has expired.');
+        throw new Error(LINK_INVALID_MESSAGE);
       }
       setRisk((await res.json()) as ExternalAcknowledge);
       setError(null);
@@ -86,7 +89,15 @@ export function ExternalAcknowledgePage() {
           </h2>
 
           {loading ? <p className="muted">Loading the assigned risk…</p> : null}
-          {error && !risk ? <div className="auth-error">{error}</div> : null}
+          {error && !risk ? (
+            <div className="ack-invalid">
+              <div className="auth-error">{error}</div>
+              <p className="muted">
+                If you believe you should still have access to this risk, please contact the
+                project or risk manager who assigned it to you.
+              </p>
+            </div>
+          ) : null}
 
           {risk ? (
             <div className="ack-panel">
@@ -107,6 +118,14 @@ export function ExternalAcknowledgePage() {
                   <div className="kv-value">{risk.risk_rating}</div>
                 </div>
                 <div>
+                  <div className="kv-label">Category</div>
+                  <div className="kv-value">{risk.category ?? '—'}</div>
+                </div>
+                <div>
+                  <div className="kv-label">Response strategy</div>
+                  <div className="kv-value">{risk.response_strategy ?? '—'}</div>
+                </div>
+                <div>
                   <div className="kv-label">Risk start</div>
                   <div className="kv-value">{formatDate(risk.risk_start_date)}</div>
                 </div>
@@ -119,6 +138,12 @@ export function ExternalAcknowledgePage() {
                   <div className="kv-value">
                     {risk.owner_name}
                     <div className="muted owner-email">{risk.owner_email}</div>
+                  </div>
+                </div>
+                <div>
+                  <div className="kv-label">Your acknowledgement</div>
+                  <div className="kv-value">
+                    {risk.acknowledged ? 'Acknowledged' : 'Not yet acknowledged'}
                   </div>
                 </div>
               </div>

@@ -1875,6 +1875,140 @@ input:disabled {
   position: relative;
 }
 
+/* Risk-owner mode: a button that opens the Internal/External chooser. */
+.user-picker-trigger {
+  width: 100%;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  text-align: left;
+  background: var(--wragby-white);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.user-picker-trigger:disabled {
+  opacity: 0.6;
+}
+
+.user-picker-selected {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.user-picker-placeholder {
+  color: var(--text-muted);
+}
+
+.user-picker-caret {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.user-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 49;
+}
+
+.user-picker-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  padding: 10px;
+  background: var(--wragby-white);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  z-index: 50;
+}
+
+.user-picker-menu-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.user-picker-menu-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.owner-type-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.owner-type-option {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px;
+  text-align: left;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: inherit;
+}
+
+.owner-type-option:hover {
+  border-color: var(--accent);
+  background: var(--primary-soft);
+}
+
+.owner-type-option-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.owner-type-option-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.user-picker-clear {
+  width: 100%;
+  padding: 7px 12px;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.user-picker-list-inline {
+  position: static;
+  margin: 6px 0 0;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  max-height: 220px;
+}
+
 .user-picker-list {
   position: absolute;
   top: 100%;
@@ -1949,7 +2083,7 @@ input:disabled {
   color: var(--text-muted);
 }
 
-/* Small "External" tag shown next to a non-Wragby owner. */
+/* Small owner-type tag shown next to / for an owner. */
 .owner-type-tag {
   display: inline-block;
   margin-left: 6px;
@@ -1964,13 +2098,27 @@ input:disabled {
   vertical-align: middle;
 }
 
+/* Standalone badge (Risk Owner Type column): no inline-side margin. */
+.owner-type-tag.owner-type-external,
+.owner-type-tag.owner-type-internal {
+  margin-left: 0;
+}
+
+.owner-type-tag.owner-type-internal {
+  color: var(--wragby-grey-dark);
+  background: var(--bg-elevated);
+}
+
 .owner-cell {
   display: inline-flex;
   align-items: center;
 }
 
 .owner-email {
+  display: block;
+  margin-top: 2px;
   font-size: 11px;
+  color: var(--text-muted);
 }
 
 /* ================================================================
