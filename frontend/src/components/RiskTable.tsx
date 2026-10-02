@@ -307,12 +307,7 @@ function RiskRow({
         <StatusBadge status={risk.status} />
       </td>
       <td className="col-hide-sm">
-        <span className="owner-cell">
-          {risk.owner_name ?? 'Unassigned'}
-          {risk.owner_type === 'External' ? (
-            <span className="owner-type-tag">External</span>
-          ) : null}
-        </span>
+        <span className="owner-cell">{risk.owner_name ?? 'Unassigned'}</span>
         {risk.owner_email ? <div className="owner-email">{risk.owner_email}</div> : null}
       </td>
       <td className="col-hide-sm">
