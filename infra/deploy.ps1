@@ -236,8 +236,8 @@ if (-not $SkipImageBuild -and ($Stage -eq 'all' -or $Stage -eq 'images')) {
 
     Write-Step 'Building frontend image...'
     $buildArgs = @()
-    if ($env:VITE_ENTRA_CLIENT_ID) { $buildArgs += '--build-arg', "VITE_ENTRA_CLIENT_ID=$($env:VITE_ENTRA_CLIENT_ID)" }
-    if ($env:VITE_ENTRA_TENANT_ID) { $buildArgs += '--build-arg', "VITE_ENTRA_TENANT_ID=$($env:VITE_ENTRA_TENANT_ID)" }
+    $authMode = if ($env:VITE_AUTH_MODE) { $env:VITE_AUTH_MODE } else { 'password' }
+    $buildArgs += '--build-arg', "VITE_AUTH_MODE=$authMode"
     docker build @buildArgs -t "${AcrServer}/${FrontendImage}:${ImageTag}" $FrontendDir
     if ($LASTEXITCODE -ne 0) { Fail 'Frontend build failed' }
     docker push "${AcrServer}/${FrontendImage}:${ImageTag}"
@@ -360,7 +360,7 @@ Next steps
 1. Create Entra security groups and store their IDs in the 'entra-role-group-ids' secret.
 2. Set remaining secrets (ACS, blob) - see infra/README.md.
 3. If the frontend was built before the Entra app existed, rebuild it with
-   VITE_ENTRA_CLIENT_ID / VITE_ENTRA_TENANT_ID and re-run -Stage images.
+   VITE_AUTH_MODE=password (default) and re-run -Stage images.
 "@ -ForegroundColor Green
 
 if ($frontendFqdn) { $frontendUrlOut = "https://$frontendFqdn" } else { $frontendUrlOut = '' }

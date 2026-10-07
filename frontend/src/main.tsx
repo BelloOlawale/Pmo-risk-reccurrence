@@ -4,8 +4,9 @@ import { BrowserRouter } from 'react-router-dom';
 
 import App from './App';
 import { AuthProvider } from './auth/AuthContext';
+import { authMode } from './auth/authMode';
 import { setAuthState } from './auth/authStore';
-import { isEntraConfigured, msalInstance } from './auth/msal';
+import { loadSession } from './auth/session';
 import './index.css';
 
 function render() {
@@ -23,21 +24,21 @@ function render() {
 /**
  * Bootstrap.
  *
- * We render immediately rather than awaiting `msalInstance.initialize()` first:
- * waiting produced a blank screen on every load. The auth gate awaits the same
- * (idempotent) initialize promise before resolving a session, which keeps the
- * original fix for the child-before-parent effect race that used to break the
- * SSO redirect. Until resolution finishes the API client defers requests.
+ * The session store is seeded synchronously before the first render so the API
+ * client never fires a request with the wrong identity: in password mode a
+ * persisted session is attached as a bearer token, otherwise the request goes
+ * out token-less and the sign-in page is shown.
  */
-if (isEntraConfigured) {
-  void msalInstance.initialize().catch((err: unknown) => {
-    // Non-fatal: the gate retries initialize() and surfaces the failure via the
-    // sign-in screen's error banner.
-    console.error('MSAL initialize() failed', err);
+if (authMode === 'password') {
+  const session = loadSession();
+  setAuthState({
+    bearer: true,
+    accessToken: session?.token ?? null,
+    devUserId: null,
+    ready: true,
   });
 } else {
-  // Dev mode has no session to resolve — unblock API requests right away.
-  setAuthState({ entra: false, ready: true });
+  setAuthState({ bearer: false, ready: true });
 }
 
 render();

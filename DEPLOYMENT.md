@@ -34,7 +34,7 @@ PMO Risk Recurrence Predictor. It corresponds to `Issues/13-deployment-cicd.md`.
 > - Azure provisioning is still pending execution (needs an Azure login with
 >   Contributor on the target subscription — see [Next steps](#next-steps)).
 
----
+
 
 ## 1. Repository layout
 

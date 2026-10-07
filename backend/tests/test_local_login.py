@@ -32,7 +32,7 @@ class TestPasswordHashing:
 @pytest.fixture()
 def password_login_on(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "local_login_enabled", True)
-    monkeypatch.setattr(settings, "test_login_secret", "unit-test-key-long-enough-000")
+    monkeypatch.setattr(settings, "local_login_secret", "unit-test-key-long-enough-000")
 
 
 class TestLoginOptions:

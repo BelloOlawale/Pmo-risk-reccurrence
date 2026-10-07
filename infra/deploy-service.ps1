@@ -376,10 +376,9 @@ if (($Stage -eq 'all' -or $Stage -eq 'images') -and -not $NoBuild) {
     if ($needsFrontendImage) {
         Write-Step 'Building frontend image...'
         $buildArgs = @()
-        $viteClientId = Resolve-Value -Name 'VITE_ENTRA_CLIENT_ID' -FileMap $fileMap
-        $viteTenantId = Resolve-Value -Name 'VITE_ENTRA_TENANT_ID' -FileMap $fileMap
-        if ($viteClientId) { $buildArgs += '--build-arg', "VITE_ENTRA_CLIENT_ID=$viteClientId" }
-        if ($viteTenantId) { $buildArgs += '--build-arg', "VITE_ENTRA_TENANT_ID=$viteTenantId" }
+        $authMode = Resolve-Value -Name 'VITE_AUTH_MODE' -FileMap $fileMap
+        if (-not $authMode) { $authMode = 'password' }
+        $buildArgs += '--build-arg', "VITE_AUTH_MODE=$authMode"
         docker build @buildArgs -t "${AcrServer}/${FrontendImage}:${ImageTag}" $FrontendDir
         if ($LASTEXITCODE -ne 0) { Fail 'Frontend build failed' }
         docker push "${AcrServer}/${FrontendImage}:${ImageTag}"

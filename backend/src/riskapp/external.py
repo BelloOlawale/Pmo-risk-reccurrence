@@ -102,14 +102,19 @@ def get_or_create_external_owner(
 def _signing_key() -> str:
     """HMAC key for acknowledgement tokens (stable across replicas)."""
     return (
-        settings.test_login_secret
+        settings.local_login_secret
         or settings.entra_client_secret
         or "riskapp-external-ack-dev-key"
     )
 
 
 def create_acknowledgement_token(*, owner_user_id: int, risk_id: int) -> str:
-    """Mint a signed, expiring token scoped to a single owner + risk."""
+    """Mint a signed, persistent token scoped to a single owner + risk.
+
+    No ``exp`` claim: the link stays usable across acknowledge → resolve →
+    reject → resolve again. Authorisation is enforced on every request by
+    matching the token's owner/risk against the current assignment.
+    """
     now = dt.datetime.now(dt.UTC)
     payload: dict[str, Any] = {
         "iss": _ACK_ISSUER,

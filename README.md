@@ -29,9 +29,10 @@ npm run dev       # Vite dev server on :5173, proxies /api to :8000
 npm run build     # type-check + production build
 ```
 
-Auth: with `VITE_ENTRA_CLIENT_ID` + `VITE_ENTRA_TENANT_ID` set, the app signs
-in via Entra  ID (MSAL). Without them it runs in dev mode with a role/user
-switcher in the sidebar (mirrors the backend's header-based dev auth).
+Auth: the app signs in with an app-managed email + password (backend
+`RISKAPP_LOCAL_LOGIN_ENABLED=true`). Set `VITE_AUTH_MODE=dev` in
+`frontend/.env` to run locally with a role/user switcher in the sidebar instead
+(mirrors the backend's header-based dev auth).
 
 ## Development conventions
 

@@ -171,53 +171,11 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/api/auth/test-login/status", response_model=schemas.TestLoginStatus)
-def test_login_status() -> schemas.TestLoginStatus:
-    """Whether the local (non-Microsoft) test login is available. Public."""
-    return schemas.TestLoginStatus(
-        enabled=settings.test_login_enabled,
-        code_required=bool(settings.test_login_code),
-    )
-
-
-@app.post("/api/auth/test-login", response_model=schemas.TestLoginToken)
-def test_login(payload: schemas.TestLoginRequest, db: DbDep) -> schemas.TestLoginToken:
-    """Issue a short-lived token for a role, without Microsoft sign-in.
-
-    Testing aid only: disabled unless ``RISKAPP_TEST_LOGIN_ENABLED`` is set, and
-    gated by ``RISKAPP_TEST_LOGIN_CODE`` when configured.
-    """
-    if not settings.test_login_enabled:
-        raise HTTPException(status_code=404, detail="Test login is disabled")
-    if settings.test_login_code and payload.code != settings.test_login_code:
-        raise HTTPException(status_code=403, detail="Invalid access code")
-
-    role = Role(payload.role)
-    default_upn = f"test.{role.name.lower()}@test.local"
-    upn = (payload.upn or "").strip() or default_upn
-    display_name = f"Test {role.value}" if upn == default_upn else upn
-    user = get_or_create_user(db, upn, display_name)
-    db.commit()
-
-    token = create_local_token(
-        user_id=user.id, upn=user.upn, display_name=user.display_name, role=role
-    )
-    return schemas.TestLoginToken(
-        access_token=token,
-        expires_in=LOCAL_LOGIN_TTL_HOURS * 3600,
-        role=role.value,
-        upn=user.upn,
-        display_name=user.display_name,
-    )
-
-
 @app.get("/api/auth/login-options", response_model=schemas.LoginOptions)
 def login_options() -> schemas.LoginOptions:
-    """Which non-Microsoft sign-in methods this deployment offers. Public."""
+    """Which sign-in methods this deployment offers. Public."""
     return schemas.LoginOptions(
         password_enabled=settings.local_login_enabled,
-        test_login_enabled=settings.test_login_enabled,
-        test_code_required=bool(settings.test_login_code),
     )
 
 
@@ -358,10 +316,10 @@ def external_resolve(token: str, db: DbDep) -> schemas.ExternalAcknowledgeRead:
     return _external_ack_read(db, risk)
 
 
-@app.post("/api/auth/login", response_model=schemas.TestLoginToken)
+@app.post("/api/auth/login", response_model=schemas.LoginToken)
 def password_login(
     payload: schemas.PasswordLoginRequest, db: DbDep
-) -> schemas.TestLoginToken:
+) -> schemas.LoginToken:
     """Sign in with an app-managed email + password.
 
     Passwords are independent of Entra (which cannot validate a tenant password
@@ -381,7 +339,7 @@ def password_login(
     token = create_local_token(
         user_id=user.id, upn=user.upn, display_name=user.display_name, role=role
     )
-    return schemas.TestLoginToken(
+    return schemas.LoginToken(
         access_token=token,
         expires_in=LOCAL_LOGIN_TTL_HOURS * 3600,
         role=role.value,

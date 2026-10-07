@@ -46,16 +46,12 @@ class Settings(BaseSettings):
     entra_client_secret: str = ""
     entra_role_group_ids: str = ""  # JSON mapping role name -> group object id
 
-    # Local test login (NON-Microsoft). Lets testers sign in with just a role
-    # while Entra consent is pending. Keep this OFF in production: when enabled
-    # anyone who knows the code can mint a role's token.
-    test_login_enabled: bool = False
-    test_login_code: str = ""  # optional shared passcode required to sign in
-    test_login_secret: str = ""  # HMAC key; falls back to the Entra client secret
-
     # Local email + password sign-in (app-managed passwords, independent of
     # Entra). Off by default; enable only where that trade-off is acceptable.
     local_login_enabled: bool = False
+    # HMAC key for locally-issued tokens (login + external acknowledgements).
+    # Falls back to the Entra client secret when unset.
+    local_login_secret: str = ""
 
     @property
     def tz(self) -> ZoneInfo:

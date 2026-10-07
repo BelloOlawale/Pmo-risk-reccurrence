@@ -2,22 +2,21 @@
 // so it never needs React context plumbing. AuthProvider keeps it in sync.
 
 export interface AuthState {
-  /** Entra ID access token (production). When set, sent as a Bearer token. */
+  /** Locally-issued (email + password) access token, sent as a Bearer token. */
   accessToken: string | null;
   /** Dev-mode user id, sent as the X-User-Id header. */
   devUserId: number | null;
   /** Dev-mode role, sent as the X-User-Role header. */
   devRole: string;
   /**
-   * True when running against Entra ID. In that mode ONLY a bearer token is
-   * sent — never the dev headers, which the backend ignores anyway and which
-   * would mask "not signed in yet" as a confusing 401.
+   * True when the session authenticates with a bearer token. In that mode ONLY
+   * a bearer token is sent — never the dev headers, which would mask "not
+   * signed in yet" as a confusing 401.
    */
-  entra: boolean;
+  bearer: boolean;
   /**
-   * True once session/token resolution has finished (successfully, with no
-   * session, or with an error). Until then the API client defers requests so a
-   * page never fires an unauthenticated call during sign-in.
+   * True once session resolution has finished. Until then the API client defers
+   * requests so a page never fires an unauthenticated call during sign-in.
    */
   ready: boolean;
 }
@@ -26,7 +25,7 @@ let state: AuthState = {
   accessToken: null,
   devUserId: null,
   devRole: 'System Admin',
-  entra: false,
+  bearer: false,
   ready: false,
 };
 
@@ -57,7 +56,7 @@ export function getAuthState(): AuthState {
 export function authHeaders(): Record<string, string> {
   const s = getAuthState();
 
-  if (s.entra) {
+  if (s.bearer) {
     return s.accessToken ? { Authorization: `Bearer ${s.accessToken}` } : {};
   }
 

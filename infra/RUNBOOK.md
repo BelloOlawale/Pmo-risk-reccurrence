@@ -80,7 +80,7 @@ The script refuses to deploy when the result would be broken or insecure:
 | `RISKAPP_ENTRA_TENANT_ID` empty | **Refuses** — API would trust unauthenticated `X-User-Role` headers, making anyone who can reach the URL an admin |
 | < 3 GB free disk before a build | **Refuses** — a full disk makes `docker build` hang |
 | Uncommitted `frontend/`/`backend/` + default SHA tag | **Warns** — no new revision would roll |
-| Test/password login enabled for non-`dev` | **Warns** — bypasses Entra MFA |
+| App-managed password login enabled for non-`dev` | **Warns** — bypasses Entra MFA |
 
 To intentionally deploy an API with no tenant (local/dev only):
 
@@ -125,8 +125,9 @@ bash infra/sync-entra-users.sh dev
 bash infra/sync-entra-users.sh dev --include-guests
 ```
 
-> Changing `VITE_ENTRA_*` requires a **frontend rebuild** (build-time values).
-> Changing `RISKAPP_ENTRA_*` requires a **backend deploy** (runtime values).
+> Changing `VITE_AUTH_MODE` requires a **frontend rebuild** (build-time value).
+> Changing `RISKAPP_LOCAL_LOGIN_ENABLED` requires a **backend deploy**
+> (runtime value).
 
 ---
 
@@ -159,8 +160,25 @@ API docs: <https://riskapp-dev-web.lemonsand-ee3845bc.eastus.azurecontainerapps.
 | `infra/generate-deploy-env.sh` | Rebuild `deploy.<env>.env` from live Azure |
 | `infra/register-entra-app.sh` | Entra app registration / SSO keys |
 | `infra/sync-entra-users.sh` | Import Entra users into the `users` table |
+| `python -m riskapp.seed_temp_users` | Create/refresh temporary local logins (see below) |
 | `infra/deploy.sh` | Legacy whole-stack (infra + images + apps) |
 | `docker-compose.yml` | Local stack (see below) |
+
+### Temporary local logins
+
+App-managed email + password accounts are created with `set_password` (one at a
+time) or the bundled temporary-accounts seeder (idempotent, one shared
+password):
+
+```bash
+cd app/backend
+python -m riskapp.seed_temp_users --password 'Wragby@2026'
+```
+
+That seeds `PM@automation.dev` (Project Manager), `PMO@automation.dev`
+(PMO Lead) and `RiskOwner@automation.dev` (Project Manager — Risk Owner is a
+per-risk assignment, not a permission role). Point `RISKAPP_DATABASE_URL` at
+the target database, or run it inside a container that already has it.
 
 ### Local stack (not Azure)
 
@@ -171,8 +189,9 @@ docker compose logs -f web
 docker compose down
 ```
 
-The local frontend has **no** `VITE_ENTRA_*` build args, so it runs in dev mode
-(no sign-in page, role switcher in the sidebar).
+The local frontend defaults to `VITE_AUTH_MODE=dev` (dev mode: no sign-in page,
+role switcher in the sidebar). Set `VITE_AUTH_MODE=password` to exercise the
+email + password sign-in locally.
 
 ### CI
 

@@ -92,9 +92,8 @@ jobs:
           RISKAPP_ENTRA_ROLE_GROUP_IDS: ${{ secrets.RISKAPP_ENTRA_ROLE_GROUP_IDS }}
           RISKAPP_APP_BASE_URL: ${{ vars.RISKAPP_APP_BASE_URL }}
           RISKAPP_CORS_ORIGINS: ${{ vars.RISKAPP_CORS_ORIGINS }}
-          # --- Optional SPA build args (Entra SSO in the browser) ---
-          VITE_ENTRA_CLIENT_ID: ${{ secrets.VITE_ENTRA_CLIENT_ID }}
-          VITE_ENTRA_TENANT_ID: ${{ secrets.VITE_ENTRA_TENANT_ID }}
+          # --- SPA build args (app-managed email + password sign-in) ---
+          VITE_AUTH_MODE: password
           # --- Azure infrastructure parameters ---
           AZURE_KEYVAULT_ADMIN_OBJECT_ID: ${{ secrets.AZURE_KEYVAULT_ADMIN_OBJECT_ID }}
           POSTGRES_ADMIN_USERNAME: riskappadmin

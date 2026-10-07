@@ -19,18 +19,13 @@ export interface User {
   is_active: boolean;
 }
 
-export interface TestLoginStatus {
-  enabled: boolean;
-  code_required: boolean;
-}
-
 export interface LoginOptions {
+  /** Whether app-managed email + password sign-in is offered. */
   password_enabled: boolean;
-  test_login_enabled: boolean;
-  test_code_required: boolean;
 }
 
-export interface TestLoginToken {
+/** Response of POST /api/auth/login — a locally-issued bearer token. */
+export interface LoginToken {
   access_token: string;
   token_type: string;
   expires_in: number;

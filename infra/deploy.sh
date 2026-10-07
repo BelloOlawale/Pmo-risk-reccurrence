@@ -234,8 +234,7 @@ if [[ "$SKIP_IMAGE_BUILD" != "true" ]] && [[ "$STAGE" == "all" || "$STAGE" == "i
 
     info "Building frontend image..."
     build_args=()
-    [[ -n "${VITE_ENTRA_CLIENT_ID:-}" ]] && build_args+=(--build-arg "VITE_ENTRA_CLIENT_ID=${VITE_ENTRA_CLIENT_ID}")
-    [[ -n "${VITE_ENTRA_TENANT_ID:-}" ]] && build_args+=(--build-arg "VITE_ENTRA_TENANT_ID=${VITE_ENTRA_TENANT_ID}")
+    build_args+=(--build-arg "VITE_AUTH_MODE=${VITE_AUTH_MODE:-password}")
     docker build "${build_args[@]}" -t "${ACR_SERVER}/${FRONTEND_IMAGE}:${IMAGE_TAG}" "$FRONTEND_DIR" || error "Frontend build failed"
     docker push "${ACR_SERVER}/${FRONTEND_IMAGE}:${IMAGE_TAG}"                                      || error "Frontend push failed"
     success "Pushed ${ACR_SERVER}/${FRONTEND_IMAGE}:${IMAGE_TAG}"
@@ -359,7 +358,7 @@ Next steps
 1. Create Entra security groups and store their IDs in the 'entra-role-group-ids' secret.
 2. Set remaining secrets (ACS, blob) - see infra/README.md.
 3. If the frontend was built before the Entra app existed, rebuild it with
-   VITE_ENTRA_CLIENT_ID / VITE_ENTRA_TENANT_ID and re-run --stage images.
+   VITE_AUTH_MODE=password (default) and re-run --stage images.
 EOF
 
 cat > "$SCRIPT_DIR/deployment-info-${ENV_NAME}.json" <<JSON

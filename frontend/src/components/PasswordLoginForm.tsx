@@ -2,7 +2,7 @@ import { useId, useState } from 'react';
 import type { FormEvent } from 'react';
 
 import { api, ApiError } from '../api/client';
-import type { TestLoginToken } from '../api/types';
+import type { LoginToken } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 
 /**
@@ -10,7 +10,7 @@ import { useAuth } from '../auth/AuthContext';
  *
  * Rendered only when the backend reports it is enabled
  * (``RISKAPP_LOCAL_LOGIN_ENABLED``). These passwords are held by this
- * application and are independent of the Microsoft/Entra account.
+ * application.
  */
 export function PasswordLoginForm() {
   const auth = useAuth();
@@ -29,7 +29,7 @@ export function PasswordLoginForm() {
     setBusy(true);
     setError(null);
     try {
-      const res = await api.post<TestLoginToken>('/api/auth/login', { email, password });
+      const res = await api.post<LoginToken>('/api/auth/login', { email, password });
       auth.loginWithToken(res.access_token, {
         upn: res.upn,
         displayName: res.display_name,
@@ -49,19 +49,19 @@ export function PasswordLoginForm() {
 
   return (
     <div className="auth-password">
-      <div className="auth-password-divider">
-        <span>or</span>
-      </div>
-
       <form className="auth-password-form" onSubmit={submit} noValidate>
-        {error ? (
-          <div className="auth-error" id={errorId} role="alert">
-            {error}
-          </div>
-        ) : null}
+        {/* Reserved slot: the card keeps its height whether or not an error
+            is shown, so the layout never jumps. */}
+        <div className="auth-feedback">
+          {error ? (
+            <div className="auth-error" id={errorId} role="alert">
+              {error}
+            </div>
+          ) : null}
+        </div>
 
         <div className="field">
-          <label htmlFor={emailId}>Wragby email</label>
+          <label htmlFor={emailId}>Email</label>
           <input
             id={emailId}
             name="email"
@@ -72,7 +72,7 @@ export function PasswordLoginForm() {
             aria-describedby={error ? errorId : undefined}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@wragbysolutions.com"
+            placeholder="you@company.com"
           />
         </div>
 
@@ -91,7 +91,7 @@ export function PasswordLoginForm() {
         </div>
 
         <button className="btn auth-password-submit" type="submit" disabled={busy}>
-          {busy ? 'Signing in…' : 'Sign in with email'}
+          {busy ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
     </div>

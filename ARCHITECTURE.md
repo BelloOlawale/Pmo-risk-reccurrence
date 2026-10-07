@@ -212,8 +212,10 @@ The switch is **purely config-driven** — no code changes.
                                       Principal(user_id, upn, roles)
 ```
 
-1. **Frontend MSAL** (`@azure/msal-react`) is configured with the client id +
-   tenant id from `VITE_ENTRA_CLIENT_ID` / `VITE_ENTRA_TENANT_ID`.
+1. **Frontend** signs the user in with an app-managed email + password; the
+   backend issues a short-lived HS256 bearer token (`POST /api/auth/login`).
+   Entra OIDC validation (steps 3–5) remains supported server-side, but the SPA
+   no longer uses MSAL.
 2. The API client (`src/api/client.ts`) attaches `Authorization: Bearer <token>`
    to every request.
 3. **Backend** (`auth.py` → `get_principal`) validates the token against the
@@ -414,8 +416,8 @@ App scale to zero. Deferred unless the bill matters.
 | `APP_TIMEZONE` | Business timezone for SLA date anchors (default `Africa/Lagos`). |
 | `CORS_ORIGINS` | Allowed SPA origins (default `http://localhost:5173`). |
 
-Frontend (`VITE_*`): `VITE_API_BASE_URL` (empty = dev proxy), `VITE_ENTRA_CLIENT_ID`,
-`VITE_ENTRA_TENANT_ID`.
+Frontend (`VITE_*`): `VITE_API_BASE_URL` (empty = dev proxy), `VITE_AUTH_MODE`
+(`password` default; `dev` for the local sidebar switcher).
 
 ---
 
@@ -427,14 +429,14 @@ cd app/backend
 docker compose up -d                 # local pgvector Postgres
 python -m uvicorn riskapp.main:app --reload --port 8000
 
-# Frontend (MSAL sign-in when VITE_ENTRA_* are set)
+# Frontend (email + password sign-in; VITE_AUTH_MODE=dev for the dev switcher)
 cd app/frontend
 npm install && npm run dev           # http://localhost:5173
 ```
 
-**To switch back to dev mode** (header auth + sidebar role switcher): comment
-out the `RISKAPP_ENTRA_*` lines in `backend/.env` and the `VITE_ENTRA_*` lines
-in `frontend/.env`.
+**To switch to dev mode** (header auth + sidebar role switcher): comment out the
+`RISKAPP_ENTRA_*` and `RISKAPP_LOCAL_LOGIN_ENABLED` lines in `backend/.env` and set
+`VITE_AUTH_MODE=dev` in `frontend/.env`.
 
 ---
 

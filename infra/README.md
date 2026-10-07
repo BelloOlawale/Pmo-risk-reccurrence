@@ -254,7 +254,7 @@ run fails fast instead of half-deploying or hanging:
 | `RISKAPP_ENTRA_TENANT_ID` empty | **Refuses** — with no tenant the API trusts unauthenticated `X-User-Role` headers (`get_principal` in `backend/src/riskapp/auth.py`), so anyone reaching the URL is an administrator. Override only deliberately with `--allow-dev-auth`. |
 | Free disk < 3 GB before an image build | **Refuses** — a full disk makes `docker build` stall for tens of minutes rather than reporting `ENOSPC`. |
 | Uncommitted changes under `frontend/` or `backend/` with a default SHA tag | **Warns** — the tag may already exist, so no new revision would roll. |
-| Test login / password login enabled for a non-`dev` environment | **Warns** — these bypass Entra MFA and Conditional Access. |
+| App-managed password login enabled for a non-`dev` environment | **Warns** — it bypasses Entra MFA and Conditional Access. |
 
 > `deploy-service.ps1` does **not** implement these preflights yet. Until it does,
 > prefer the bash script (or WSL) for deploys, and never bypass the tenant check on
@@ -328,8 +328,7 @@ The deployment scripts also respect these environment variables:
 | `CHAT_MODEL_NAME` / `CHAT_MODEL_VERSION` | Chat model overrides (bash script) |
 | `POSTGRES_ADMIN_PASSWORD` | PostgreSQL password (skips the prompt) |
 | `SKIP_IMAGE_BUILD` | `true` to skip image build/push (bash script) |
-| `VITE_ENTRA_CLIENT_ID` | Entra Client ID (for frontend build) |
-| `VITE_ENTRA_TENANT_ID` | Entra Tenant ID (for frontend build) |
+| `VITE_AUTH_MODE` | SPA auth mode: `password` (default) or `dev` (local sidebar switcher) |
 
 ### Examples
 

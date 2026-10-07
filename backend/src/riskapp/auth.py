@@ -78,31 +78,21 @@ def _role_group_map() -> dict[Role, str]:
 _JWKS_CLIENT: PyJWKClient | None = None
 
 # ---------------------------------------------------------------------------
-# Local test login (non-Microsoft)
-#
-# Issues a short-lived HS256 token carrying the same shape of claims the rest
-# of the app expects (upn / name / roles), so authorization behaves identically
-# to an Entra token. Disabled unless ``settings.test_login_enabled``.
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
 # Local (non-Microsoft) sign-in
 #
 # Issues a short-lived HS256 token carrying the same shape of claims the rest
 # of the app expects (upn / name / roles), so authorization behaves identically
-# to an Entra token. Two ways to obtain one, each behind its own flag:
-#   * email + password        (local_login_enabled)
-#   * role-only test login    (test_login_enabled, optional shared code)
+# to an Entra token. Available only when ``local_login_enabled`` is set.
 # ---------------------------------------------------------------------------
 
-LOCAL_LOGIN_ISSUER = "riskapp-test-login"
+LOCAL_LOGIN_ISSUER = "riskapp-local-login"
 LOCAL_LOGIN_TTL_HOURS = 8
 
 
 def _local_login_key() -> str:
     """Signing key for local tokens (stable across replicas)."""
     return (
-        settings.test_login_secret
+        settings.local_login_secret
         or settings.entra_client_secret
         or "riskapp-local-login-dev-key"
     )
@@ -233,8 +223,8 @@ def get_principal(
     if authorization and authorization.lower().startswith("bearer "):
         token = authorization.split(" ", 1)[1].strip()
 
-    # Locally-issued token (password login, or the role-only test login).
-    if (settings.test_login_enabled or settings.local_login_enabled) and token:
+    # Locally-issued token (app-managed email + password login).
+    if settings.local_login_enabled and token:
         claims = _decode_local_token(token)
         if claims is not None:
             return _principal_from_local_claims(claims, db)

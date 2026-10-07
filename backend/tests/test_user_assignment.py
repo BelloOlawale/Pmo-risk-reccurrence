@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from riskapp import schemas
 from riskapp.config import settings
+from riskapp.security import hash_password
 from riskapp.services import create_project, get_or_create_user
 
 
@@ -52,14 +53,18 @@ class TestAddProjectEndpoint:
         assert resp.status_code == 422
 
     def test_bearer_authenticated_pm_owns_and_sees_new_register(
-        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+        self, client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(settings, "test_login_enabled", True)
-        monkeypatch.setattr(settings, "test_login_code", "")
-        monkeypatch.setattr(settings, "test_login_secret", "project-creation-test-signing-key-123")
+        monkeypatch.setattr(settings, "local_login_enabled", True)
+        monkeypatch.setattr(settings, "local_login_secret", "project-creation-test-signing-key-123")
+        creator = get_or_create_user(db_session, "creator@example.com", "Creator")
+        creator.password_hash = hash_password("Secret123!")
+        creator.role = "Project Manager"
+        db_session.commit()
+
         login = client.post(
-            "/api/auth/test-login",
-            json={"role": "Project Manager", "upn": "creator@example.com"},
+            "/api/auth/login",
+            json={"email": "creator@example.com", "password": "Secret123!"},
         )
         assert login.status_code == 200
         monkeypatch.setattr(settings, "entra_tenant_id", "test-tenant")

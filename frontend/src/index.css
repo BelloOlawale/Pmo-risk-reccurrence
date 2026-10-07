@@ -2122,16 +2122,6 @@ input:disabled {
 }
 
 /* ================================================================
-   TEST LOGIN (non-Microsoft, testing only)
-   ================================================================ */
-
-.test-login {
-  margin-top: 24px;
-  width: 100%;
-  text-align: left;
-}
-
-/* ================================================================
    AUTHENTICATION PAGE — dedicated sign-in layout
 
    Deliberately separate from the application shell: no sidebar and no
@@ -2146,7 +2136,7 @@ input:disabled {
   flex-direction: column;
   align-items: center;
   background: var(--bg);
-  padding: 0 20px 28px;
+  padding: 0 20px 20px;
   overflow-x: hidden;
 }
 
@@ -2164,14 +2154,14 @@ input:disabled {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  padding: 56px 0 32px;
+  gap: 8px;
+  padding: 28px 0 18px;
   text-align: center;
 }
 
 .auth-logo {
   display: block;
-  height: 46px;
+  height: 40px;
   width: auto;
   max-width: 100%;
   object-fit: contain;
@@ -2179,23 +2169,23 @@ input:disabled {
 
 /* Short red rule used as the brand lockup accent (not a large red area). */
 .auth-brand-rule {
-  width: 40px;
-  height: 3px;
+  width: 34px;
+  height: 2px;
   border-radius: 2px;
   background: var(--wragby-red);
 }
 
 .auth-product-name {
   margin: 0;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
   letter-spacing: 0.01em;
   color: var(--text);
 }
 
 .auth-product-subtitle {
-  margin: -6px 0 0;
-  font-size: 12px;
+  margin: -4px 0 0;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -2207,18 +2197,20 @@ input:disabled {
   width: 100%;
   display: flex;
   justify-content: center;
-  align-items: center;
+  /* Pin to the top instead of centring: the card keeps the same position
+     whether or not an error/loaded state changes its height. */
+  align-items: flex-start;
   padding-bottom: 8px;
 }
 
 .auth-card {
   width: 100%;
-  max-width: 420px;
+  max-width: 380px;
   background: var(--wragby-white);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04), 0 14px 36px -18px rgba(17, 24, 39, 0.22);
-  padding: 32px 32px 30px;
+  padding: 24px 24px 22px;
 }
 
 .auth-card-heading {
@@ -2238,7 +2230,7 @@ input:disabled {
   text-align: center;
 }
 
-/* ---- Primary authentication action (Microsoft SSO) ---- */
+/* ---- Primary action button (also used on the external ack page) ---- */
 
 .auth-primary-btn {
   display: inline-flex;
@@ -2273,73 +2265,22 @@ input:disabled {
   opacity: 0.55;
 }
 
-/* White tile keeps the multi-colour Microsoft mark legible on blue. */
-.auth-ms-logo {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  flex-shrink: 0;
-  background: #ffffff;
-  border-radius: 4px;
-}
+/* ---- Email + password sign-in ---- */
 
-/* ---- Development / test access ---- */
-
-.auth-dev,
 .auth-password {
   margin-top: 28px;
 }
 
-.auth-dev-divider,
-.auth-password-divider {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: var(--text-faint);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.auth-dev-divider::before,
-.auth-dev-divider::after,
-.auth-password-divider::before,
-.auth-password-divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--border);
-}
-
-.auth-dev-divider span,
-.auth-password-divider span {
-  white-space: nowrap;
-}
-
-.auth-dev-note {
-  margin: 10px 0 18px;
-  text-align: center;
-  font-size: 11.5px;
-  color: var(--text-faint);
-}
-
-.auth-dev-form .field,
 .auth-password-form .field {
   margin-bottom: 14px;
 }
 
-.auth-dev-form .field label,
 .auth-password-form .field label {
   font-size: 12px;
   font-weight: 600;
   color: var(--text);
 }
 
-.auth-dev-form input,
-.auth-dev-form select,
 .auth-password-form input {
   height: 40px;
   padding: 8px 12px;
@@ -2348,24 +2289,12 @@ input:disabled {
 }
 
 /* Neutral grey → Wragby Red focus (never blue). */
-.auth-dev-form input:focus,
-.auth-dev-form select:focus,
 .auth-password-form input:focus {
   outline: none;
   border-color: var(--wragby-red);
   box-shadow: 0 0 0 3px rgba(237, 28, 46, 0.14);
 }
 
-.auth-optional {
-  margin-left: 4px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-faint);
-  text-transform: none;
-  letter-spacing: 0;
-}
-
-.btn.auth-dev-submit,
 .btn.auth-password-submit {
   width: 100%;
   height: 40px;
@@ -2390,6 +2319,21 @@ input:disabled {
   padding: 10px 12px;
   margin-bottom: 16px;
   font-size: 12.5px;
+}
+
+/* Fixed-height feedback slot inside the sign-in card. Reserving the space
+   keeps the card — and therefore the whole page — from jumping when an error
+   appears or clears. */
+.auth-feedback {
+  min-height: 42px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+}
+
+.auth-feedback .auth-error {
+  width: 100%;
+  margin-bottom: 0;
 }
 
 /* ---- Signing-in / error status card ---- */
@@ -2438,7 +2382,7 @@ input:disabled {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 32px 0 4px;
+  padding: 20px 0 4px;
   font-size: 11.5px;
   color: var(--text-faint);
   text-align: center;
@@ -2450,24 +2394,24 @@ input:disabled {
 
 @media (max-width: 520px) {
   .auth-page {
-    padding: 0 16px 24px;
+    padding: 0 16px 16px;
   }
   .auth-brand {
-    padding: 40px 0 24px;
+    padding: 20px 0 14px;
   }
   .auth-logo {
-    height: 40px;
+    height: 34px;
   }
   .auth-card {
     max-width: 100%;
-    padding: 24px 20px;
+    padding: 20px 18px;
     border-radius: var(--radius);
   }
   .auth-card-heading {
-    font-size: 20px;
+    font-size: 19px;
   }
   .auth-footer {
-    padding-top: 24px;
+    padding-top: 16px;
     flex-wrap: wrap;
   }
 }

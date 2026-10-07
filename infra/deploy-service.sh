@@ -88,7 +88,6 @@ PLAIN_ENV_VARS=(
   RISKAPP_APP_BASE_URL
   RISKAPP_APP_TIMEZONE
   RISKAPP_CORS_ORIGINS
-  RISKAPP_TEST_LOGIN_ENABLED
   RISKAPP_LOCAL_LOGIN_ENABLED
 )
 
@@ -100,8 +99,7 @@ SECRET_ENV_VARS=(
   RISKAPP_ACS_ACCESS_KEY
   RISKAPP_BLOB_ACCOUNT_KEY
   RISKAPP_ENTRA_CLIENT_SECRET
-  RISKAPP_TEST_LOGIN_CODE
-  RISKAPP_TEST_LOGIN_SECRET
+  RISKAPP_LOCAL_LOGIN_SECRET
 )
 
 # -----------------------------------------------------------------------------
@@ -361,10 +359,9 @@ mean to run an open API (never on a shared or internet-facing environment)."
     fi
 
     if [[ "$ENV_NAME" != "dev" ]]; then
-        if [[ "$(value RISKAPP_TEST_LOGIN_ENABLED)" == "true" ]] \
-           || [[ "$(value RISKAPP_LOCAL_LOGIN_ENABLED)" == "true" ]]; then
-            warn "Test login and/or app-managed password login are ENABLED for '$ENV_NAME'."
-            warn "These bypass Entra MFA and Conditional Access; keep them dev-only."
+        if [[ "$(value RISKAPP_LOCAL_LOGIN_ENABLED)" == "true" ]]; then
+            warn "App-managed email + password login is ENABLED for '$ENV_NAME'."
+            warn "It bypasses Entra MFA and Conditional Access; keep it dev-only."
         fi
     fi
 }
@@ -587,10 +584,9 @@ if [[ "$STAGE" == "all" || "$STAGE" == "images" ]] && [[ "$BUILD_IMAGES" == "tru
     if [[ "$NEEDS_FRONTEND_IMAGE" == "true" ]]; then
         info "Building frontend image..."
         build_args=()
-        vite_client_id="$(value VITE_ENTRA_CLIENT_ID)"
-        vite_tenant_id="$(value VITE_ENTRA_TENANT_ID)"
-        [[ -n "$vite_client_id" ]] && build_args+=(--build-arg "VITE_ENTRA_CLIENT_ID=${vite_client_id}")
-        [[ -n "$vite_tenant_id" ]] && build_args+=(--build-arg "VITE_ENTRA_TENANT_ID=${vite_tenant_id}")
+        vite_auth_mode="$(value VITE_AUTH_MODE)"
+        vite_auth_mode="${vite_auth_mode:-password}"
+        build_args+=(--build-arg "VITE_AUTH_MODE=${vite_auth_mode}")
         docker build "${build_args[@]}" -t "${ACR_SERVER}/${FRONTEND_IMAGE_NAME}:${IMAGE_TAG}" "$FRONTEND_DIR" \
             || error "Frontend build failed"
         docker push "${ACR_SERVER}/${FRONTEND_IMAGE_NAME}:${IMAGE_TAG}" || error "Frontend push failed"

@@ -69,22 +69,9 @@ class ExternalOwnerCreate(BaseModel):
         return value
 
 
-class TestLoginStatus(BaseModel):
-    """Whether the non-Microsoft test login is available."""
+class LoginToken(BaseModel):
+    """A locally-issued bearer token returned by the password login."""
 
-    enabled: bool
-    code_required: bool
-
-
-class TestLoginRequest(BaseModel):
-    """Sign in as a role without Microsoft (testing only)."""
-
-    role: Literal["System Admin", "PMO Lead", "Project Manager"] = "System Admin"
-    upn: str | None = None
-    code: str | None = None
-
-
-class TestLoginToken(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
@@ -94,11 +81,9 @@ class TestLoginToken(BaseModel):
 
 
 class LoginOptions(BaseModel):
-    """Which non-Microsoft sign-in methods the deployment offers."""
+    """Which sign-in methods the deployment offers."""
 
     password_enabled: bool
-    test_login_enabled: bool
-    test_code_required: bool
 
 
 class PasswordLoginRequest(BaseModel):
