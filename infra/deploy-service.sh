@@ -119,7 +119,9 @@ if [[ -z "${IMAGE_TAG:-}" ]]; then
         IMAGE_TAG="$(date +%Y%m%d%H%M%S)"
     fi
 fi
-LOCATION="${AZURE_LOCATION:-eastus}"
+# Resolved after argument parsing so it can default per environment
+# (see the LOCATION default block below). --location / AZURE_LOCATION win.
+LOCATION="${AZURE_LOCATION:-}"
 PREFIX="${APP_PREFIX:-riskapp}"
 RG_NAME=""
 ACR_NAME="${ACR_NAME:-}"
@@ -211,6 +213,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$STAGE" in all|infra|images|apps) ;; *) error "Invalid --stage: $STAGE" ;; esac
+
+# Default region per environment when neither AZURE_LOCATION nor --location is
+# given. Some environments live outside East US (int is UK South — its ACR and
+# Container Apps environment were created there), and deploying with the wrong
+# region makes Bicep try to recreate same-named resources in a new region.
+if [[ -z "$LOCATION" ]]; then
+    case "$ENV_NAME" in
+        int|integration|staging) LOCATION="uksouth" ;;
+        *)                       LOCATION="eastus" ;;
+    esac
+fi
 
 # Configuration file precedence: explicit --env-file > generated deploy env
 # (infra/deploy.<env>.env) > backend/.env (local development).

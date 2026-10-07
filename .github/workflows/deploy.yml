@@ -18,6 +18,7 @@ on:
         default: dev
         options:
           - dev
+          - int
           - prod
       stage:
         description: Deployment stage
@@ -71,7 +72,9 @@ jobs:
             --stage "${{ inputs.stage }}" \
             --image-tag "${{ github.sha }}"
         env:
-          AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'eastus' }}
+          # Leave empty to let deploy-service.sh pick the per-environment
+          # default (int -> uksouth, everything else -> eastus).
+          AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
           # --- Runtime configuration (source of truth for the deployed app) ---
           RISKAPP_DATABASE_URL: ${{ secrets.RISKAPP_DATABASE_URL }}
           RISKAPP_REDIS_URL: ${{ secrets.RISKAPP_REDIS_URL }}

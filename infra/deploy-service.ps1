@@ -53,7 +53,8 @@ param(
     [string]$Stage = 'all',
 
     [string]$ImageTag = '',
-    [string]$Location = 'eastus',
+    # Empty means "pick the per-environment default" (see below).
+    [string]$Location = '',
     [string]$Prefix = 'riskapp',
     [string]$ResourceGroup = '',
     [string]$AcrName = '',
@@ -91,6 +92,14 @@ if ([string]::IsNullOrEmpty($ImageTag)) {
     $sha = (git -C $RepoRoot rev-parse --short HEAD 2>$null)
     if ($LASTEXITCODE -eq 0 -and $sha) { $ImageTag = $sha.Trim() }
     else { $ImageTag = (Get-Date -Format 'yyyyMMddHHmmss') }
+}
+
+# Default region per environment when -Location is not given. Some environments
+# live outside East US (int is UK South — its ACR and Container Apps environment
+# were created there); the wrong region makes Bicep try to recreate same-named
+# resources in a new region.
+if ([string]::IsNullOrEmpty($Location)) {
+    $Location = if ($Environment -in @('int', 'integration', 'staging')) { 'uksouth' } else { 'eastus' }
 }
 
 # -----------------------------------------------------------------------------

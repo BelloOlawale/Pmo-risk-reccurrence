@@ -26,8 +26,18 @@ checks disk space itself and refuses to build when the host is nearly full.
 ### `infra/deploy-service.sh` — deploy one service, a few, or everything
 
 ```bash
-bash infra/deploy-service.sh <dev|prod> [options]
+bash infra/deploy-service.sh <dev|int|prod> [options]
 ```
+
+| Environment | Subscription | Resource group | Region |
+|-------------|--------------|----------------|--------|
+| `dev` | Datazone@alawani_wragby | `rg-riskapp-dev` | `eastus` |
+| `int` | INT - Wragby AI Processes | `rg-riskapp-int` | `uksouth` |
+
+The script picks the region from the environment name (`int` → `uksouth`,
+otherwise `eastus`); `--location` / `AZURE_LOCATION` still override it. Switch
+the Azure CLI subscription (`az account set --subscription <id>`) before
+deploying a non-default environment.
 
 | Service | Image | When to deploy it |
 |---------|-------|-------------------|

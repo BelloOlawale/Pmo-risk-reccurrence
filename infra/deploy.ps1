@@ -29,13 +29,14 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('dev', 'prod')]
+    [ValidateSet('dev', 'prod', 'int')]
     [string]$Environment,
 
     [ValidateSet('all', 'infra', 'images', 'apps')]
     [string]$Stage = 'all',
 
-    [string]$Location = 'eastus',
+    # Empty means "pick the per-environment default" (see below).
+    [string]$Location = '',
     [string]$Prefix = 'riskapp',
     [string]$ImageTag = 'latest',
     [string]$AcrName = '',
@@ -66,6 +67,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+
+# Default region per environment when -Location is not given (int is UK South).
+if ([string]::IsNullOrEmpty($Location)) {
+    $Location = if ($Environment -in @('int', 'integration', 'staging')) { 'uksouth' } else { 'eastus' }
+}
 
 $ScriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot    = (Get-Item $ScriptDir).Parent.FullName

@@ -49,7 +49,16 @@ shift
 # ---- Defaults (overridable by environment variables) ------------------------
 STAGE="all"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
-LOCATION="${AZURE_LOCATION:-eastus}"
+# Per-environment default region (int is UK South — its ACR/Container Apps
+# environment live there). --location or AZURE_LOCATION override it.
+if [[ -n "${AZURE_LOCATION:-}" ]]; then
+    LOCATION="$AZURE_LOCATION"
+else
+    case "$ENV_NAME" in
+        int|integration|staging) LOCATION="uksouth" ;;
+        *)                       LOCATION="eastus" ;;
+    esac
+fi
 PREFIX="${APP_PREFIX:-riskapp}"
 ACR_NAME="${ACR_NAME:-}"
 OPENAI_ACCOUNT_NAME="${OPENAI_ACCOUNT_NAME:-}"
