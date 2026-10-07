@@ -178,7 +178,7 @@ export function ActiveRiskRegisterPage() {
                         <span className="register-sep">·</span>
                         <span>{p.project_type_name}</span>
                         <span className="register-sep">·</span>
-                        <span>PM: {ownerName(users, p.pm_user_id)}</span>
+                        <span>PM: {p.pm_name ?? ownerName(users, p.pm_user_id)}</span>
                       </div>
                     </div>
                   </div>

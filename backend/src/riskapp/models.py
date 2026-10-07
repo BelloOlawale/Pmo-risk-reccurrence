@@ -117,6 +117,16 @@ class Project(TimestampMixin, Base):
     def project_type_name(self) -> str:
         return self.project_type.name
 
+    @property
+    def pm_name(self) -> str | None:
+        """Display name of the assigned Project Manager (authenticated creator)."""
+        return self.pm_user.display_name if self.pm_user else None
+
+    @property
+    def pm_email(self) -> str | None:
+        """UPN/email of the assigned Project Manager."""
+        return self.pm_user.upn if self.pm_user else None
+
 
 class Risk(TimestampMixin, Base):
     __tablename__ = "risks"
@@ -201,6 +211,15 @@ class Risk(TimestampMixin, Base):
     @property
     def owner_type(self) -> str | None:
         return self.owner.owner_type if self.owner else None
+
+    @property
+    def project_name(self) -> str | None:
+        return self.project.name if self.project else None
+
+    @property
+    def project_start_date(self) -> dt.date | None:
+        """Used by validation/UI so a risk start can be checked against its project."""
+        return self.project.start_date if self.project else None
 
 
 class RiskAuditLog(Base):

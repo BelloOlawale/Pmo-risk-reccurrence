@@ -162,6 +162,8 @@ class ProjectRead(BaseModel):
     project_type_name: str
     status: str
     pm_user_id: int | None = None
+    pm_name: str | None = None
+    pm_email: str | None = None
     start_date: dt.date | None
     end_date: dt.date | None
     stage_gate: str | None
@@ -207,6 +209,8 @@ class RiskRead(BaseModel):
     id: int
     risk_code: str
     project_id: int
+    project_name: str | None = None
+    project_start_date: dt.date | None = None
     description: str
     category: str | None
     subcategory: str | None
@@ -275,6 +279,13 @@ class RiskDeEscalate(BaseModel):
     """Payload for de-escalating an Escalated risk back to In Progress."""
 
     rationale: str = Field(min_length=1)
+    actor_user_id: int | None = None
+
+
+class ResolutionReject(BaseModel):
+    """Payload for a Project Manager rejecting a Risk Owner's resolution."""
+
+    reason: str = Field(min_length=1, max_length=2000)
     actor_user_id: int | None = None
 
 
@@ -453,8 +464,12 @@ class ExternalAcknowledgeRead(BaseModel):
     sla_deadline: dt.datetime | None
     owner_name: str
     owner_email: str
+    project_manager: str = ""
     acknowledged: bool
     acknowledged_at: dt.datetime | None
+    # Set when the Project Manager has rejected a proposed resolution, so the
+    # owner can see why the risk was returned to In Progress.
+    resolution_rejected_reason: str | None = None
 
 
 class ImportRowErrorRead(BaseModel):

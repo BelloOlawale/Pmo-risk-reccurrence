@@ -7,16 +7,18 @@ import { formatDate, formatDateTime } from '../utils/format';
 
 const API_BASE: string = import.meta.env.VITE_API_BASE_URL ?? '';
 
-/** Shown for bad, expired or already-revoked links — leaks nothing internal. */
-const LINK_INVALID_MESSAGE = 'This risk link has expired or is no longer valid.';
+/** Shown for bad or revoked links — leaks nothing internal. */
+const LINK_INVALID_MESSAGE = 'This risk link is not valid or is no longer available.';
 
 /**
- * Public, token-scoped acknowledgement page for an external Risk Owner.
+ * Public, token-scoped page for an external Risk Owner.
  *
- * The secure, expiring token in the URL grants access to exactly one risk, so
- * this page deliberately uses a bare `fetch` (no session/auth headers) and is
+ * The secure, persistent token in the URL grants access to exactly one risk,
+ * so this page deliberately uses a bare `fetch` (no session/auth headers) and is
  * mounted outside the application shell — an external owner has no Wragby
- * account and must never reach the internal app.
+ * account and must never reach the internal app. The link does not expire while
+ * the risk stays assigned to this owner, so they can acknowledge, resolve, and
+ * act again if the Project Manager sends the resolution back.
  */
 export function ExternalAcknowledgePage() {
   const { token } = useParams();
@@ -24,6 +26,7 @@ export function ExternalAcknowledgePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [acknowledging, setAcknowledging] = useState(false);
+  const [resolving, setResolving] = useState(false);
 
   const load = useCallback(async () => {
     if (!token) {
@@ -65,6 +68,25 @@ export function ExternalAcknowledgePage() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setAcknowledging(false);
+    }
+  }
+
+  async function resolve() {
+    if (!token) return;
+    setResolving(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/external/acknowledge/${token}/resolve`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        throw new Error('We could not submit your resolution. Please try again.');
+      }
+      setRisk((await res.json()) as ExternalAcknowledge);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setResolving(false);
     }
   }
 
@@ -140,11 +162,21 @@ export function ExternalAcknowledgePage() {
                     <div className="muted owner-email">{risk.owner_email}</div>
                   </div>
                 </div>
+                {risk.project_manager ? (
+                  <div>
+                    <div className="kv-label">Project Manager</div>
+                    <div className="kv-value">{risk.project_manager}</div>
+                  </div>
+                ) : null}
                 <div>
                   <div className="kv-label">Your acknowledgement</div>
                   <div className="kv-value">
                     {risk.acknowledged ? 'Acknowledged' : 'Not yet acknowledged'}
                   </div>
+                </div>
+                <div>
+                  <div className="kv-label">Current status</div>
+                  <div className="kv-value">{risk.status}</div>
                 </div>
               </div>
 
@@ -157,15 +189,14 @@ export function ExternalAcknowledgePage() {
 
               {error ? <div className="auth-error">{error}</div> : null}
 
-              {risk.acknowledged ? (
-                <div className="ack-confirmed">
-                  <strong>Acknowledged.</strong>{' '}
-                  {risk.acknowledged_at
-                    ? `Recorded ${formatDateTime(risk.acknowledged_at)}.`
-                    : ''}{' '}
-                  Thank you — you can close this page.
+              {risk.resolution_rejected_reason && risk.status === 'In Progress' ? (
+                <div className="auth-error" role="alert">
+                  <strong>Your previous resolution was rejected by the Project Manager.</strong>{' '}
+                  Reason: {risk.resolution_rejected_reason}
                 </div>
-              ) : (
+              ) : null}
+
+              {!risk.acknowledged ? (
                 <button
                   type="button"
                   className="btn btn-primary auth-primary-btn"
@@ -174,6 +205,38 @@ export function ExternalAcknowledgePage() {
                 >
                   {acknowledging ? 'Acknowledging…' : 'Acknowledge Risk'}
                 </button>
+              ) : risk.status === 'Resolved' ? (
+                <div className="ack-confirmed">
+                  <strong>Resolution submitted.</strong> Awaiting Project Manager review.
+                  Thank you — you can close this page.
+                </div>
+              ) : risk.status === 'Closed' ? (
+                <div className="ack-confirmed">
+                  <strong>This risk is closed.</strong> No further action is required.
+                </div>
+              ) : risk.status === 'Dismissed' ? (
+                <div className="ack-confirmed">
+                  <strong>This risk was dismissed.</strong> No further action is required.
+                </div>
+              ) : (
+                <>
+                  <div className="ack-confirmed">
+                    <strong>Acknowledged.</strong>{' '}
+                    {risk.acknowledged_at
+                      ? `Recorded ${formatDateTime(risk.acknowledged_at)}.`
+                      : ''}{' '}
+                    When the risk has been addressed, mark it as resolved for the Project
+                    Manager to review.
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-primary auth-primary-btn"
+                    disabled={resolving}
+                    onClick={() => void resolve()}
+                  >
+                    {resolving ? 'Submitting…' : 'Mark as Resolved'}
+                  </button>
+                </>
               )}
             </div>
           ) : null}

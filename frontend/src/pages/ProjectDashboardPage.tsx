@@ -117,7 +117,7 @@ export function ProjectDashboardPage() {
                 <span className="mono">{project.project_code}</span> · {project.department_name} ·{' '}
                 {project.project_type_name}
                 {project.customer ? ` · ${project.customer}` : ''}
-                {' · '}PM: {ownerName(users, project.pm_user_id)}
+                {' · '}PM: {project.pm_name ?? ownerName(users, project.pm_user_id)}
               </>
             ) : (
               'Loading…'

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Iterable
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Response, UploadFile, status
@@ -23,6 +24,7 @@ from riskapp.auth import (
     can_close_project,
     can_close_risk,
     can_delete_risk,
+    can_review_resolution,
     create_local_token,
     get_principal,
     require_roles,
@@ -40,6 +42,7 @@ from riskapp.excel_export import (
 )
 from riskapp.external import (
     EXTERNAL,
+    acknowledgement_url,
     decode_acknowledgement_token,
     get_or_create_external_owner,
 )
@@ -54,10 +57,14 @@ from riskapp.llm.chat import AzureOpenAIChat, ChatProvider
 from riskapp.notifications import (
     EVENT_MATERIALIZED,
     EVENT_OWNER_ASSIGNMENT,
+    EVENT_RESOLUTION_REJECTED,
+    EVENT_RESOLVED,
     build_notification_service,
+    resolution_rejected_email,
 )
 from riskapp.security import hash_password, verify_password
 from riskapp.services import (
+    accept_resolution,
     accept_risk,
     acknowledge_risk,
     close_project,
@@ -72,6 +79,8 @@ from riskapp.services import (
     get_project,
     get_risk,
     list_users,
+    reject_resolution,
+    resolve_risk,
     update_risk,
 )
 from riskapp.suggestions import (
@@ -250,7 +259,27 @@ def _resolve_external_risk(db: Session, token: str) -> models.Risk:
     return risk
 
 
-def _external_ack_read(risk: models.Risk) -> schemas.ExternalAcknowledgeRead:
+def _latest_rejection_reason(db: Session, risk: models.Risk) -> str | None:
+    """Reason from the last resolution review, only when it was a rejection."""
+    last = db.scalar(
+        select(models.RiskAuditLog)
+        .where(
+            models.RiskAuditLog.risk_id == risk.id,
+            models.RiskAuditLog.action.in_(
+                ["resolution_submitted", "resolution_rejected", "resolution_accepted"]
+            ),
+        )
+        .order_by(models.RiskAuditLog.id.desc())
+        .limit(1)
+    )
+    if last is not None and last.action == "resolution_rejected":
+        return str(last.new_value) if last.new_value is not None else None
+    return None
+
+
+def _external_ack_read(
+    db: Session, risk: models.Risk
+) -> schemas.ExternalAcknowledgeRead:
     owner = risk.owner
     return schemas.ExternalAcknowledgeRead(
         risk_code=risk.risk_code,
@@ -268,8 +297,10 @@ def _external_ack_read(risk: models.Risk) -> schemas.ExternalAcknowledgeRead:
         sla_deadline=risk.sla_deadline,
         owner_name=owner.display_name if owner else "",
         owner_email=owner.upn if owner else "",
+        project_manager=risk.project.pm_name or "" if risk.project else "",
         acknowledged=risk.sla_acknowledged,
         acknowledged_at=risk.acknowledged_at,
+        resolution_rejected_reason=_latest_rejection_reason(db, risk),
     )
 
 
@@ -281,7 +312,7 @@ def external_acknowledge_info(
     token: str, db: DbDep
 ) -> schemas.ExternalAcknowledgeRead:
     """Public: show the single risk behind an external acknowledgement link."""
-    return _external_ack_read(_resolve_external_risk(db, token))
+    return _external_ack_read(db, _resolve_external_risk(db, token))
 
 
 @app.post(
@@ -293,7 +324,38 @@ def external_acknowledge(token: str, db: DbDep) -> schemas.ExternalAcknowledgeRe
     risk = _resolve_external_risk(db, token)
     if not risk.sla_acknowledged:
         risk = acknowledge_risk(db, risk, actor_user_id=risk.owner_user_id)
-    return _external_ack_read(risk)
+    return _external_ack_read(db, risk)
+
+
+@app.post(
+    "/api/external/acknowledge/{token}/resolve",
+    response_model=schemas.ExternalAcknowledgeRead,
+)
+def external_resolve(token: str, db: DbDep) -> schemas.ExternalAcknowledgeRead:
+    """Public: Risk Owner marks the assigned risk Resolved (awaits PM review).
+
+    The owner may only move the risk into ``Resolved`` — never ``Closed``. The
+    Project Manager is notified to review the proposed resolution.
+    """
+    risk = _resolve_external_risk(db, token)
+    if risk.status == RiskStatus.RESOLVED.value:
+        return _external_ack_read(db, risk)  # idempotent re-submission
+    try:
+        risk = resolve_risk(db, risk, actor_user_id=risk.owner_user_id)
+    except (InvalidTransitionError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    build_notification_service().notify(
+        db,
+        event=EVENT_RESOLVED,
+        title=f"Resolution submitted: {risk.risk_code}",
+        body=(
+            f"Risk {risk.risk_code} was marked Resolved by its Risk Owner and "
+            "now awaits your review (accept or reject the resolution)."
+        ),
+        risk=risk,
+    )
+    db.commit()
+    return _external_ack_read(db, risk)
 
 
 @app.post("/api/auth/login", response_model=schemas.TestLoginToken)
@@ -437,6 +499,27 @@ def risk_meta(db: DbDep) -> dict[str, object]:
     return _risk_meta_cache.get_or_set(lambda: _compute_risk_meta(db))
 
 
+def _canonical_departments(names: Iterable[str | None]) -> list[str]:
+    """One option per department, case-insensitively deduped.
+
+    The register carries mixed casing from historical imports (``DATAZONE`` vs
+    ``Datazone``). Offering both in the picker is noise, so collapse them to a
+    single representative, preferring a mixed/Title-case value over ALL-CAPS.
+    """
+    by_lower: dict[str, str] = {}
+    for raw in names:
+        if raw is None:
+            continue
+        name = str(raw).strip()
+        if not name:
+            continue
+        key = name.lower()
+        current = by_lower.get(key)
+        if current is None or (current.isupper() and not name.isupper()):
+            by_lower[key] = name
+    return sorted(by_lower.values(), key=str.lower)
+
+
 def _compute_risk_meta(db: Session) -> dict[str, object]:
     categories = sorted(
         {str(category) for category in db.scalars(
@@ -471,6 +554,9 @@ def _compute_risk_meta(db: Session) -> dict[str, object]:
 
     return {
         "categories": categories,
+        "departments": _canonical_departments(
+            db.scalars(select(models.Department.name)).all()
+        ),
         "lifecycle": lifecycle,
         "risk_sources": ["Human", "Environmental", "Technical"],
         "response_strategies": ["Mitigate", "Transfer", "Avoid", "Accept"],
@@ -526,6 +612,7 @@ def list_projects(
     stmt = select(models.Project).options(
         selectinload(models.Project.department),
         selectinload(models.Project.project_type),
+        selectinload(models.Project.pm_user),
     )
     if status is not None:
         stmt = stmt.where(models.Project.status == status)
@@ -602,7 +689,10 @@ def add_risk(
         raise HTTPException(status_code=404, detail="Project not found")
     if not can_access_project(principal, project):
         raise HTTPException(status_code=403, detail="Forbidden")
-    risk = create_risk(db, payload)
+    try:
+        risk = create_risk(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     # Reopen a closed register when a new risk is added to it: the register
     # becomes Active again and reappears under Active Risk.
     if project.status == "Closed":
@@ -623,7 +713,9 @@ def list_risks(principal: PrincipalDep, db: DbDep) -> list[schemas.RiskRead]:
     risks; owners see the risks assigned to them; PMs see the risks of their
     own projects.
     """
-    stmt = select(models.Risk).options(selectinload(models.Risk.owner))
+    stmt = select(models.Risk).options(
+        selectinload(models.Risk.owner), selectinload(models.Risk.project)
+    )
     if not principal.is_pmo_or_admin:
         stmt = stmt.where(
             or_(
@@ -746,7 +838,24 @@ def patch_risk(
     if payload.status == RiskStatus.CLOSED.value and not can_close_risk(principal):
         raise HTTPException(
             status_code=403,
-            detail="You are not authorized to close risks.",
+            detail=(
+                "You are not authorized to close risks. Only a PMO Lead can "
+                "finally close a risk."
+            ),
+        )
+    # Sending a Resolved risk back to In Progress is the PM's review decision;
+    # it is not a generic status edit available to the Risk Owner.
+    if (
+        risk.status == RiskStatus.RESOLVED.value
+        and payload.status == RiskStatus.IN_PROGRESS.value
+        and not can_review_resolution(principal, risk)
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Only the Project Manager or PMO Lead can send a resolution back "
+                "to In Progress."
+            ),
         )
     was_event = risk.status == RiskStatus.EVENT.value
     owner_before = risk.owner_user_id
@@ -798,6 +907,87 @@ def acknowledge(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return schemas.RiskRead.model_validate(acknowledged)
+
+
+@app.post(
+    "/api/risks/{risk_id}/resolution/accept", response_model=schemas.RiskRead
+)
+def accept_risk_resolution(
+    risk_id: int, principal: PrincipalDep, db: DbDep
+) -> schemas.RiskRead:
+    """Project Manager accepts the Risk Owner's resolution (risk stays Resolved)."""
+    risk = get_risk(db, risk_id)
+    if risk is None:
+        raise HTTPException(status_code=404, detail="Risk not found")
+    if not can_access_risk(principal, risk):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not can_review_resolution(principal, risk):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the Project Manager or PMO Lead can review a resolution.",
+        )
+    try:
+        updated = accept_resolution(db, risk, actor_user_id=principal.user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return schemas.RiskRead.model_validate(updated)
+
+
+@app.post(
+    "/api/risks/{risk_id}/resolution/reject", response_model=schemas.RiskRead
+)
+def reject_risk_resolution(
+    risk_id: int,
+    payload: schemas.ResolutionReject,
+    principal: PrincipalDep,
+    db: DbDep,
+) -> schemas.RiskRead:
+    """Project Manager rejects the resolution: risk returns to In Progress.
+
+    A reason is mandatory; the Risk Owner is emailed it together with their
+    persistent link so they can continue working the risk.
+    """
+    risk = get_risk(db, risk_id)
+    if risk is None:
+        raise HTTPException(status_code=404, detail="Risk not found")
+    if not can_access_risk(principal, risk):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not can_review_resolution(principal, risk):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the Project Manager or PMO Lead can review a resolution.",
+        )
+    reason = payload.reason.strip()
+    try:
+        updated = reject_resolution(
+            db,
+            risk,
+            reason=reason,
+            actor_user_id=payload.actor_user_id or principal.user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    owner = updated.owner
+    email_body = None
+    if owner is not None and owner.owner_type == EXTERNAL:
+        link = acknowledgement_url(updated)
+        if link:
+            email_body = resolution_rejected_email(updated, reason, link)
+    build_notification_service().notify(
+        db,
+        event=EVENT_RESOLUTION_REJECTED,
+        title=f"Resolution rejected: {updated.risk_code}",
+        body=(
+            f"Your proposed resolution for risk {updated.risk_code} was rejected by "
+            f"the Project Manager. Reason: {reason}"
+        ),
+        risk=updated,
+        email_body=email_body,
+    )
+    db.commit()
+    db.refresh(updated)
+    return schemas.RiskRead.model_validate(updated)
 
 
 @app.delete("/api/risks/{risk_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -870,7 +1060,7 @@ def list_project_risks(
         raise HTTPException(status_code=403, detail="Forbidden")
     risks = db.scalars(
         select(models.Risk)
-        .options(selectinload(models.Risk.owner))
+        .options(selectinload(models.Risk.owner), selectinload(models.Risk.project))
         .where(models.Risk.project_id == project_id)
         .order_by(models.Risk.created_at.desc(), models.Risk.id.desc())
     ).all()

@@ -48,6 +48,9 @@ export interface Project {
   project_type_name: string;
   status: string;
   pm_user_id: number | null;
+  /** Resolved Project Manager display name (never blank when a PM is assigned). */
+  pm_name: string | null;
+  pm_email: string | null;
   start_date: string | null;
   end_date: string | null;
   stage_gate: string | null;
@@ -67,6 +70,8 @@ export interface Risk {
   id: number;
   risk_code: string;
   project_id: number;
+  project_name: string | null;
+  project_start_date: string | null;
   description: string;
   category: string | null;
   risk_source: string | null;
@@ -227,6 +232,7 @@ export interface RiskCreatePayload {
 /** GET /api/risk-meta — controlled option sets for the risk forms. */
 export interface RiskMeta {
   categories: string[];
+  departments: string[];
   lifecycle: string[];
   risk_sources: string[];
   response_strategies: string[];
@@ -255,6 +261,9 @@ export interface ExternalAcknowledge {
   sla_deadline: string | null;
   owner_name: string;
   owner_email: string;
+  project_manager: string;
   acknowledged: boolean;
   acknowledged_at: string | null;
+  /** Set when the PM rejected a proposed resolution, so the owner can see why. */
+  resolution_rejected_reason: string | null;
 }

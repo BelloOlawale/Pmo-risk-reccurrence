@@ -304,14 +304,28 @@ def can_close_project(principal: Principal, project: Any) -> bool:
 
 
 def can_close_risk(principal: Principal) -> bool:
-    """True for the Project Manager of the risk, PMO Lead, or System Admin.
+    """True only for the PMO Lead (final closure authority) and System Admin.
 
-    The PM of the risk's register may close it; PMO Lead / System Admin have
-    system-admin-level authority. Enforced server-side on any transition to
-    ``Closed`` (row-level access is separately checked before this).
+    The Project Manager reviews the Risk Owner's proposed resolution but cannot
+    close a risk; final closure is reserved to the PMO Lead (with System Admin
+    as the application superuser).
     """
-    return principal.has_role(
-        Role.PROJECT_MANAGER, Role.PMO_LEAD, Role.SYSTEM_ADMIN
+    return principal.has_role(Role.PMO_LEAD, Role.SYSTEM_ADMIN)
+
+
+def can_review_resolution(principal: Principal, risk: Any) -> bool:
+    """True for the risk's project PM, a PMO Lead, or a System Admin.
+
+    Owns the "accept / reject the Risk Owner's resolution" decision. Row-level
+    access is checked separately, so a PM can only ever reach own risks.
+    """
+    if principal.is_pmo_or_admin:
+        return True
+    return (
+        principal.has_role(Role.PROJECT_MANAGER)
+        and principal.user_id is not None
+        and risk.project is not None
+        and risk.project.pm_user_id == principal.user_id
     )
 
 

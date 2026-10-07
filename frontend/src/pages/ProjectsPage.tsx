@@ -82,7 +82,7 @@ export function ProjectsPage() {
                       <td>{p.department_name}</td>
                       <td>{p.project_type_name}</td>
                       <td>{p.customer ?? '—'}</td>
-                      <td>{ownerName(users, p.pm_user_id)}</td>
+                      <td>{p.pm_name ?? ownerName(users, p.pm_user_id)}</td>
                       <td>
                         <StatusBadge status={p.status} />
                       </td>

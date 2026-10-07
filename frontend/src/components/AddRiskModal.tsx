@@ -64,6 +64,9 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
     initialProjectId !== undefined
       ? projects.find((p) => p.id === initialProjectId) ?? null
       : null;
+  const selectedProject =
+    fixedProject ?? projects.find((p) => String(p.id) === form.project_id) ?? null;
+  const projectStartDate = selectedProject?.start_date ?? undefined;
 
   function set<K extends keyof FormState>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -88,6 +91,14 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
       form.risk_end_date < form.risk_start_date
     ) {
       setError('Risk end date cannot be earlier than the risk start date.');
+      return;
+    }
+    if (
+      form.risk_start_date &&
+      projectStartDate &&
+      form.risk_start_date < projectStartDate
+    ) {
+      setError('Risk start date cannot be earlier than the project start date.');
       return;
     }
 
@@ -210,8 +221,14 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
               <input
                 type="date"
                 value={form.risk_start_date}
+                min={projectStartDate}
                 onChange={(e) => set('risk_start_date', e.target.value)}
               />
+              {projectStartDate ? (
+                <span className="field-hint">
+                  Cannot be earlier than the project start date ({projectStartDate}).
+                </span>
+              ) : null}
             </div>
             <div className="field">
               <label>Risk end date</label>

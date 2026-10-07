@@ -56,7 +56,7 @@ _TRANSITIONS: dict[RiskStatus, frozenset[RiskStatus]] = {
         }
     ),
     RiskStatus.EVENT: frozenset({RiskStatus.RESOLVED}),
-    RiskStatus.RESOLVED: frozenset({RiskStatus.CLOSED}),
+    RiskStatus.RESOLVED: frozenset({RiskStatus.CLOSED, RiskStatus.IN_PROGRESS}),
     RiskStatus.CLOSED: frozenset(),
     RiskStatus.DISMISSED: frozenset(),
 }

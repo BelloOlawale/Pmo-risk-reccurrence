@@ -1,8 +1,9 @@
 """Risk closure permissions.
 
-The Project Manager who owns the register may close a risk, as may the PMO Lead
-and System Admin. The backend still enforces row-level access, so an unrelated
-PM cannot close someone else's risk even though PM is a permitted role.
+The PMO Lead has the final authority to close a risk (System Admin as the app
+superuser). The Project Manager reviews resolutions but cannot close a risk.
+Row-level access is still enforced, so an unrelated PM cannot touch someone
+else's risk even though PM is a permitted role for other actions.
 """
 
 from __future__ import annotations
@@ -64,7 +65,8 @@ def test_me_returns_role(client: TestClient) -> None:
     assert "Project Manager" in resp.json()["roles"]
 
 
-def test_pm_can_close_own_risk(client: TestClient) -> None:
+def test_pm_cannot_close_own_risk(client: TestClient) -> None:
+    """Final closure is PMO Lead-only; the PM reviews but cannot close."""
     project = _create_project(client, user_id=7)
     risk = _resolved_risk(client, project, pm_user_id=7)
 
@@ -73,11 +75,7 @@ def test_pm_can_close_own_risk(client: TestClient) -> None:
         json={"status": "Closed", "actor_user_id": 7},
         headers=_headers(7, "Project Manager"),
     )
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "Closed"
-
-    read = client.get(f"/api/risks/{risk['id']}", headers=_headers(None, "System Admin")).json()
-    assert read["status"] == "Closed"
+    assert resp.status_code == 403
 
 
 def test_other_pm_cannot_close_someone_elses_risk(client: TestClient) -> None:

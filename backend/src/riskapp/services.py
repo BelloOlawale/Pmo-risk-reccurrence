@@ -203,11 +203,34 @@ def close_project(
     return project
 
 
+def validate_project_dates(start: dt.date | None, end: dt.date | None) -> None:
+    """Raise when a Project End Date is earlier than its Project Start Date."""
+    if start is not None and end is not None and end < start:
+        raise ValueError(
+            "Project end date cannot be earlier than the project start date."
+        )
+
+
 def validate_risk_dates(start: dt.date | None, end: dt.date | None) -> None:
     """Raise when a Risk End Date is earlier than its Risk Start Date."""
     if start is not None and end is not None and end < start:
         raise ValueError(
             "Risk end date cannot be earlier than the risk start date."
+        )
+
+
+def validate_risk_start_within_project(
+    risk_start: dt.date | None, project_start: dt.date | None
+) -> None:
+    """Raise when a Risk Start Date precedes its project's Start Date.
+
+    A risk belongs to a project, so it cannot start before the project does.
+    Enforced in the service layer so every caller (API, importer, suggestion
+    acceptance) is protected — not only the Create Risk form.
+    """
+    if risk_start is not None and project_start is not None and risk_start < project_start:
+        raise ValueError(
+            "Risk start date cannot be earlier than the project start date."
         )
 
 
@@ -230,6 +253,11 @@ def create_risk(
     """
     rating = compute_risk_rating(payload.likelihood, payload.impact)
     validate_risk_dates(payload.risk_start_date, payload.risk_end_date)
+    project = db.get(models.Project, payload.project_id)
+    if project is not None:
+        validate_risk_start_within_project(
+            payload.risk_start_date, project.start_date
+        )
     now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
     initial_status = status
     if payload.owner_user_id is not None and status == RiskStatus.OPEN.value:
@@ -492,6 +520,92 @@ def de_escalate_risk(
     return risk
 
 
+def resolve_risk(
+    db: Session, risk: models.Risk, *, actor_user_id: int | None = None
+) -> models.Risk:
+    """Risk Owner proposes a resolution: ``In Progress`` -> ``Resolved``.
+
+    The owner may resolve a live risk (Open / In Progress / Escalated). Once
+    Resolved the Project Manager reviews it; the owner can never close it.
+    """
+    target = ensure_transition(risk.status, RiskStatus.RESOLVED.value)
+    old_status = risk.status
+    risk.status = target.value
+    risk.resolved_date = dt.datetime.now(dt.UTC).replace(tzinfo=None)
+    record_change(
+        db,
+        risk,
+        action="resolution_submitted",
+        field="status",
+        old_value=old_status,
+        new_value=target.value,
+        actor_user_id=actor_user_id,
+    )
+    db.commit()
+    db.refresh(risk)
+    return risk
+
+
+def accept_resolution(
+    db: Session, risk: models.Risk, *, actor_user_id: int | None = None
+) -> models.Risk:
+    """Project Manager accepts the owner's resolution; the risk stays Resolved."""
+    if risk.status != RiskStatus.RESOLVED.value:
+        raise ValueError("Only a Resolved risk has a resolution to accept.")
+    record_change(
+        db,
+        risk,
+        action="resolution_accepted",
+        field="status",
+        old_value=RiskStatus.RESOLVED.value,
+        new_value=RiskStatus.RESOLVED.value,
+        actor_user_id=actor_user_id,
+    )
+    db.commit()
+    db.refresh(risk)
+    return risk
+
+
+def reject_resolution(
+    db: Session, risk: models.Risk, *, reason: str, actor_user_id: int | None = None
+) -> models.Risk:
+    """Project Manager rejects the owner's resolution: ``Resolved`` -> ``In Progress``.
+
+    A reason is mandatory and recorded on the audit trail so the Risk Owner can
+    see why the resolution was sent back.
+    """
+    cleaned = (reason or "").strip()
+    if not cleaned:
+        raise ValueError("A reason is required to reject a resolution.")
+    if risk.status != RiskStatus.RESOLVED.value:
+        raise ValueError("Only a Resolved risk can be rejected.")
+    target = ensure_transition(risk.status, RiskStatus.IN_PROGRESS.value)
+    old_status = risk.status
+    risk.status = target.value
+    risk.resolved_date = None
+    record_change(
+        db,
+        risk,
+        action="status_change",
+        field="status",
+        old_value=old_status,
+        new_value=target.value,
+        actor_user_id=actor_user_id,
+    )
+    record_change(
+        db,
+        risk,
+        action="resolution_rejected",
+        field="rejection_reason",
+        old_value=None,
+        new_value=cleaned,
+        actor_user_id=actor_user_id,
+    )
+    db.commit()
+    db.refresh(risk)
+    return risk
+
+
 # Fields that are fixed at creation. The Edit Details form shows them
 # read-only; the API rejects any attempt to change them.
 _IMMUTABLE_RISK_FIELDS = frozenset(
@@ -581,6 +695,10 @@ def update_risk(
 
     if "risk_start_date" in data or "risk_end_date" in data:
         validate_risk_dates(risk.risk_start_date, risk.risk_end_date)
+        validate_risk_start_within_project(
+            risk.risk_start_date,
+            risk.project.start_date if risk.project is not None else None,
+        )
         _refresh_sla_deadline(db, risk, actor_user_id)
 
     # Assigning an owner moves a live, unowned Open risk into the workflow.

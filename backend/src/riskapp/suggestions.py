@@ -545,8 +545,14 @@ def accept_suggestion(
     if source.risk_start_date is not None and source.risk_start_date >= dt.date.today():
         source_start = source.risk_start_date
     source_end = source.risk_end_date
+    # A risk cannot start before its project: clamp an automatically-enriched
+    # start date up to the project start (and drop an end date that is now out
+    # of order). The PM can always set the dates explicitly afterwards.
+    if project.start_date is not None and (
+        source_start is None or source_start < project.start_date
+    ):
+        source_start = project.start_date
     if source_end is not None and source_start is not None and source_end < source_start:
-        # Never copy an inconsistent pair from history.
         source_end = None
 
     risk = models.Risk(

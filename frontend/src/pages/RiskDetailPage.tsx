@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 
 import { api, ApiError } from '../api/client';
-import type { Issue, Me, Risk, RiskAuditLog, RiskSource } from '../api/types';
+import type { Issue, Me, Project, Risk, RiskAuditLog, RiskSource } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { ownerName, useUsers } from '../api/users';
 import { RatingBadge, SectionCard, StatusBadge } from '../components/Badges';
@@ -66,6 +66,12 @@ function actionLabel(action: string, field: string | null): string {
       return 'De-escalated';
     case 'issue_created':
       return 'Issue created';
+    case 'resolution_submitted':
+      return 'Resolution submitted';
+    case 'resolution_accepted':
+      return 'Resolution accepted';
+    case 'resolution_rejected':
+      return 'Resolution rejected';
     case 'field_edit':
       return field ? `Edited ${humanizeField(field)}` : 'Edited';
     default:
@@ -154,6 +160,18 @@ export function RiskDetailPage() {
   );
   const { data: me } = useApi(() => api.get<Me>('/api/me'), []);
   const users = useUsers();
+  const { data: project } = useApi(
+    () =>
+      risk ? api.get<Project>(`/api/projects/${risk.project_id}`) : Promise.resolve(null),
+    [risk?.project_id],
+  );
+
+  const canReviewResolution =
+    (me?.roles ?? []).some((r) => r === 'PMO Lead' || r === 'System Admin') ||
+    ((me?.roles ?? []).includes('Project Manager') &&
+      me?.user_id !== null &&
+      me?.user_id !== undefined &&
+      project?.pm_user_id === me.user_id);
 
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<EditForm>(EMPTY_FORM);
@@ -161,6 +179,8 @@ export function RiskDetailPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [statusTarget, setStatusTarget] = useState('');
   const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
 
   useEffect(() => {
     if (risk && !editing) {
@@ -192,6 +212,14 @@ export function RiskDetailPage() {
       form.risk_end_date < form.risk_start_date
     ) {
       setActionError('Risk end date cannot be earlier than the risk start date.');
+      return;
+    }
+    if (
+      form.risk_start_date &&
+      project?.start_date &&
+      form.risk_start_date < project.start_date
+    ) {
+      setActionError('Risk start date cannot be earlier than the project start date.');
       return;
     }
     setSaving(true);
@@ -250,14 +278,36 @@ export function RiskDetailPage() {
     }
   }
 
+  async function acceptResolution() {
+    await runAction(() =>
+      api.post<Risk>(`/api/risks/${id}/resolution/accept`, {
+        actor_user_id: auth.userId,
+      }),
+    );
+  }
+
+  async function rejectResolution() {
+    const reason = rejectReason.trim();
+    if (!reason) {
+      setActionError('A reason is required to reject a resolution.');
+      return;
+    }
+    await runAction(() =>
+      api.post<Risk>(`/api/risks/${id}/resolution/reject`, {
+        reason,
+        actor_user_id: auth.userId,
+      }),
+    );
+    setRejectOpen(false);
+  }
+
   const readOnly = risk?.status === 'Closed' || risk?.status === 'Dismissed';
   const transitions = risk ? allowedTransitions(risk.status) : [];
   // PMO Lead has the final authority to close a risk; System Admin is the app
   // superuser. Everyone else sees the lifecycle without the Closed transition
   // (the backend enforces the same rule regardless of what the UI shows).
   const canCloseRisk = (me?.roles ?? []).some(
-    (role) =>
-      role === 'Project Manager' || role === 'PMO Lead' || role === 'System Admin',
+    (role) => role === 'PMO Lead' || role === 'System Admin',
   );
   const statusOptions = canCloseRisk
     ? transitions
@@ -309,6 +359,23 @@ export function RiskDetailPage() {
               >
                 Acknowledge
               </button>
+            ) : null}
+            {risk.status === 'Resolved' && canReviewResolution ? (
+              <>
+                <button className="btn btn-primary" onClick={() => void acceptResolution()}>
+                  Accept resolution
+                </button>
+                <button
+                  className="btn btn-danger"
+                  onClick={() => {
+                    setRejectReason('');
+                    setActionError(null);
+                    setRejectOpen(true);
+                  }}
+                >
+                  Reject resolution
+                </button>
+              </>
             ) : null}
             {risk.status === 'Suggested' ? (
               <>
@@ -421,8 +488,15 @@ export function RiskDetailPage() {
                         <input
                           type="date"
                           value={form.risk_start_date}
+                          min={project?.start_date ?? undefined}
                           onChange={(e) => setForm({ ...form, risk_start_date: e.target.value })}
                         />
+                        {project?.start_date ? (
+                          <span className="field-hint">
+                            Cannot be earlier than the project start date (
+                            {project.start_date}).
+                          </span>
+                        ) : null}
                       </div>
                       <div className="field">
                         <label>Risk end date</label>
@@ -618,7 +692,8 @@ export function RiskDetailPage() {
                           {entry.field &&
                           (entry.action === 'field_edit' ||
                             entry.action === 'status_change' ||
-                            entry.action === 'issue_created') ? (
+                            entry.action === 'issue_created' ||
+                            entry.action === 'resolution_rejected') ? (
                             <div className="timeline-change">
                               {humanizeField(entry.field)}: {fmtValue(entry.old_value)} →{' '}
                               {fmtValue(entry.new_value)}
@@ -635,6 +710,45 @@ export function RiskDetailPage() {
       ) : (
         !error && <div className="loading">Loading risk…</div>
       )}
+
+      {rejectOpen ? (
+        <div className="modal-overlay" onClick={() => setRejectOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Reject Risk Resolution</h2>
+              <button
+                className="btn btn-sm"
+                onClick={() => setRejectOpen(false)}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+            <p>Please provide a reason for rejecting this resolution.</p>
+            {actionError ? <div className="error-banner">{actionError}</div> : null}
+            <div className="field">
+              <textarea
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder="The mitigation is incomplete because…"
+                autoFocus
+              />
+            </div>
+            <div className="btn-group">
+              <button className="btn" onClick={() => setRejectOpen(false)}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-danger"
+                disabled={!rejectReason.trim()}
+                onClick={() => void rejectResolution()}
+              >
+                Reject Resolution
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {confirmCloseOpen ? (
         <div className="modal-overlay" onClick={() => setConfirmCloseOpen(false)}>

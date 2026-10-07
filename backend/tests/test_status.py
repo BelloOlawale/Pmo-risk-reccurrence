@@ -29,6 +29,8 @@ class TestTransitions:
             (RiskStatus.ESCALATED, RiskStatus.RESOLVED),
             (RiskStatus.EVENT, RiskStatus.RESOLVED),
             (RiskStatus.RESOLVED, RiskStatus.CLOSED),
+            # PM sends a rejected resolution back to the owner's In Progress.
+            (RiskStatus.RESOLVED, RiskStatus.IN_PROGRESS),
         ],
     )
     def test_valid(self, current: RiskStatus, target: RiskStatus) -> None:
@@ -44,7 +46,6 @@ class TestTransitions:
             (RiskStatus.CLOSED, RiskStatus.IN_PROGRESS),
             # Can't jump backwards arbitrarily.
             (RiskStatus.RESOLVED, RiskStatus.OPEN),
-            (RiskStatus.RESOLVED, RiskStatus.IN_PROGRESS),
             (RiskStatus.IN_PROGRESS, RiskStatus.OPEN),
             (RiskStatus.EVENT, RiskStatus.OPEN),
             (RiskStatus.EVENT, RiskStatus.ESCALATED),

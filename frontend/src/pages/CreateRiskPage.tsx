@@ -3,25 +3,11 @@ import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { api, ApiError } from '../api/client';
-import type { Project, ProjectCreatePayload, Risk } from '../api/types';
+import type { Project, ProjectCreatePayload, Risk, RiskMeta } from '../api/types';
 import { AddRiskModal } from '../components/AddRiskModal';
 import { RatingBadge, StatusBadge } from '../components/Badges';
 import { SuggestionsPanel } from '../components/SuggestionsPanel';
 import { useApi } from '../hooks/useApi';
-
-const DEPARTMENTS: string[] = [
-  'Business Solutions',
-  'Datazone',
-  'Tss',
-  'Finance',
-  'Digital advisory',
-  'Marketing',
-  'Sales',
-  'Software Engineering',
-  'Managed technology and advisory',
-  'SAP',
-  'Customer success',
-];
 
 interface FormState {
   name: string;
@@ -44,28 +30,37 @@ const EMPTY: FormState = {
 function DepartmentField({
   value,
   onChange,
+  options,
 }: {
   value: string;
   onChange: (value: string) => void;
+  options: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(-1);
+  // ``typed`` is null until the user actually edits the text. Keeping it
+  // separate from ``value`` means opening the field shows every department
+  // instead of filtering by the already-selected value — so changing the
+  // selection never requires deleting the current one first.
+  const [typed, setTyped] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const matches = useMemo(() => {
-    const q = value.trim().toLowerCase();
-    if (!q) return DEPARTMENTS;
-    return DEPARTMENTS.filter((d) => d.toLowerCase().includes(q));
-  }, [value]);
+    const q = (typed ?? '').trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((d) => d.toLowerCase().includes(q));
+  }, [options, typed]);
 
   function commit(next: string) {
     onChange(next);
+    setTyped(null);
     setOpen(false);
     setHighlight(-1);
   }
 
   function onKeyDown(e: ReactKeyboardEvent<HTMLInputElement>) {
     if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      setTyped(null);
       setOpen(true);
       setHighlight(0);
       return;
@@ -80,10 +75,16 @@ function DepartmentField({
       if (open && highlight >= 0 && matches[highlight]) {
         e.preventDefault();
         commit(matches[highlight]);
+      } else if (typed !== null) {
+        e.preventDefault();
+        const next = typed.trim();
+        if (next) commit(next);
+        else setTyped(null);
       } else {
         setOpen(false);
       }
     } else if (e.key === 'Escape') {
+      setTyped(null);
       setOpen(false);
       setHighlight(-1);
     }
@@ -92,16 +93,32 @@ function DepartmentField({
   return (
     <div className="combobox" ref={rootRef}>
       <input
-        value={value}
+        value={typed ?? value}
         onChange={(e) => {
-          onChange(e.target.value);
+          setTyped(e.target.value);
           setOpen(true);
           setHighlight(-1);
         }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+        onFocus={() => {
+          // Show the full list; the current value stays visible but no longer
+          // filters the options.
+          setTyped(null);
+          setOpen(true);
+        }}
+        onBlur={() => {
+          window.setTimeout(() => {
+            setOpen(false);
+            // A typed value that was not picked from the list is treated as a
+            // custom department (existing behaviour is preserved).
+            if (typed !== null) {
+              const next = typed.trim();
+              if (next) onChange(next);
+              setTyped(null);
+            }
+          }, 120);
+        }}
         onKeyDown={onKeyDown}
-        placeholder="Select or type a department…"
+        placeholder="Search or type a department…"
         autoComplete="off"
         role="combobox"
         aria-expanded={open}
@@ -135,6 +152,7 @@ function CreateRiskForm({ onCreate }: { onCreate: (project: Project) => void }) 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<Record<string, string>>({});
+  const { data: meta } = useApi(() => api.get<RiskMeta>('/api/risk-meta'), []);
 
   function set<K extends keyof FormState>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -210,7 +228,11 @@ function CreateRiskForm({ onCreate }: { onCreate: (project: Project) => void }) 
               </div>
               <div className="field">
                 <label>Department *</label>
-                <DepartmentField value={form.department} onChange={(v) => set('department', v)} />
+                <DepartmentField
+                  value={form.department}
+                  onChange={(v) => set('department', v)}
+                  options={meta?.departments ?? []}
+                />
                 {fieldError.department ? (
                   <span className="field-error">{fieldError.department}</span>
                 ) : null}

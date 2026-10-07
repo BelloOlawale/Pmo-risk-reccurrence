@@ -212,7 +212,7 @@ class TestExternalOwnerEmail:
         body = NotificationService._email_body("You have been assigned a risk.", stored)
 
         assert "WRAGBY" in body and "RiskIntel" in body
-        assert "View &amp; Acknowledge Risk" in body
+        assert "View Risk" in body
         assert "/acknowledge/" in body
         assert "Vendor migration" in body
         assert "SLA deadline" in body

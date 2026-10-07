@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from riskapp import models
 from riskapp.config import settings
-from riskapp.external import ACK_TTL_DAYS, acknowledgement_url
+from riskapp.external import acknowledgement_url
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,10 @@ EVENT_BREACH = "breach"
 EVENT_RISK_START = "risk_start"
 EVENT_WEEKLY_SUMMARY = "weekly_summary"
 EVENT_MATERIALIZED = "materialized"
+# Risk Owner submitted a resolution -> the Project Manager reviews it.
+EVENT_RESOLVED = "resolution_submitted"
+# Project Manager rejected the resolution -> the Risk Owner is notified.
+EVENT_RESOLUTION_REJECTED = "resolution_rejected"
 
 
 @dataclass(frozen=True)
@@ -126,6 +130,20 @@ def resolve_recipients(event: str, ctx: RecipientContext) -> Recipients:
             to_emails=_unique(ctx.pm_email, ctx.pmo_lead_email),
             cc_emails=(),
         )
+    if event == EVENT_RESOLVED:
+        # The owner submitted a resolution; the Project Manager reviews it and
+        # the PMO Lead is kept informed.
+        return Recipients(
+            to_user_ids=_unique_ids(ctx.pm_user_id),
+            to_emails=_unique(ctx.pm_email, ctx.pmo_lead_email),
+            cc_emails=(),
+        )
+    if event == EVENT_RESOLUTION_REJECTED:
+        return Recipients(
+            to_user_ids=_unique_ids(ctx.owner_user_id),
+            to_emails=_unique(ctx.owner_email),
+            cc_emails=(),
+        )
     raise ValueError(f"Unknown notification event {event!r}")
 
 
@@ -190,17 +208,72 @@ def _external_ack_email(risk: models.Risk, ack_link: str) -> str:
     <p style="font-size:14px;color:#374151;margin:0 0 12px;">{description}</p>
     <table style="border-collapse:collapse;margin:8px 0 18px;">{rows}</table>
     <p style="font-size:14px;line-height:1.55;">
-      This secure link is personal to you and expires after {ACK_TTL_DAYS} days.
-      It only shows the risk assigned to you.
+      This secure link is personal to you and stays valid while this risk is
+      assigned to you. If the risk is reassigned to someone else, this link
+      stops working. It only ever shows the risk assigned to you.
     </p>
     <p style="margin:22px 0;">
       <a href="{link}"
          style="background:#ED1C2E;color:#ffffff;text-decoration:none;padding:12px 22px;
                 border-radius:6px;font-weight:700;font-size:14px;display:inline-block;"
-        >View &amp; Acknowledge Risk</a>
+        >View Risk</a>
     </p>
     <p style="font-size:13px;color:#64748B;line-height:1.55;">
       If you were not expecting this email, you can safely ignore it.
+    </p>
+  </div>
+</div>"""
+
+
+def resolution_rejected_email(risk: models.Risk, reason: str, link: str) -> str:
+    """Email the Risk Owner that the Project Manager rejected their resolution."""
+    owner = risk.owner
+    owner_name = html.escape((owner.display_name if owner else "") or "there")
+    project_name = html.escape(risk.project.name if risk.project else "—")
+    code = html.escape(risk.risk_code)
+    description = html.escape(risk.description or "")
+    reason_html = html.escape(reason)
+    href = html.escape(link, quote=True)
+    rows = "".join(
+        [
+            _email_row("Risk", f"{risk.risk_code} — {risk.description or ''}"),
+            _email_row("Project", project_name),
+            _email_row("Current status", risk.status),
+        ]
+    )
+    return f"""\
+<div style="font-family:Inter,Segoe UI,Arial,sans-serif;max-width:600px;
+            margin:0 auto;color:#111827;">
+  <div style="border-top:4px solid #ED1C2E;padding:20px 24px 0;">
+    <div style="font-size:20px;font-weight:800;letter-spacing:0.04em;">
+      <span style="color:#ED1C2E;">WRAGBY</span> RiskIntel
+    </div>
+    <div style="color:#64748B;font-size:13px;margin-top:2px;">PMO Risk Management</div>
+  </div>
+  <div style="padding:20px 24px 24px;">
+    <p style="font-size:15px;">Dear {owner_name},</p>
+    <h2 style="font-size:17px;margin:6px 0 10px;">Risk Resolution Rejected</h2>
+    <p style="font-size:14px;line-height:1.55;">
+      Your proposed resolution for risk {code} in the {project_name} project has
+      been rejected by the Project Manager.
+    </p>
+    <p style="font-size:14px;color:#374151;margin:0 0 12px;">{description}</p>
+    <table style="border-collapse:collapse;margin:8px 0 18px;">{rows}</table>
+    <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;
+                padding:12px 14px;margin:0 0 18px;">
+      <div style="font-size:12px;font-weight:700;color:#B91C1C;
+                  text-transform:uppercase;letter-spacing:0.04em;">Reason</div>
+      <div style="font-size:14px;color:#111827;margin-top:4px;">{reason_html}</div>
+    </div>
+    <p style="font-size:14px;line-height:1.55;">
+      The risk has been returned to <strong>In Progress</strong>. Please review it
+      and continue working on the required resolution.
+    </p>
+    <p style="margin:22px 0;">
+      <a href="{href}"
+         style="background:#ED1C2E;color:#ffffff;text-decoration:none;padding:12px 22px;
+                border-radius:6px;font-weight:700;font-size:14px;display:inline-block;"
+        >View Risk</a>
     </p>
   </div>
 </div>"""
@@ -273,6 +346,7 @@ class NotificationService:
         body: str,
         risk: models.Risk | None = None,
         project: models.Project | None = None,
+        email_body: str | None = None,
     ) -> Recipients:
         """Resolve recipients, persist in-app rows, and send email."""
         ctx = self._build_context(db, risk, project)
@@ -285,6 +359,7 @@ class NotificationService:
             recipients=recipients,
             risk=risk,
             project=project,
+            email_body=email_body,
         )
 
     def notify_recipients(
@@ -297,6 +372,7 @@ class NotificationService:
         recipients: Recipients,
         risk: models.Risk | None = None,
         project: models.Project | None = None,
+        email_body: str | None = None,
     ) -> Recipients:
         """Persist and email for an already-resolved recipient set."""
         project_id = (
@@ -321,7 +397,11 @@ class NotificationService:
                     to=list(recipients.to_emails),
                     cc=list(recipients.cc_emails) or None,
                     subject=title,
-                    body_html=self._email_body(body, risk),
+                    body_html=(
+                        email_body
+                        if email_body is not None
+                        else self._email_body(body, risk)
+                    ),
                 )
             except Exception:
                 # Email is best-effort; never let a mail failure roll back the

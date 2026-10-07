@@ -7,10 +7,17 @@ existing ``risks.owner_user_id`` foreign key, SLA/escalation workflow and
 notifications keep working unchanged — they simply never authenticate and hold
 no application roles.
 
-Because they have no Wragby account, an external owner acknowledges a risk via a
-**signed, expiring, single-risk** link emailed to them. The token encodes only
-the owner id and the one risk id it grants access to, so it can never be used to
-reach other registers, projects, reports or admin functionality.
+Because they have no Wragby account, an external owner reaches their risk via
+a **signed, persistent, single-risk** link emailed to them. The token encodes
+only the owner id and the one risk id it grants access to, so it can never be
+used to reach other registers, projects, reports or admin functionality.
+
+The link does **not** expire on a timer: it stays valid for the whole life of
+the risk so the owner can acknowledge, resolve, and act again if the Project
+Manager sends the resolution back. It remains secure because every request is
+re-checked against the live data — the token is only accepted while the risk is
+still assigned to that same owner (reassigning the risk silently revokes the
+previous owner's link) and the owner is still active.
 """
 
 from __future__ import annotations
@@ -31,7 +38,6 @@ EXTERNAL = "External"
 
 _ACK_ISSUER = "riskapp-external-ack"
 _ACK_PURPOSE = "acknowledge"
-ACK_TTL_DAYS = 30
 
 # Deliberately simple: a single ``@`` with a dotted domain. Enough to reject
 # obvious typos without pulling in an extra dependency.
@@ -111,7 +117,6 @@ def create_acknowledgement_token(*, owner_user_id: int, risk_id: int) -> str:
         "sub": str(owner_user_id),
         "risk_id": risk_id,
         "iat": int(now.timestamp()),
-        "exp": int((now + dt.timedelta(days=ACK_TTL_DAYS)).timestamp()),
     }
     return jwt.encode(payload, _signing_key(), algorithm="HS256")
 
