@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Iterable
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -730,8 +730,13 @@ def _serialize_issue(issue: models.Issue) -> schemas.IssueRead:
     return item
 
 
-def _issue_stmt() -> Select[tuple[models.Issue]]:
-    """Issue query with the relationships the read schema needs eagerly loaded."""
+def _issue_stmt() -> Select[Any]:
+    """Issue query with the relationships the read schema needs eagerly loaded.
+
+    SQLAlchemy 2.1 changed ``Select``'s generic parameter from the row tuple
+    (``Select[tuple[Issue]]``) to the ORM entity (``Select[Issue]``), so keep
+    the parameter as ``Any`` to type-check under both 2.0 and 2.1.
+    """
     return select(models.Issue).options(*_ISSUE_LOADS)
 
 
