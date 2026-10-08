@@ -35,6 +35,7 @@ export function statusGroup(status: string): RiskStatusGroup {
     case 'In Progress':
     case 'Escalated':
     case 'Event':
+    case 'Pending Resolution':
       return 'In Progress';
     case 'Resolved':
     case 'Closed':

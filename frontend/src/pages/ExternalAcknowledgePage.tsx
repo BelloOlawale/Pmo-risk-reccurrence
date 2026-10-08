@@ -205,10 +205,15 @@ export function ExternalAcknowledgePage() {
                 >
                   {acknowledging ? 'Acknowledging…' : 'Acknowledge Risk'}
                 </button>
-              ) : risk.status === 'Resolved' ? (
+              ) : risk.status === 'Pending Resolution' ? (
                 <div className="ack-confirmed">
                   <strong>Resolution submitted.</strong> Awaiting Project Manager review.
                   Thank you — you can close this page.
+                </div>
+              ) : risk.status === 'Resolved' ? (
+                <div className="ack-confirmed">
+                  <strong>Resolution accepted.</strong> The Project Manager has approved your
+                  resolution. No further action is required.
                 </div>
               ) : risk.status === 'Closed' ? (
                 <div className="ack-confirmed">

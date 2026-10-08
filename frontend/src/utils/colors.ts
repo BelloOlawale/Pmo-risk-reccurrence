@@ -45,6 +45,7 @@ export const STATUS_COLORS: Record<string, string> = {
   'In Progress': '#0891B2',
   Escalated: BRAND.red,       // Red accent for escalated status
   Event: '#F59E0B',
+  'Pending Resolution': '#8B5CF6', // violet - awaiting Project Manager review
   Resolved: '#16A34A',
   Closed: '#64748B',
   Dismissed: '#64748B',
@@ -56,6 +57,7 @@ export const STATUS_ORDER = [
   'In Progress',
   'Escalated',
   'Event',
+  'Pending Resolution',
   'Resolved',
   'Closed',
   'Dismissed',

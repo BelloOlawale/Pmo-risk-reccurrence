@@ -272,7 +272,7 @@ flowchart TD
     E --> F["Status → In Progress"]
     F --> G["Back under SLA monitoring"]
     D -->|"Risk materialized"| H["Status → Event<br/>(displays as 'Materialized')"]
-    D -->|"Resolve"| I["Status → Resolved"]
+    D -->|"Resolve"| I["Status → Pending Resolution<br/>(owner) → Resolved (PM)"]
 ```
 
 - Only **PM or PMO Lead** may de-escalate, and it requires a written rationale
@@ -289,8 +289,9 @@ flowchart TD
 > acknowledged but unresolved risk still materializes once its Risk End Date
 > passes. A **manual** status change to `Event` by the owner/PM materializes the
 > risk identically and immediately (same Issue creation + notification), so the
-> outcome does not depend on the next hourly sweep. `Resolved` / `Closed` risks
-> never materialize, the original risk is always retained for audit, and a
+> outcome does not depend on the next hourly sweep. `Pending Resolution` /
+> `Resolved` / `Closed` risks never materialize, the original risk is always
+> retained for audit, and a
 > materialized risk is never automatically closed (the PMO Lead keeps sole
 > closure authority).
 
@@ -300,12 +301,15 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["Risk resolved<br/>(residual acceptable)"] --> B["Status → Resolved"]
-    B --> C["Notify PM + PMO Lead"]
-    C --> D["Close risk"]
-    D --> E["Capture closure fields:<br/>root_cause, what_worked,<br/>resolution_category"]
-    E --> F["Status → Closed<br/>(read-only)"]
-    F --> G["Learnings available to<br/>suggestion engine (Phase 8)"]
+    A["Risk owner proposes<br/>resolution (residual acceptable)"] --> B["Status → Pending Resolution"]
+    B --> C["Notify PM"]
+    C --> D{"PM review"}
+    D -->|"Accept"| E["Status → Resolved"]
+    D -->|"Reject (+ reason)"| R["Status → In Progress<br/>(owner notified)"]
+    E --> F["Close risk (PMO Lead)"]
+    F --> G["Capture closure fields:<br/>root_cause, what_worked,<br/>resolution_category"]
+    G --> H["Status → Closed<br/>(read-only)"]
+    H --> I["Learnings available to<br/>suggestion engine (Phase 8)"]
 ```
 
 `Closed` is **terminal and read-only** — the audit log preserves the full
@@ -337,19 +341,22 @@ stateDiagram-v2
     Open --> InProgress : acknowledge / working
     Open --> Escalated : SLA breach
     Open --> Event : materializes
-    Open --> Resolved : resolve
+    Open --> PendingResolution : resolve (owner)
     InProgress --> Escalated : SLA breach
     InProgress --> Event : materializes
-    InProgress --> Resolved : resolve
+    InProgress --> PendingResolution : resolve (owner)
     Escalated --> InProgress : de-escalate (PM / PMO Lead)
     Escalated --> Event : materializes
-    Escalated --> Resolved : resolve
-    Event --> Resolved : resolve
-    Resolved --> Closed : close
+    Escalated --> PendingResolution : resolve (owner)
+    Event --> PendingResolution : resolve (owner)
+    PendingResolution --> Resolved : accept (PM / PMO Lead)
+    PendingResolution --> InProgress : reject (PM / PMO Lead)
+    Resolved --> Closed : close (PMO Lead)
     Closed --> [*]
     Dismissed --> [*]
 
     state "In Progress" as InProgress
+    state "Pending Resolution" as PendingResolution
 ```
 
 | Status | Meaning |
@@ -359,7 +366,8 @@ stateDiagram-v2
 | In Progress | Owner acknowledged / working. |
 | Escalated | SLA breached (no activity before deadline). |
 | Event | Risk materialised (displays as "Materialized"). |
-| Resolved | Issue resolved; residual acceptable. |
+| Pending Resolution | Risk Owner proposed a resolution; awaits the Project Manager's accept/reject. |
+| Resolved | Project Manager accepted the resolution; residual acceptable. |
 | Closed | Formally closed with root cause / lessons learned; read-only. |
 | Dismissed | A Suggested risk the PM rejected (never reappears for that project). |
 
@@ -421,7 +429,9 @@ sequenceDiagram
     end
 
     OW->>SYS: Resolve (residual acceptable)
-    SYS->>SYS: Status = Resolved, notify PM + PMO Lead
+    SYS->>SYS: Status = Pending Resolution, notify PM
+    PM->>SYS: Accept resolution
+    SYS->>SYS: Status = Resolved
     PM->>SYS: Close (root cause + lessons learned)
     SYS->>SYS: Status = Closed (read-only); learnings → corpus
 ```

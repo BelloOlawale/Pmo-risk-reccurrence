@@ -359,3 +359,49 @@ def can_access_issue(principal: Principal, issue: Any) -> bool:
         principal.has_role(Role.PROJECT_MANAGER)
         and issue.project.pm_user_id == principal.user_id
     )
+
+
+# ---------------------------------------------------------------------------
+# Read-only "history" access
+#
+# Closed risk registers are shared institutional memory: every Project Manager
+# may read them (and the imported historical corpus, which has no assigned PM)
+# regardless of who closed them. These helpers extend *read* access only; the
+# `can_access_*` guards still gate every mutation, so a PM cannot edit another
+# PM's register just because they can read its history.
+
+
+def _has_knowledge_role(principal: Principal) -> bool:
+    """True for any role that may browse risk history (PM / PMO Lead / Admin)."""
+    return principal.is_pmo_or_admin or principal.has_role(Role.PROJECT_MANAGER)
+
+
+def can_view_project(principal: Principal, project: Any) -> bool:
+    """Read-only access: own projects as usual, plus any Closed register."""
+    if can_access_project(principal, project):
+        return True
+    return project.status == "Closed" and _has_knowledge_role(principal)
+
+
+def can_view_risk(principal: Principal, risk: Any) -> bool:
+    """Read-only access mirroring :func:`can_view_project` for a risk."""
+    if can_access_risk(principal, risk):
+        return True
+    project = risk.project
+    return (
+        project is not None
+        and project.status == "Closed"
+        and _has_knowledge_role(principal)
+    )
+
+
+def can_view_issue(principal: Principal, issue: Any) -> bool:
+    """Read-only access mirroring :func:`can_view_project` for an Issue."""
+    if can_access_issue(principal, issue):
+        return True
+    project = issue.project
+    return (
+        project is not None
+        and project.status == "Closed"
+        and _has_knowledge_role(principal)
+    )

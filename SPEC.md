@@ -122,7 +122,7 @@ Risk Rating is computed from Likelihood × Impact via the standard 3×3 matrix:
 ## 5. Status Lifecycle
 
 ```
-Suggested ──► Open ──► In Progress ──► Escalated ──► Event ──► Resolved ──► Closed
+Suggested ──► Open ──► In Progress ──► Escalated ──► Event ──► Pending Resolution ──► Resolved ──► Closed
 ```
 
 | Status | Meaning |
@@ -132,7 +132,8 @@ Suggested ──► Open ──► In Progress ──► Escalated ──► Eve
 | In Progress | Owner acknowledged / working |
 | Escalated | SLA breached (no activity before deadline) |
 | Event | Risk materialised (displays as "Materialized"); set **automatically** when the Risk End Date passes with the risk still unresolved, or **deliberately** when the owner/PM changes the status to Event |
-| Resolved | Issue resolved; residual acceptable |
+| Pending Resolution | The Risk Owner proposed a resolution; the Project Manager reviews it |
+| Resolved | The Project Manager accepted the proposed resolution; residual acceptable |
 | Closed | Formally closed with root cause / lessons learned; read-only |
 
 Special cases:
@@ -145,8 +146,11 @@ These are three distinct concepts:
 
 - **Acknowledged** — the owner has responded; the SLA acknowledgement
   requirement is permanently satisfied. The risk stays active.
-- **Resolved** — the owner dealt with the risk before the Risk End Date;
-  status `Resolved`. No materialization, no Issue.
+- **Pending Resolution** — the owner proposed a resolution; status `Pending
+  Resolution`, awaiting the Project Manager's accept/reject. No materialization,
+  no Issue.
+- **Resolved** — the Project Manager accepted the owner's resolution; status
+  `Resolved`. No materialization, no Issue.
 - **Materialized** — the risk was **not** resolved by its Risk End Date, or the
   owner/PM deliberately marked it as having occurred; status → `Event`
   (displays as "Materialized"), one Issue is auto-created.
@@ -329,7 +333,7 @@ treatment workflow (residual risk scoring, management sign-off).
 2. Python/FastAPI + React/TS + PostgreSQL (+ pgvector) + Azure.
 3. Celery + Redis + Beat for all background work (scale now, not APScheduler).
 4. 3-level scoring (Low/Med/High); no Critical flag, no 1–25, no 5 dimensions.
-5. Status: Suggested → Open → In Progress → Escalated → Event → Resolved → Closed.
+5. Status: Suggested → Open → In Progress → Escalated → Event → Pending Resolution → Resolved → Closed.
 6. Escalation = SLA breach only.
 7. Light treatment (Response Strategy + Response Plan), no residual scoring.
 8. "Recurrence" = hybrid (exact + keyword + semantic) suggestion engine + LLM.

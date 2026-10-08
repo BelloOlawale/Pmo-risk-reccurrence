@@ -132,9 +132,11 @@ export function ProjectDashboardPage() {
           >
             {exporting ? 'Exporting…' : 'Export to Excel'}
           </button>
-          <button className="btn btn-primary" onClick={() => setAdding(true)}>
-            + Add New
-          </button>
+          {canManageRisks() ? (
+            <button className="btn btn-primary" onClick={() => setAdding(true)}>
+              + Add New
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -146,7 +148,9 @@ export function ProjectDashboardPage() {
 
       {isClosed ? (
         <div className="closed-banner">
-          This risk register is closed. Add a new risk to reopen it in Active Risk.
+          {canManageRisks()
+            ? 'This risk register is closed. Add a new risk to reopen it in Active Risk.'
+            : 'This closed register is part of shared risk history and is read-only.'}
         </div>
       ) : null}
 
@@ -210,7 +214,7 @@ export function ProjectDashboardPage() {
         </>
       )}
 
-      {adding ? (
+      {adding && canManageRisks() ? (
         <AddRiskModal
           projects={project ? [project] : []}
           initialProjectId={id}

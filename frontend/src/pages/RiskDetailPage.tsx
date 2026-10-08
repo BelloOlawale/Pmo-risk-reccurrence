@@ -301,7 +301,22 @@ export function RiskDetailPage() {
     setRejectOpen(false);
   }
 
-  const readOnly = risk?.status === 'Closed' || risk?.status === 'Dismissed';
+  // A closed register is shared, read-only history for anyone who does not
+  // manage it (its own PM, or a PMO Lead / System Admin).
+  const isPmoOrAdmin = (me?.roles ?? []).some(
+    (role) => role === 'PMO Lead' || role === 'System Admin',
+  );
+  const isProjectPm =
+    (me?.roles ?? []).includes('Project Manager') &&
+    me?.user_id !== null &&
+    me?.user_id !== undefined &&
+    project?.pm_user_id === me.user_id;
+  const historyReadOnly = project?.status === 'Closed' && !isPmoOrAdmin && !isProjectPm;
+
+  const readOnly =
+    risk?.status === 'Closed' ||
+    risk?.status === 'Dismissed' ||
+    historyReadOnly;
   const transitions = risk ? allowedTransitions(risk.status) : [];
   // PMO Lead has the final authority to close a risk; System Admin is the app
   // superuser. Everyone else sees the lifecycle without the Closed transition
@@ -314,6 +329,9 @@ export function RiskDetailPage() {
     : transitions.filter((t) => t !== 'Closed');
   const awaitingPmoClosure =
     risk?.status === 'Resolved' && statusOptions.length === 0;
+  // While a resolution is pending review, accepting/rejecting is the only
+  // decision available — the generic status dropdown must not bypass it.
+  const pendingResolution = risk?.status === 'Pending Resolution';
 
   return (
     <div>
@@ -350,7 +368,7 @@ export function RiskDetailPage() {
       {risk ? (
         <>
           <div className="btn-group mb-20">
-            {risk.owner_user_id !== null && !risk.sla_acknowledged ? (
+            {risk.owner_user_id !== null && !risk.sla_acknowledged && !historyReadOnly ? (
               <button
                 className="btn btn-primary"
                 onClick={() =>
@@ -360,7 +378,7 @@ export function RiskDetailPage() {
                 Acknowledge
               </button>
             ) : null}
-            {risk.status === 'Resolved' && canReviewResolution ? (
+            {risk.status === 'Pending Resolution' && canReviewResolution ? (
               <>
                 <button className="btn btn-primary" onClick={() => void acceptResolution()}>
                   Accept resolution
@@ -376,6 +394,11 @@ export function RiskDetailPage() {
                   Reject resolution
                 </button>
               </>
+            ) : null}
+            {risk.status === 'Pending Resolution' && !canReviewResolution ? (
+              <span className="muted">
+                Resolution submitted — awaiting Project Manager review.
+              </span>
             ) : null}
             {risk.status === 'Suggested' ? (
               <>
@@ -634,7 +657,7 @@ export function RiskDetailPage() {
                 </SectionCard>
               ) : null}
 
-              {statusOptions.length > 0 || awaitingPmoClosure ? (
+              {!pendingResolution && !historyReadOnly && (statusOptions.length > 0 || awaitingPmoClosure) ? (
                 <SectionCard title="Change status">
                   {statusOptions.length > 0 ? (
                     <>

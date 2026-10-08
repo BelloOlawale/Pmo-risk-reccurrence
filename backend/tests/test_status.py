@@ -20,17 +20,19 @@ class TestTransitions:
             (RiskStatus.OPEN, RiskStatus.IN_PROGRESS),
             (RiskStatus.OPEN, RiskStatus.ESCALATED),
             (RiskStatus.OPEN, RiskStatus.EVENT),
-            (RiskStatus.OPEN, RiskStatus.RESOLVED),
+            (RiskStatus.OPEN, RiskStatus.PENDING_RESOLUTION),
             (RiskStatus.IN_PROGRESS, RiskStatus.ESCALATED),
             (RiskStatus.IN_PROGRESS, RiskStatus.EVENT),
-            (RiskStatus.IN_PROGRESS, RiskStatus.RESOLVED),
+            (RiskStatus.IN_PROGRESS, RiskStatus.PENDING_RESOLUTION),
             (RiskStatus.ESCALATED, RiskStatus.IN_PROGRESS),
             (RiskStatus.ESCALATED, RiskStatus.EVENT),
-            (RiskStatus.ESCALATED, RiskStatus.RESOLVED),
-            (RiskStatus.EVENT, RiskStatus.RESOLVED),
+            (RiskStatus.ESCALATED, RiskStatus.PENDING_RESOLUTION),
+            (RiskStatus.EVENT, RiskStatus.PENDING_RESOLUTION),
+            # PM accepts the owner's proposed resolution.
+            (RiskStatus.PENDING_RESOLUTION, RiskStatus.RESOLVED),
+            # PM rejects the owner's proposed resolution.
+            (RiskStatus.PENDING_RESOLUTION, RiskStatus.IN_PROGRESS),
             (RiskStatus.RESOLVED, RiskStatus.CLOSED),
-            # PM sends a rejected resolution back to the owner's In Progress.
-            (RiskStatus.RESOLVED, RiskStatus.IN_PROGRESS),
         ],
     )
     def test_valid(self, current: RiskStatus, target: RiskStatus) -> None:
@@ -46,10 +48,16 @@ class TestTransitions:
             (RiskStatus.CLOSED, RiskStatus.IN_PROGRESS),
             # Can't jump backwards arbitrarily.
             (RiskStatus.RESOLVED, RiskStatus.OPEN),
+            (RiskStatus.RESOLVED, RiskStatus.IN_PROGRESS),
+            (RiskStatus.RESOLVED, RiskStatus.PENDING_RESOLUTION),
             (RiskStatus.IN_PROGRESS, RiskStatus.OPEN),
             (RiskStatus.EVENT, RiskStatus.OPEN),
             (RiskStatus.EVENT, RiskStatus.ESCALATED),
             (RiskStatus.ESCALATED, RiskStatus.OPEN),
+            # A pending resolution only becomes Resolved or In Progress.
+            (RiskStatus.PENDING_RESOLUTION, RiskStatus.OPEN),
+            (RiskStatus.PENDING_RESOLUTION, RiskStatus.CLOSED),
+            (RiskStatus.PENDING_RESOLUTION, RiskStatus.EVENT),
             # Suggested can only become Open or Dismissed.
             (RiskStatus.SUGGESTED, RiskStatus.IN_PROGRESS),
             (RiskStatus.SUGGESTED, RiskStatus.RESOLVED),
@@ -80,6 +88,7 @@ class TestTerminal:
             RiskStatus.IN_PROGRESS,
             RiskStatus.ESCALATED,
             RiskStatus.EVENT,
+            RiskStatus.PENDING_RESOLUTION,
             RiskStatus.RESOLVED,
         ],
     )

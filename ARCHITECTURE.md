@@ -272,6 +272,15 @@ can_access_risk(principal, risk):
     return PM and risk.project.pm_user_id == principal.user_id # project PM
 ```
 
+**Shared risk history (read-only).** `can_view_project` / `can_view_risk` /
+`can_view_issue` extend *read* access for closed registers only: any Project
+Manager (plus PMO Lead / Admin) may browse every closed register and the
+historical risks embedded in them — including the imported historical corpus,
+which has no assigned PM — regardless of who closed them. Mutations keep using
+`can_access_*`, so a PM cannot edit another PM's register just because its
+history is readable. `GET /api/projects?scope=history` returns exactly those
+closed registers; active registers stay PM-scoped.
+
 The API layer enforces these; the pure functions are unit-tested independently
 of Entra.
 
@@ -282,7 +291,9 @@ of Entra.
 - **Scoring** — `risk_rating = f(likelihood, impact)` via the 3×3 matrix (no
   Critical band, no 1–25, no 5 dimensions).
 - **Status lifecycle** — `Suggested → Open → In Progress → Escalated → Event →
-  Resolved → Closed`, plus `Dismissed` (terminal). Enforced transitions; every
+  Pending Resolution → Resolved → Closed`, plus `Dismissed` (terminal). A Risk
+  Owner's resolution enters `Pending Resolution`; the Project Manager accepts
+  (`→ Resolved`) or rejects (`→ In Progress`). Enforced transitions; every
   mutation is audit-logged.
 - **SLA** — response windows (High 24h / Medium 48h / Low 120h), warning
   windows (4h / 12h / 24h). Deadline anchored at `risk_start_date` (midnight in

@@ -191,7 +191,14 @@ def test_close_allowed_after_all_risks_resolved(client: TestClient) -> None:
     assert (
         client.patch(
             f"/api/risks/{risk['id']}",
-            json={"status": "Resolved"},
+            json={"status": "Pending Resolution"},
+            headers=_headers(9, "Project Manager"),
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            f"/api/risks/{risk['id']}/resolution/accept",
             headers=_headers(9, "Project Manager"),
         ).status_code
         == 200
@@ -226,7 +233,14 @@ def test_risk_status_does_not_change_project_status(client: TestClient) -> None:
         assert (
             client.patch(
                 f"/api/risks/{risk['id']}",
-                json={"status": "Resolved"},
+                json={"status": "Pending Resolution"},
+                headers=_headers(6, "Project Manager"),
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                f"/api/risks/{risk['id']}/resolution/accept",
                 headers=_headers(6, "Project Manager"),
             ).status_code
             == 200

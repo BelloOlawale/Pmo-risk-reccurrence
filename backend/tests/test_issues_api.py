@@ -403,12 +403,12 @@ class TestManualEventMaterialization:
         project = _create_project(client, user_id=7, name="Resolve only register")
         risk = _open_risk(client, project, user_id=7)
 
-        # Resolving does not create an Issue.
+        # Proposing a resolution does not create an Issue.
         resp = client.patch(
             f"/api/risks/{risk['id']}",
-            json={"status": "Resolved", "actor_user_id": 7},
+            json={"status": "Pending Resolution", "actor_user_id": 7},
             headers=_headers(7, "Project Manager"),
         )
         assert resp.status_code == 200
-        assert resp.json()["status"] == "Resolved"
+        assert resp.json()["status"] == "Pending Resolution"
         assert self._issue_for(db_session, risk["id"]) is None

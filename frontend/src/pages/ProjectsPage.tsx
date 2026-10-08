@@ -9,11 +9,15 @@ import { useApi } from '../hooks/useApi';
 import { formatDate } from '../utils/format';
 
 export function ProjectsPage() {
-  const { data, error, loading } = useApi(() => api.get<Project[]>('/api/projects'));
+  // scope=history is the shared view: every PM sees all closed registers
+  // (including the imported historical corpus), not only the ones they own.
+  const { data, error, loading } = useApi(() =>
+    api.get<Project[]>('/api/projects?scope=history'),
+  );
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const users = useUsers();
 
-  // Risk History shows only closed registers — completed/historical work.
+  // Defensive client-side filter; the API already restricts this to Closed.
   const projects = useMemo(
     () => (data ?? []).filter((p) => p.status === 'Closed'),
     [data],
@@ -29,7 +33,8 @@ export function ProjectsPage() {
         <div>
           <h1>Risk History</h1>
           <div className="subtitle">
-            Closed risk registers — open a register to inspect its historical risks
+            Every closed risk register in the system — open one to inspect its historical
+            risks
           </div>
         </div>
         <Link to="/create-risk" className="btn btn-primary">

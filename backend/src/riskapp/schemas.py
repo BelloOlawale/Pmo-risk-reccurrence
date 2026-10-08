@@ -296,8 +296,8 @@ class IssueRead(BaseModel):
 
     ``status`` is the Issue's *effective* status: Issues are born ``Open`` when
     a risk materializes, and resolution/closure of the materialized event is
-    tracked on the originating risk (``Event -> Resolved -> Closed`` by the PMO
-    Lead), so the API reports ``Resolved``/``Closed`` once the source risk
+    tracked on the originating risk (``Event -> Pending Resolution -> Resolved ->
+    Closed``), so the API reports ``Resolved``/``Closed`` once the source risk
     reaches those statuses.
     """
 

@@ -13,6 +13,7 @@ class RiskStatus(str, Enum):  # noqa: UP042 — str+Enum is intentional (DB-frie
     IN_PROGRESS = "In Progress"
     ESCALATED = "Escalated"
     EVENT = "Event"
+    PENDING_RESOLUTION = "Pending Resolution"
     RESOLVED = "Resolved"
     CLOSED = "Closed"
     DISMISSED = "Dismissed"
@@ -38,25 +39,30 @@ _TRANSITIONS: dict[RiskStatus, frozenset[RiskStatus]] = {
             RiskStatus.IN_PROGRESS,
             RiskStatus.ESCALATED,
             RiskStatus.EVENT,
-            RiskStatus.RESOLVED,
+            RiskStatus.PENDING_RESOLUTION,
         }
     ),
     RiskStatus.IN_PROGRESS: frozenset(
         {
             RiskStatus.ESCALATED,
             RiskStatus.EVENT,
-            RiskStatus.RESOLVED,
+            RiskStatus.PENDING_RESOLUTION,
         }
     ),
     RiskStatus.ESCALATED: frozenset(
         {
             RiskStatus.IN_PROGRESS,
             RiskStatus.EVENT,
-            RiskStatus.RESOLVED,
+            RiskStatus.PENDING_RESOLUTION,
         }
     ),
-    RiskStatus.EVENT: frozenset({RiskStatus.RESOLVED}),
-    RiskStatus.RESOLVED: frozenset({RiskStatus.CLOSED, RiskStatus.IN_PROGRESS}),
+    RiskStatus.EVENT: frozenset({RiskStatus.PENDING_RESOLUTION}),
+    # A proposed resolution only becomes Resolved when the Project Manager
+    # accepts it, or goes back to In Progress when they reject it.
+    RiskStatus.PENDING_RESOLUTION: frozenset(
+        {RiskStatus.RESOLVED, RiskStatus.IN_PROGRESS}
+    ),
+    RiskStatus.RESOLVED: frozenset({RiskStatus.CLOSED}),
     RiskStatus.CLOSED: frozenset(),
     RiskStatus.DISMISSED: frozenset(),
 }

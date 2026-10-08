@@ -18,13 +18,15 @@ from riskapp.auth import (
     PrincipalDep,
     Role,
     authenticate_local,
-    can_access_issue,
     can_access_project,
     can_access_risk,
     can_close_project,
     can_close_risk,
     can_delete_risk,
     can_review_resolution,
+    can_view_issue,
+    can_view_project,
+    can_view_risk,
     create_local_token,
     get_principal,
     require_roles,
@@ -290,13 +292,17 @@ def external_acknowledge(token: str, db: DbDep) -> schemas.ExternalAcknowledgeRe
     response_model=schemas.ExternalAcknowledgeRead,
 )
 def external_resolve(token: str, db: DbDep) -> schemas.ExternalAcknowledgeRead:
-    """Public: Risk Owner marks the assigned risk Resolved (awaits PM review).
+    """Public: Risk Owner proposes a resolution (status -> ``Pending Resolution``).
 
-    The owner may only move the risk into ``Resolved`` — never ``Closed``. The
-    Project Manager is notified to review the proposed resolution.
+    The owner may only move the risk into ``Pending Resolution`` — never
+    ``Resolved`` or ``Closed``. The Project Manager is notified to review the
+    proposed resolution and accept or reject it.
     """
     risk = _resolve_external_risk(db, token)
-    if risk.status == RiskStatus.RESOLVED.value:
+    if risk.status in (
+        RiskStatus.PENDING_RESOLUTION.value,
+        RiskStatus.RESOLVED.value,
+    ):
         return _external_ack_read(db, risk)  # idempotent re-submission
     try:
         risk = resolve_risk(db, risk, actor_user_id=risk.owner_user_id)
@@ -307,8 +313,8 @@ def external_resolve(token: str, db: DbDep) -> schemas.ExternalAcknowledgeRead:
         event=EVENT_RESOLVED,
         title=f"Resolution submitted: {risk.risk_code}",
         body=(
-            f"Risk {risk.risk_code} was marked Resolved by its Risk Owner and "
-            "now awaits your review (accept or reject the resolution)."
+            f"Risk {risk.risk_code} was marked Pending Resolution by its Risk Owner "
+            "and now awaits your review (accept or reject the resolution)."
         ),
         risk=risk,
     )
@@ -565,16 +571,29 @@ def add_project(
 
 @app.get("/api/projects", response_model=list[schemas.ProjectRead])
 def list_projects(
-    principal: PrincipalDep, db: DbDep, status: str | None = None
+    principal: PrincipalDep,
+    db: DbDep,
+    status: str | None = None,
+    scope: str | None = None,
 ) -> list[schemas.ProjectRead]:
     stmt = select(models.Project).options(
         selectinload(models.Project.department),
         selectinload(models.Project.project_type),
         selectinload(models.Project.pm_user),
     )
-    if status is not None:
+    # ``scope=history`` is the shared, read-only Risk History view: every Project
+    # Manager sees all Closed registers (imported historical ones included),
+    # not just the registers they own. Active registers stay PM-scoped.
+    history = scope == "history"
+    if history and not (
+        principal.is_pmo_or_admin or principal.has_role(Role.PROJECT_MANAGER)
+    ):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if history:
+        stmt = stmt.where(models.Project.status == "Closed")
+    elif status is not None:
         stmt = stmt.where(models.Project.status == status)
-    if not principal.is_pmo_or_admin:
+    if not principal.is_pmo_or_admin and not history:
         stmt = stmt.where(models.Project.pm_user_id == principal.user_id)
     projects = db.scalars(stmt.order_by(models.Project.id)).all()
 
@@ -629,7 +648,7 @@ def read_project(
     project = get_project(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    if not can_access_project(principal, project):
+    if not can_view_project(principal, project):
         raise HTTPException(status_code=403, detail="Forbidden")
     return _project_read(db, project)
 
@@ -694,7 +713,7 @@ def read_risk(risk_id: int, principal: PrincipalDep, db: DbDep) -> schemas.RiskR
     risk = get_risk(db, risk_id)
     if risk is None:
         raise HTTPException(status_code=404, detail="Risk not found")
-    if not can_access_risk(principal, risk):
+    if not can_view_risk(principal, risk):
         raise HTTPException(status_code=403, detail="Forbidden")
     return schemas.RiskRead.model_validate(risk)
 
@@ -748,7 +767,7 @@ def list_project_issues(
     project = get_project(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    if not can_access_project(principal, project):
+    if not can_view_project(principal, project):
         raise HTTPException(status_code=403, detail="Forbidden")
     issues = db.scalars(
         _issue_stmt()
@@ -765,7 +784,7 @@ def read_issue(issue_id: int, principal: PrincipalDep, db: DbDep) -> schemas.Iss
     )
     if issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
-    if not can_access_issue(principal, issue):
+    if not can_view_issue(principal, issue):
         raise HTTPException(status_code=403, detail="Forbidden")
     return _serialize_issue(issue)
 
@@ -776,7 +795,7 @@ def read_risk_issue(risk_id: int, principal: PrincipalDep, db: DbDep) -> schemas
     risk = get_risk(db, risk_id)
     if risk is None:
         raise HTTPException(status_code=404, detail="Risk not found")
-    if not can_access_risk(principal, risk):
+    if not can_view_risk(principal, risk):
         raise HTTPException(status_code=403, detail="Forbidden")
     issue = db.scalar(
         _issue_stmt().where(models.Issue.source_risk_id == risk_id)
@@ -806,10 +825,10 @@ def patch_risk(
                 "finally close a risk."
             ),
         )
-    # Sending a Resolved risk back to In Progress is the PM's review decision;
-    # it is not a generic status edit available to the Risk Owner.
+    # Sending a Pending Resolution risk back to In Progress is the PM's review
+    # decision; it is not a generic status edit available to the Risk Owner.
     if (
-        risk.status == RiskStatus.RESOLVED.value
+        risk.status == RiskStatus.PENDING_RESOLUTION.value
         and payload.status == RiskStatus.IN_PROGRESS.value
         and not can_review_resolution(principal, risk)
     ):
@@ -878,7 +897,7 @@ def acknowledge(
 def accept_risk_resolution(
     risk_id: int, principal: PrincipalDep, db: DbDep
 ) -> schemas.RiskRead:
-    """Project Manager accepts the Risk Owner's resolution (risk stays Resolved)."""
+    """Project Manager accepts the resolution (Pending Resolution -> Resolved)."""
     risk = get_risk(db, risk_id)
     if risk is None:
         raise HTTPException(status_code=404, detail="Risk not found")
@@ -905,7 +924,7 @@ def reject_risk_resolution(
     principal: PrincipalDep,
     db: DbDep,
 ) -> schemas.RiskRead:
-    """Project Manager rejects the resolution: risk returns to In Progress.
+    """Project Manager rejects the resolution (Pending Resolution -> In Progress).
 
     A reason is mandatory; the Risk Owner is emailed it together with their
     persistent link so they can continue working the risk.
@@ -1019,7 +1038,7 @@ def list_project_risks(
     project = get_project(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    if not can_access_project(principal, project):
+    if not can_view_project(principal, project):
         raise HTTPException(status_code=403, detail="Forbidden")
     risks = db.scalars(
         select(models.Risk)
@@ -1042,7 +1061,7 @@ def export_project_risks(
     project = get_project(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    if not can_access_project(principal, project):
+    if not can_view_project(principal, project):
         raise HTTPException(status_code=403, detail="Forbidden")
     risks = list(
         db.scalars(

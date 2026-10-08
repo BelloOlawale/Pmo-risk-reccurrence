@@ -408,6 +408,6 @@ class TestTransitionRiskMaterializes:
         db_session.refresh(risk)
 
         transition_risk(db_session, risk, RiskStatus.IN_PROGRESS.value)
-        transition_risk(db_session, risk, RiskStatus.RESOLVED.value)
+        transition_risk(db_session, risk, RiskStatus.PENDING_RESOLUTION.value)
 
         assert _issues(db_session) == []

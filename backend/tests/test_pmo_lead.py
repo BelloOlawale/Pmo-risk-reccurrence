@@ -45,13 +45,20 @@ def _resolved_risk(client: TestClient, project: dict, *, pm_user_id: int) -> dic
         headers=_headers(pm_user_id, "Project Manager"),
     ).json()
     assert risk["status"] == "Open"
-    resp = client.patch(
+    # The owner-facing path is a two-step review: propose (Pending Resolution),
+    # then the PM accepts it (Resolved).
+    pending = client.patch(
         f"/api/risks/{risk['id']}",
-        json={"status": "Resolved"},
+        json={"status": "Pending Resolution"},
+        headers=_headers(pm_user_id, "Project Manager"),
+    )
+    assert pending.status_code == 200
+    resp = client.post(
+        f"/api/risks/{risk['id']}/resolution/accept",
         headers=_headers(pm_user_id, "Project Manager"),
     )
     assert resp.status_code == 200
-    return risk
+    return resp.json()
 
 
 def test_me_returns_role(client: TestClient) -> None:

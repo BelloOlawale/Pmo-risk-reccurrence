@@ -3,10 +3,11 @@
 
 export const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   Suggested: ['Open', 'Dismissed'],
-  Open: ['In Progress', 'Escalated', 'Event', 'Resolved'],
-  'In Progress': ['Escalated', 'Event', 'Resolved'],
-  Escalated: ['In Progress', 'Event', 'Resolved'],
-  Event: ['Resolved'],
+  Open: ['In Progress', 'Escalated', 'Event', 'Pending Resolution'],
+  'In Progress': ['Escalated', 'Event', 'Pending Resolution'],
+  Escalated: ['In Progress', 'Event', 'Pending Resolution'],
+  Event: ['Pending Resolution'],
+  'Pending Resolution': ['Resolved', 'In Progress'],
   Resolved: ['Closed'],
   Closed: [],
   Dismissed: [],
@@ -23,6 +24,7 @@ export const ACTIVE_STATUSES = new Set([
   'In Progress',
   'Escalated',
   'Event',
+  'Pending Resolution',
 ]);
 
 export function isActiveStatus(status: string): boolean {

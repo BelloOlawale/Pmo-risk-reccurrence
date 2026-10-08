@@ -125,7 +125,7 @@ def test_acknowledged_but_unresolved_past_deadline_becomes_event(
     assert [i["source_risk_id"] for i in listed] == [row.id]
 
 
-def test_acknowledged_and_resolved_before_deadline_does_not_escalate_or_materialize(
+def test_acknowledged_and_pending_resolution_does_not_escalate_or_materialize(
     client: TestClient, db_session: Session
 ) -> None:
     _, risk = _project_and_risk(client)
@@ -133,7 +133,7 @@ def test_acknowledged_and_resolved_before_deadline_does_not_escalate_or_material
     client.post(f"/api/risks/{risk['id']}/acknowledge")
     assert (
         client.patch(
-            f"/api/risks/{risk['id']}", json={"status": "Resolved"}
+            f"/api/risks/{risk['id']}", json={"status": "Pending Resolution"}
         ).status_code
         == 200
     )

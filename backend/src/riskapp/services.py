@@ -154,8 +154,8 @@ def get_project(db: Session, project_id: int) -> models.Project | None:
 
 
 # Risk statuses that count as "resolved/closed" for the purpose of closing a
-# risk register. Suggested / Open / In Progress / Escalated / Event risks are
-# still outstanding and block closure.
+# risk register. Suggested / Open / In Progress / Escalated / Event /
+# Pending Resolution risks are still outstanding and block closure.
 _CLOSED_ELIGIBLE_STATUSES = frozenset(
     {
         RiskStatus.RESOLVED.value,
@@ -523,15 +523,16 @@ def de_escalate_risk(
 def resolve_risk(
     db: Session, risk: models.Risk, *, actor_user_id: int | None = None
 ) -> models.Risk:
-    """Risk Owner proposes a resolution: ``In Progress`` -> ``Resolved``.
+    """Risk Owner proposes a resolution: ``Open``/``In Progress`` -> ``Pending Resolution``.
 
-    The owner may resolve a live risk (Open / In Progress / Escalated). Once
-    Resolved the Project Manager reviews it; the owner can never close it.
+    The owner may propose a resolution for a live risk (Open / In Progress /
+    Escalated / Event). The proposal is not final: it enters ``Pending
+    Resolution`` until the Project Manager accepts or rejects it. The owner can
+    never close a risk.
     """
-    target = ensure_transition(risk.status, RiskStatus.RESOLVED.value)
+    target = ensure_transition(risk.status, RiskStatus.PENDING_RESOLUTION.value)
     old_status = risk.status
     risk.status = target.value
-    risk.resolved_date = dt.datetime.now(dt.UTC).replace(tzinfo=None)
     record_change(
         db,
         risk,
@@ -549,16 +550,20 @@ def resolve_risk(
 def accept_resolution(
     db: Session, risk: models.Risk, *, actor_user_id: int | None = None
 ) -> models.Risk:
-    """Project Manager accepts the owner's resolution; the risk stays Resolved."""
-    if risk.status != RiskStatus.RESOLVED.value:
-        raise ValueError("Only a Resolved risk has a resolution to accept.")
+    """Project Manager accepts the owner's resolution: ``Pending Resolution`` -> ``Resolved``."""
+    if risk.status != RiskStatus.PENDING_RESOLUTION.value:
+        raise ValueError("Only a risk pending resolution has a resolution to accept.")
+    target = ensure_transition(risk.status, RiskStatus.RESOLVED.value)
+    old_status = risk.status
+    risk.status = target.value
+    risk.resolved_date = dt.datetime.now(dt.UTC).replace(tzinfo=None)
     record_change(
         db,
         risk,
         action="resolution_accepted",
         field="status",
-        old_value=RiskStatus.RESOLVED.value,
-        new_value=RiskStatus.RESOLVED.value,
+        old_value=old_status,
+        new_value=target.value,
         actor_user_id=actor_user_id,
     )
     db.commit()
@@ -569,7 +574,7 @@ def accept_resolution(
 def reject_resolution(
     db: Session, risk: models.Risk, *, reason: str, actor_user_id: int | None = None
 ) -> models.Risk:
-    """Project Manager rejects the owner's resolution: ``Resolved`` -> ``In Progress``.
+    """Project Manager rejects the owner's resolution: ``Pending Resolution`` -> ``In Progress``.
 
     A reason is mandatory and recorded on the audit trail so the Risk Owner can
     see why the resolution was sent back.
@@ -577,8 +582,8 @@ def reject_resolution(
     cleaned = (reason or "").strip()
     if not cleaned:
         raise ValueError("A reason is required to reject a resolution.")
-    if risk.status != RiskStatus.RESOLVED.value:
-        raise ValueError("Only a Resolved risk can be rejected.")
+    if risk.status != RiskStatus.PENDING_RESOLUTION.value:
+        raise ValueError("Only a risk pending resolution can be rejected.")
     target = ensure_transition(risk.status, RiskStatus.IN_PROGRESS.value)
     old_status = risk.status
     risk.status = target.value

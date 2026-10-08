@@ -99,19 +99,20 @@ class TestOwnerResolve:
         assert client.post(f"/api/external/acknowledge/{token}").status_code == 200
         resolved = client.post(f"/api/external/acknowledge/{token}/resolve")
         assert resolved.status_code == 200, resolved.text
-        assert resolved.json()["status"] == "Resolved"
+        # The owner's proposal is not final: it awaits the Project Manager.
+        assert resolved.json()["status"] == "Pending Resolution"
 
         # The same persistent link now shows the current state.
         view = client.get(f"/api/external/acknowledge/{token}")
         assert view.status_code == 200
-        assert view.json()["status"] == "Resolved"
+        assert view.json()["status"] == "Pending Resolution"
 
     def test_resolve_is_idempotent(self, client: TestClient, db_session: Session) -> None:
         _pm, _p, _r, _o, token = self._setup(client, db_session)
         assert client.post(f"/api/external/acknowledge/{token}/resolve").status_code == 200
         again = client.post(f"/api/external/acknowledge/{token}/resolve")
         assert again.status_code == 200
-        assert again.json()["status"] == "Resolved"
+        assert again.json()["status"] == "Pending Resolution"
 
     def test_owner_has_no_close_action(self, client: TestClient, db_session: Session) -> None:
         _pm, _p, _r, _o, token = self._setup(client, db_session)
@@ -150,7 +151,7 @@ class TestPmReview:
         client.post(f"/api/external/acknowledge/{token}/resolve")
         return pm, project, risk, owner, token
 
-    def test_pm_accept_keeps_resolved(self, client: TestClient, db_session: Session) -> None:
+    def test_pm_accept_marks_resolved(self, client: TestClient, db_session: Session) -> None:
         pm, _p, risk, _o, _t = self._resolved(client, db_session)
         resp = client.post(
             f"/api/risks/{risk['id']}/resolution/accept",
@@ -160,6 +161,48 @@ class TestPmReview:
         assert resp.json()["status"] == "Resolved"
         history = client.get(f"/api/risks/{risk['id']}/history").json()
         assert any(h["action"] == "resolution_accepted" for h in history)
+
+    def test_review_is_no_longer_possible_after_accept(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        """Once accepted the risk is Resolved, so accept/reject stop applying."""
+        pm, _p, risk, _o, _t = self._resolved(client, db_session)
+        client.post(
+            f"/api/risks/{risk['id']}/resolution/accept",
+            headers=_headers(pm.id, "Project Manager"),
+        )
+
+        # Accepting again is rejected: there is nothing left to review.
+        again = client.post(
+            f"/api/risks/{risk['id']}/resolution/accept",
+            headers=_headers(pm.id, "Project Manager"),
+        )
+        assert again.status_code == 422
+        # Rejecting an accepted resolution is also rejected.
+        reject = client.post(
+            f"/api/risks/{risk['id']}/resolution/reject",
+            json={"reason": "Too late."},
+            headers=_headers(pm.id, "Project Manager"),
+        )
+        assert reject.status_code == 422
+        # The risk stays Resolved throughout.
+        current = client.get(
+            f"/api/risks/{risk['id']}", headers=_headers(pm.id, "Project Manager")
+        )
+        assert current.json()["status"] == "Resolved"
+
+    def test_pm_can_see_the_resolution_history(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        """The project manager can read the full audit trail for their risk."""
+        pm, _p, risk, _o, _t = self._resolved(client, db_session)
+        resp = client.get(
+            f"/api/risks/{risk['id']}/history",
+            headers=_headers(pm.id, "Project Manager"),
+        )
+        assert resp.status_code == 200, resp.text
+        actions = [entry["action"] for entry in resp.json()]
+        assert "resolution_submitted" in actions
 
     def test_pm_reject_returns_to_in_progress_with_reason(
         self, client: TestClient, db_session: Session
@@ -201,7 +244,7 @@ class TestPmReview:
         )
         again = client.post(f"/api/external/acknowledge/{token}/resolve")
         assert again.status_code == 200
-        assert again.json()["status"] == "Resolved"
+        assert again.json()["status"] == "Pending Resolution"
         # After re-submission the stale rejection reason is no longer shown.
         assert again.json()["resolution_rejected_reason"] is None
 

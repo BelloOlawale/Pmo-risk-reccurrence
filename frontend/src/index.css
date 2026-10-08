@@ -24,6 +24,10 @@
   --wragby-red-soft: #FDE9EA;
   --wragby-red-muted: #E14B57;   /* Softer red — secondary/structural accents */
 
+  /* Wragby Blue — secondary structure, input focus (never the brand accent) */
+  --wragby-blue: #173F6B;
+  --wragby-blue-dark: #102C4C;
+
   /* Grey — neutral open/active status, kept distinct from the red brand palette */
   --wragby-grey: #64748B;
   --wragby-grey-dark: #475569;
@@ -2125,8 +2129,9 @@ input:disabled {
    AUTHENTICATION PAGE — dedicated sign-in layout
 
    Deliberately separate from the application shell: no sidebar and no
-   topbar are rendered until a session exists. Centred single-column
-   layout, white-dominant, with restrained Wragby brand accents.
+   topbar are rendered until a session exists. A single centred column,
+   white-dominant, with restrained Wragby brand accents (red accent,
+   blue focus, white canvas).
    ================================================================ */
 
 .auth-page {
@@ -2136,7 +2141,6 @@ input:disabled {
   flex-direction: column;
   align-items: center;
   background: var(--bg);
-  padding: 0 20px 20px;
   overflow-x: hidden;
 }
 
@@ -2150,21 +2154,42 @@ input:disabled {
   background: var(--wragby-red);
 }
 
+/* Groups the branding lockup and the card so they read as one unit and sit
+   together in the vertical centre of the page. */
+.auth-center {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px 20px;
+}
+
+/* ---- Brand lockup ---- */
+
 .auth-brand {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 28px 0 18px;
   text-align: center;
 }
 
 .auth-logo {
   display: block;
-  height: 40px;
+  height: 30px;
   width: auto;
   max-width: 100%;
   object-fit: contain;
+}
+
+.auth-product-name {
+  margin: 12px 0 0;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  color: var(--text);
 }
 
 /* Short red rule used as the brand lockup accent (not a large red area). */
@@ -2173,64 +2198,65 @@ input:disabled {
   height: 2px;
   border-radius: 2px;
   background: var(--wragby-red);
-}
-
-.auth-product-name {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  color: var(--text);
+  margin: 9px 0 8px;
 }
 
 .auth-product-subtitle {
-  margin: -4px 0 0;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--wragby-red);
 }
 
 .auth-main {
-  flex: 1;
   width: 100%;
   display: flex;
   justify-content: center;
-  /* Pin to the top instead of centring: the card keeps the same position
-     whether or not an error/loaded state changes its height. */
-  align-items: flex-start;
-  padding-bottom: 8px;
+  margin-top: 22px;
 }
+
+/* ---- Login card ---- */
 
 .auth-card {
   width: 100%;
-  max-width: 380px;
+  max-width: 400px;
   background: var(--wragby-white);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04), 0 14px 36px -18px rgba(17, 24, 39, 0.22);
-  padding: 24px 24px 22px;
+  border-radius: var(--radius);
+  box-shadow:
+    0 1px 2px rgba(17, 24, 39, 0.04),
+    0 16px 36px -28px rgba(17, 24, 39, 0.34);
+  padding: 28px 28px 26px;
+}
+
+/* Sign-in card: slightly narrower and tighter than the shared card so the
+   form reads as one proportionate component, not a large empty panel. */
+.auth-card-signin {
+  max-width: 380px;
+  padding: 26px 28px;
 }
 
 .auth-card-heading {
   margin: 0;
-  font-size: 22px;
+  font-size: 19px;
   font-weight: 700;
+  line-height: 1.3;
   letter-spacing: -0.02em;
   color: var(--text);
   text-align: center;
 }
 
 .auth-card-sub {
-  margin: 8px 0 0;
-  font-size: 13.5px;
-  line-height: 1.55;
+  margin: 7px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--text-muted);
   text-align: center;
 }
 
-/* ---- Primary action button (also used on the external ack page) ---- */
+/* ---- Primary action button (shared with the external ack page) ---- */
 
 .auth-primary-btn {
   display: inline-flex;
@@ -2268,103 +2294,139 @@ input:disabled {
 /* ---- Email + password sign-in ---- */
 
 .auth-password {
-  margin-top: 28px;
+  margin-top: 24px;
 }
 
 .auth-password-form .field {
-  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 16px;
+}
+
+/* The password field is immediately above the submit button; its gap is owned
+   by the button so the two do not stack. */
+.auth-password-form .field:last-of-type {
+  margin-bottom: 0;
 }
 
 .auth-password-form .field label {
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--text);
 }
 
 .auth-password-form input {
-  height: 40px;
-  padding: 8px 12px;
+  height: 44px;
+  padding: 0 13px;
   font-size: 14px;
-  border-color: var(--border-strong);
-}
-
-/* Neutral grey → Wragby Red focus (never blue). */
-.auth-password-form input:focus {
-  outline: none;
-  border-color: var(--wragby-red);
-  box-shadow: 0 0 0 3px rgba(237, 28, 46, 0.14);
-}
-
-.btn.auth-password-submit {
-  width: 100%;
-  height: 40px;
-  margin-top: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
   background: var(--wragby-white);
-  border-color: var(--border-strong);
   color: var(--text);
 }
 
-.btn.auth-dev-submit:hover:not(:disabled),
-.btn.auth-password-submit:hover:not(:disabled) {
-  background: var(--bg-elevated);
-  border-color: var(--wragby-red);
-  color: var(--wragby-red);
+.auth-password-form input::placeholder {
+  color: var(--text-faint);
 }
 
-.auth-error {
-  background: var(--wragby-red-soft);
-  border: 1px solid rgba(237, 28, 46, 0.25);
-  border-radius: var(--radius-sm);
-  color: var(--danger);
-  padding: 10px 12px;
-  margin-bottom: 16px;
-  font-size: 12.5px;
+/* Neutral grey → Wragby Blue focus. Red is reserved for errors and the
+   brand accent, never for a normal field state. */
+.auth-password-form input:focus {
+  outline: none;
+  border-color: var(--wragby-blue);
+  box-shadow: 0 0 0 3px rgba(23, 63, 107, 0.14);
 }
 
-/* Fixed-height feedback slot inside the sign-in card. Reserving the space
-   keeps the card — and therefore the whole page — from jumping when an error
-   appears or clears. */
-.auth-feedback {
-  min-height: 42px;
-  margin-bottom: 10px;
-  display: flex;
-  align-items: center;
+/* ---- Password visibility ---- */
+
+.auth-input-wrap {
+  position: relative;
 }
 
-.auth-feedback .auth-error {
-  width: 100%;
-  margin-bottom: 0;
+.auth-password-form .auth-input-wrap input {
+  padding-right: 44px;
 }
 
-/* ---- Signing-in / error status card ---- */
-
-.auth-card-status .auth-card-heading {
-  margin-top: 4px;
-}
-
-.auth-status-icon {
-  display: flex;
+.auth-pw-toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 16px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.auth-status-error {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: var(--wragby-red-soft);
-  color: var(--danger);
-  font-size: 18px;
-  font-weight: 700;
+.auth-pw-toggle:hover {
+  color: var(--text);
+  background: var(--bg-elevated);
 }
 
+.auth-pw-toggle:focus-visible {
+  outline: none;
+  color: var(--wragby-blue);
+  box-shadow: 0 0 0 2px rgba(23, 63, 107, 0.35);
+}
+
+.auth-pw-toggle svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+/* ---- Sign-in submit ---- */
+
+.btn.auth-submit-btn {
+  width: 100%;
+  height: 44px;
+  margin-top: 22px;
+  background: var(--wragby-red);
+  border-color: var(--wragby-red);
+  border-radius: var(--radius-sm);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.btn.auth-submit-btn:hover:not(:disabled) {
+  background: var(--wragby-red-dark);
+  border-color: var(--wragby-red-dark);
+  color: #ffffff;
+}
+
+.btn.auth-submit-btn:active:not(:disabled) {
+  background: #A9121F;
+  border-color: #A9121F;
+}
+
+.btn.auth-submit-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn.auth-submit-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(237, 28, 46, 0.25);
+}
+
+/* Small spinner for the signing-in state (light, for the red button). */
 .auth-spinner {
-  width: 24px;
-  height: 24px;
+  width: 16px;
+  height: 16px;
   display: inline-block;
-  border: 2.5px solid var(--border-strong);
-  border-top-color: var(--wragby-red);
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #ffffff;
   border-radius: 50%;
   animation: auth-spin 0.7s linear infinite;
 }
@@ -2375,6 +2437,34 @@ input:disabled {
   }
 }
 
+/* ---- Authentication error ---- */
+
+.auth-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: var(--wragby-red-soft);
+  border: 1px solid rgba(237, 28, 46, 0.22);
+  border-radius: var(--radius-sm);
+  color: #B3121F;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.auth-error svg {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+}
+
+/* Error shown in place of the form when password sign-in is unavailable. */
+.auth-error-standalone {
+  margin-top: 18px;
+}
+
 /* ---- Footer ---- */
 
 .auth-footer {
@@ -2382,7 +2472,7 @@ input:disabled {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 20px 0 4px;
+  padding: 14px 20px 18px;
   font-size: 11.5px;
   color: var(--text-faint);
   text-align: center;
@@ -2393,26 +2483,27 @@ input:disabled {
 }
 
 @media (max-width: 520px) {
-  .auth-page {
-    padding: 0 16px 16px;
-  }
-  .auth-brand {
-    padding: 20px 0 14px;
+  .auth-center {
+    justify-content: flex-start;
+    padding: 24px 16px 18px;
   }
   .auth-logo {
-    height: 34px;
+    height: 28px;
   }
-  .auth-card {
+  .auth-main {
+    margin-top: 20px;
+  }
+  .auth-card,
+  .auth-card-signin {
     max-width: 100%;
-    padding: 20px 18px;
-    border-radius: var(--radius);
+    padding: 22px 18px;
   }
   .auth-card-heading {
-    font-size: 19px;
+    font-size: 18px;
   }
   .auth-footer {
-    padding-top: 16px;
     flex-wrap: wrap;
+    padding-bottom: 14px;
   }
 }
 
@@ -2420,23 +2511,6 @@ input:disabled {
   .auth-spinner {
     animation-duration: 1.6s;
   }
-}
-
-/* Email + password submit is a first-class sign-in and uses the Wragby red
-   accent, matching every other primary button in the app. */
-.btn.auth-password-submit {
-  width: 100%;
-  height: 40px;
-  margin-top: 4px;
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #ffffff;
-}
-
-.btn.auth-password-submit:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
-  color: #ffffff;
 }
 
 /* ================================================================
