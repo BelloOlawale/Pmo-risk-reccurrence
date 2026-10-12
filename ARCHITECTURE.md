@@ -13,8 +13,10 @@ A **standalone web application** that automates project risk management:
 1. A PM onboards a project.
 2. The system **suggests recurring risks** from historical registers (hybrid
    search + LLM analysis with grounded citations).
-3. Risks are captured, scored, monitored on SLA deadlines, escalated on breach,
-   resolved, and closed — feeding learnings back so future suggestions improve.
+3. Risks are captured, scored, monitored with daily owner reminders, escalated
+   when unacknowledged, materialized into an Issue when unresolved past the Risk
+   End Date, resolved, and closed — feeding learnings back so future suggestions
+   improve.
 
 Explicitly **not** used: SharePoint, Power Apps, Power BI, Power Automate.
 
@@ -87,7 +89,7 @@ app/
 │   │   ├── import_pipeline/   # Excel parse → field map → import
 │   │   ├── notifications.py   # ACS email + in-app notifications
 │   │   ├── scheduler.py       # Celery Beat schedule
-│   │   ├── tasks.py           # Celery tasks (SLA monitor, emails, …)
+│   │   ├── tasks.py           # Celery tasks (reminders, escalation, emails, …)
 │   │   ├── audit.py           # append-only audit logging helper
 │   │   ├── config.py          # pydantic-settings (RISKAPP_* env vars)
 │   │   └── db.py              # engine + session factory
@@ -328,12 +330,14 @@ There are two suggestion surfaces:
 
 ## 9. Background jobs (Celery + Beat)
 
-- Hourly SLA monitor (remind / escalate on breach).
-- Hourly **end-date monitor** (at :30): materialize overdue unresolved risks —
+- Daily **owner reminders**: email the Risk Owner each day from the Risk Start
+  Date up to three days before the Risk End Date while the risk is unacknowledged.
+- Daily **escalation monitor**: two days before the Risk End Date, transition an
+  unacknowledged risk to `Escalated` and email the owner + PM. No Issue is created.
+- Daily **end-date monitor**: materialize overdue unresolved risks —
   `risk_end_date` passed and status still `Open` / `In Progress` / `Escalated` —
-  to `Event` and auto-create one Issue per risk (idempotent; resolves against
-  the source-risk timezone-safe business date).
-- Daily start-date check (email owner when `risk_start_date` is today).
+  to `Event`, email the PM the risk + owner details, and auto-create one Issue
+  per risk (idempotent; resolves against the timezone-safe business date).
 - Weekly summary (Mon 8 AM) to PM + PMO Lead.
 - Async email sending.
 - Async LLM suggestion generation.

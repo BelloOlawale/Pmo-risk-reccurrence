@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from riskapp import models, notifications
 from riskapp.config import settings
 from riskapp.notifications import build_notification_service
-from riskapp.scheduler import run_start_date_check
+from riskapp.scheduler import run_daily_reminders
 from riskapp.services import get_or_create_user
 
 
@@ -150,7 +150,7 @@ class TestEmailProviderWiring:
         assert service._email is None  # noqa: SLF001
 
 
-class TestStartDateIdempotency:
+class TestDailyReminderIdempotency:
     def _risk_starting_today(self, db: Session, today: dt.date) -> models.Risk:
         dept = models.Department(name="D-start")
         ptype = models.ProjectType(name="T-start")
@@ -174,6 +174,7 @@ class TestStartDateIdempotency:
             status="Open",
             owner_user_id=owner.id,
             risk_start_date=today,
+            risk_end_date=today + dt.timedelta(days=10),
         )
         db.add(risk)
         db.commit()
@@ -183,8 +184,8 @@ class TestStartDateIdempotency:
         today = dt.date(2026, 8, 23)
         self._risk_starting_today(db_session, today)
 
-        first = run_start_date_check(db_session, build_notification_service(), today)
-        second = run_start_date_check(db_session, build_notification_service(), today)
+        first = run_daily_reminders(db_session, build_notification_service(), today)
+        second = run_daily_reminders(db_session, build_notification_service(), today)
 
         assert first == 1
         assert second == 0

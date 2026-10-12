@@ -26,17 +26,17 @@ celery_app.conf.update(
     # Register the task module so the worker picks up riskapp.tasks on boot.
     include=["riskapp.tasks"],
     beat_schedule={
-        "monitor-sla-hourly": {
-            "task": "riskapp.tasks.monitor_sla",
-            "schedule": crontab(minute=0),
+        "daily-owner-reminders": {
+            "task": "riskapp.tasks.send_daily_reminders",
+            "schedule": crontab(hour=6, minute=0),
         },
-        "materialize-overdue-risks-hourly": {
+        "daily-escalations": {
+            "task": "riskapp.tasks.escalate_unacknowledged_risks",
+            "schedule": crontab(hour=6, minute=15),
+        },
+        "materialize-overdue-risks-daily": {
             "task": "riskapp.tasks.materialize_overdue_risks",
-            "schedule": crontab(minute=30),
-        },
-        "check-start-dates-hourly": {
-            "task": "riskapp.tasks.check_start_dates",
-            "schedule": crontab(minute=10),
+            "schedule": crontab(hour=6, minute=30),
         },
         "weekly-summary-monday": {
             "task": "riskapp.tasks.weekly_summary",

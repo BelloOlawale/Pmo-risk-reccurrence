@@ -1,4 +1,12 @@
-"""Tests for the scheduler logic: SLA monitor, start dates, weekly summary."""
+"""Tests for the scheduler logic: daily reminders, escalations, weekly summary.
+
+The monitoring cadence is day-based:
+
+- Daily acknowledgement reminders from the Risk Start Date up to (and including)
+  three days before the Risk End Date, stopping once acknowledged.
+- An unacknowledged risk escalates two days before the Risk End Date, emailing
+  the Risk Owner and the Project Manager. Escalation never creates an Issue.
+"""
 
 from __future__ import annotations
 
@@ -12,34 +20,15 @@ from riskapp import models
 from riskapp.domain.status import RiskStatus
 from riskapp.notifications import NotificationService
 from riskapp.scheduler import (
-    find_sla_actions,
-    run_sla_monitor,
-    run_start_date_check,
+    find_daily_reminder_risks,
+    find_escalation_risks,
+    run_daily_reminders,
+    run_escalation_monitor,
     run_weekly_summary,
-    sla_state,
     weekly_summary_data,
 )
 
-NOW = dt.datetime(2026, 8, 23, 12, 0, 0)
-
-
-class TestSlaState:
-    def test_owner_active_satisfied(self) -> None:
-        assert sla_state("High", NOW, NOW, owner_active=True) == "satisfied"
-
-    def test_breach_when_deadline_passed(self) -> None:
-        assert (
-            sla_state("High", NOW - dt.timedelta(minutes=1), NOW, owner_active=False)
-            == "breach"
-        )
-
-    def test_warning_within_window(self) -> None:
-        deadline = NOW + dt.timedelta(hours=2)  # High warning window is 4h
-        assert sla_state("High", deadline, NOW, owner_active=False) == "warning"
-
-    def test_ok_before_warning_window(self) -> None:
-        deadline = NOW + dt.timedelta(hours=10)
-        assert sla_state("High", deadline, NOW, owner_active=False) == "ok"
+TODAY = dt.date(2026, 8, 23)
 
 
 def _risk(
@@ -47,10 +36,11 @@ def _risk(
     *,
     code: str,
     status: str = "Open",
-    deadline: dt.datetime | None = NOW + dt.timedelta(hours=10),
     acknowledged: bool = False,
     owner: models.User | None = None,
-    start_date: dt.date | None = None,
+    start_date: dt.date | None = dt.date(2026, 8, 18),
+    end_date: dt.date | None = dt.date(2026, 8, 30),
+    last_reminder_on: dt.date | None = None,
 ) -> models.Risk:
     dept = models.Department(name=f"D-{code}")
     ptype = models.ProjectType(name=f"T-{code}")
@@ -82,103 +72,113 @@ def _risk(
         impact="High",
         risk_rating="High",
         status=status,
-        sla_deadline=deadline,
         sla_acknowledged=acknowledged,
         owner_user_id=owner.id,
         risk_start_date=start_date,
+        risk_end_date=end_date,
+        last_reminder_on=last_reminder_on,
     )
     db.add(risk)
     db.commit()
     return risk
 
 
-class TestFindSlaActions:
-    def test_breach_and_warning_detected(self, db_session: Session) -> None:
-        _risk(db_session, code="RSK-B", deadline=NOW - dt.timedelta(hours=1))
-        _risk(db_session, code="RSK-W", deadline=NOW + dt.timedelta(hours=1))
-        _risk(db_session, code="RSK-OK", deadline=NOW + dt.timedelta(hours=10))
+class TestFindDailyReminderRisks:
+    def test_reminder_due_within_window(self, db_session: Session) -> None:
+        risk = _risk(db_session, code="RSK-REM")
+        assert find_daily_reminder_risks(db_session, TODAY) == [risk]
 
-        actions = find_sla_actions(db_session, NOW)
-        by_code = {a.risk_code: a.action for a in actions}
-        assert by_code == {"RSK-B": "breach", "RSK-W": "warning"}
+    def test_no_reminder_after_three_days_before_end(self, db_session: Session) -> None:
+        # end - 3 = 2026-08-25; on 08-26 the reminder window has closed.
+        _risk(db_session, code="RSK-LATE", end_date=dt.date(2026, 8, 28))
+        assert find_daily_reminder_risks(db_session, dt.date(2026, 8, 26)) == []
 
-    def test_acknowledged_risk_skipped(self, db_session: Session) -> None:
-        _risk(db_session, code="RSK-ACK", acknowledged=True, deadline=NOW - dt.timedelta(hours=1))
-        assert find_sla_actions(db_session, NOW) == []
+    def test_no_reminder_before_start_date(self, db_session: Session) -> None:
+        _risk(db_session, code="RSK-EARLY", start_date=dt.date(2026, 8, 24))
+        assert find_daily_reminder_risks(db_session, TODAY) == []
 
-    def test_no_deadline_skipped(self, db_session: Session) -> None:
-        _risk(db_session, code="RSK-NODL", deadline=None)
-        assert find_sla_actions(db_session, NOW) == []
+    def test_acknowledged_risk_is_not_reminded(self, db_session: Session) -> None:
+        _risk(db_session, code="RSK-ACK", acknowledged=True)
+        assert find_daily_reminder_risks(db_session, TODAY) == []
 
-    def test_owner_edits_do_not_satisfy_sla(self, db_session: Session) -> None:
-        """Only acknowledgement stops the escalation clock, not any edit."""
-        owner = models.User(upn="o@example.com", display_name="O")
-        db_session.add(owner)
-        db_session.flush()
-        risk = _risk(
-            db_session,
-            code="RSK-EDIT",
-            owner=owner,
-            deadline=NOW - dt.timedelta(hours=1),
-        )
-        db_session.add(
-            models.RiskAuditLog(
-                risk_id=risk.id, user_id=owner.id, action="field_edit", field="description"
-            )
-        )
+    def test_already_reminded_today_is_skipped(self, db_session: Session) -> None:
+        _risk(db_session, code="RSK-DONE", last_reminder_on=TODAY)
+        assert find_daily_reminder_risks(db_session, TODAY) == []
+
+    def test_risk_without_owner_is_skipped(self, db_session: Session) -> None:
+        risk = _risk(db_session, code="RSK-NOOWNER")
+        risk.owner_user_id = None
         db_session.commit()
-        actions = find_sla_actions(db_session, NOW)
-        assert [a.risk_code for a in actions] == ["RSK-EDIT"]
-        assert actions[0].action == "breach"
+        assert find_daily_reminder_risks(db_session, TODAY) == []
 
-    def test_acknowledged_risk_is_satisfied(self, db_session: Session) -> None:
-        _risk(
-            db_session,
-            code="RSK-ACKED",
-            acknowledged=True,
-            deadline=NOW - dt.timedelta(hours=1),
-        )
-        assert find_sla_actions(db_session, NOW) == []
+    def test_risk_without_dates_is_skipped(self, db_session: Session) -> None:
+        _risk(db_session, code="RSK-NODATES", start_date=None, end_date=None)
+        assert find_daily_reminder_risks(db_session, TODAY) == []
 
 
-class TestRunSlaMonitor:
-    def test_breach_escalates_and_notifies(self, db_session: Session) -> None:
-        risk = _risk(db_session, code="RSK-ESC", deadline=NOW - dt.timedelta(hours=1))
-        count = run_sla_monitor(db_session, NotificationService(), NOW)
+class TestRunDailyReminders:
+    def test_sends_owner_reminder_and_stamps_the_day(self, db_session: Session) -> None:
+        risk = _risk(db_session, code="RSK-SEND")
+        count = run_daily_reminders(db_session, NotificationService(), TODAY)
+        assert count == 1
+
+        db_session.refresh(risk)
+        assert risk.last_reminder_on == TODAY
+        notifications = db_session.scalars(select(models.Notification)).all()
+        assert len(notifications) == 1
+        assert notifications[0].type == "owner_reminder"
+        assert notifications[0].recipient_user_id == risk.owner_user_id
+
+    def test_second_run_same_day_is_idempotent(self, db_session: Session) -> None:
+        _risk(db_session, code="RSK-ONCE")
+        first = run_daily_reminders(db_session, NotificationService(), TODAY)
+        second = run_daily_reminders(db_session, NotificationService(), TODAY)
+        assert first == 1
+        assert second == 0
+
+
+class TestFindEscalationRisks:
+    def test_due_two_days_before_end(self, db_session: Session) -> None:
+        risk = _risk(db_session, code="RSK-ESC", end_date=dt.date(2026, 8, 25))
+        assert find_escalation_risks(db_session, TODAY) == [risk]
+
+    def test_not_due_before_two_days(self, db_session: Session) -> None:
+        _risk(db_session, code="RSK-WAIT", end_date=dt.date(2026, 8, 27))
+        assert find_escalation_risks(db_session, TODAY) == []
+
+    def test_acknowledged_risk_is_not_escalated(self, db_session: Session) -> None:
+        _risk(db_session, code="RSK-ESCACK", acknowledged=True, end_date=dt.date(2026, 8, 24))
+        assert find_escalation_risks(db_session, TODAY) == []
+
+
+class TestRunEscalationMonitor:
+    def test_escalates_and_notifies_owner_and_pm(self, db_session: Session) -> None:
+        risk = _risk(db_session, code="RSK-ESC2", end_date=dt.date(2026, 8, 25))
+        count = run_escalation_monitor(db_session, NotificationService(), TODAY)
         assert count == 1
 
         db_session.refresh(risk)
         assert risk.status == RiskStatus.ESCALATED.value
 
-        notifications = db_session.scalars(select(models.Notification)).all()
-        # Breach → owner + PM (PMO Lead is email-only).
-        assert len(notifications) == 2
+        notifications = db_session.scalars(
+            select(models.Notification).where(models.Notification.type == "escalation")
+        ).all()
         assert {n.recipient_user_id for n in notifications} == {
             risk.owner_user_id,
             risk.project.pm_user_id,
         }
-        assert all(n.type == "breach" for n in notifications)
 
-    def test_warning_notifies_without_escalating(self, db_session: Session) -> None:
-        risk = _risk(db_session, code="RSK-WARN", deadline=NOW + dt.timedelta(hours=1))
-        run_sla_monitor(db_session, NotificationService(), NOW)
+    def test_escalation_does_not_create_an_issue(self, db_session: Session) -> None:
+        _risk(db_session, code="RSK-ESC3", end_date=dt.date(2026, 8, 25))
+        run_escalation_monitor(db_session, NotificationService(), TODAY)
+        assert db_session.scalars(select(models.Issue)).all() == []
 
-        db_session.refresh(risk)
-        assert risk.status == "Open"
-        notifications = db_session.scalars(select(models.Notification)).all()
-        assert len(notifications) == 1
-        assert notifications[0].type == "sla_warning"
-
-
-class TestStartDateCheck:
-    def test_notifies_owner_for_risks_starting_today(self, db_session: Session) -> None:
-        _risk(db_session, code="RSK-START", start_date=dt.date(2026, 8, 23))
-        count = run_start_date_check(
-            db_session, NotificationService(), dt.date(2026, 8, 23)
-        )
-        assert count == 1
-        notifications = db_session.scalars(select(models.Notification)).all()
-        assert notifications[0].type == "risk_start"
+    def test_escalation_is_idempotent(self, db_session: Session) -> None:
+        _risk(db_session, code="RSK-ESC4", end_date=dt.date(2026, 8, 25))
+        first = run_escalation_monitor(db_session, NotificationService(), TODAY)
+        second = run_escalation_monitor(db_session, NotificationService(), TODAY)
+        assert first == 1
+        assert second == 0
 
 
 class TestWeeklySummary:

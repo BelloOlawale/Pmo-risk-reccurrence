@@ -395,7 +395,10 @@ class TestManualEventMaterialization:
                 )
             ).all()
         )
-        assert {n.recipient_user_id for n in notices} == {owner.id, pm.id}
+        # Materialization now notifies the Project Manager (who owns the
+        # resulting Issue); the Risk Owner is no longer emailed here.
+        assert {n.recipient_user_id for n in notices} == {pm.id}
+        assert any(owner.display_name in n.body for n in notices)
 
     def test_patch_to_event_is_not_an_issue_for_non_materializing_targets(
         self, client: TestClient, db_session: Session

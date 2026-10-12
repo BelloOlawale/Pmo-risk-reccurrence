@@ -1,11 +1,13 @@
-"""SLA deadline and warning-window helpers.
+"""SLA deadline and day-based monitoring helpers.
 
 The SLA is **PM-defined**: the Risk Start Date is the SLA start and the Risk End
-Date *is* the SLA deadline (see :func:`deadline_from_end_date`). The risk rating
-represents severity only and never drives the deadline.
+Date *is* the SLA deadline and resolution deadline (see
+:func:`deadline_from_end_date`). The risk rating represents severity only and
+never drives the deadline or the monitoring cadence.
 
-Risk rating is still used for one thing: how far ahead of the deadline the
-owner is warned. That warning window lives here.
+Monitoring is expressed in whole days before the Risk End Date: daily owner
+reminders up to three days before, then escalation two days before, then
+materialization once the end date has passed.
 
 Datetimes are UTC-normalized and naive, matching the application's storage
 convention.
@@ -13,27 +15,27 @@ convention.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, time, tzinfo
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 
-# Warning window (hours before the deadline) by rating. This is the only place
-# the rating still influences monitoring cadence; it never moves the deadline.
-WARNING_HOURS: dict[str, int] = {
-    "High": 4,
-    "Medium": 12,
-    "Low": 24,
-}
-
-
-def _normalize(rating: str) -> str:
-    normalized = rating.strip().title()
-    if normalized not in WARNING_HOURS:
-        raise ValueError(f"Unknown rating {rating!r}; expected Low / Medium / High")
-    return normalized
+# Owner monitoring cadence, expressed in whole days before the Risk End Date.
+#
+# Daily acknowledgement reminders run from the Risk Start Date up to and
+# including ``REMINDER_LEAD_DAYS`` before the end date. An unacknowledged risk is
+# escalated (email to owner + PM, status -> Escalated) from
+# ``ESCALATION_LEAD_DAYS`` before the end date. Once the end date has passed and
+# the risk is still unresolved it materialises (status -> Event + Issue).
+REMINDER_LEAD_DAYS = 3
+ESCALATION_LEAD_DAYS = 2
 
 
-def warning_hours(rating: str) -> int:
-    """Return the warning window in hours before the deadline for a rating."""
-    return WARNING_HOURS[_normalize(rating)]
+def reminder_last_date(end_date: date) -> date:
+    """Last day on which a daily owner reminder is sent (end date - 3 days)."""
+    return end_date - timedelta(days=REMINDER_LEAD_DAYS)
+
+
+def escalation_date(end_date: date) -> date:
+    """Day on which an unacknowledged risk escalates (end date - 2 days)."""
+    return end_date - timedelta(days=ESCALATION_LEAD_DAYS)
 
 
 def as_naive_utc(value: datetime) -> datetime:

@@ -179,7 +179,7 @@ class TestExternalAcknowledgement:
     def test_garbage_token_is_rejected(self, client: TestClient) -> None:
         assert client.get("/api/external/acknowledge/not-a-token").status_code == 404
 
-    def test_internal_owner_has_no_acknowledgement_link(
+    def test_internal_owner_has_an_acknowledgement_link(
         self, client: TestClient, db_session: Session
     ) -> None:
         from riskapp.external import acknowledgement_url
@@ -193,7 +193,35 @@ class TestExternalAcknowledgement:
 
         stored = db_session.get(models.Risk, risk["id"])
         assert stored is not None
-        assert acknowledgement_url(stored) is None
+        link = acknowledgement_url(stored)
+        assert link is not None
+        assert "/acknowledge/" in link
+
+    def test_internal_owner_can_view_acknowledge_and_resolve_from_link(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        """An internal owner acts from the emailed link, never the app."""
+        project = _project(client)
+        risk = _risk(client, project["id"])
+        owner = models.User(upn="i@wragby.com", display_name="Internal Owner")
+        db_session.add(owner)
+        db_session.commit()
+        client.patch(f"/api/risks/{risk['id']}", json={"owner_user_id": owner.id})
+
+        token = create_acknowledgement_token(owner_user_id=owner.id, risk_id=risk["id"])
+
+        view = client.get(f"/api/external/acknowledge/{token}")
+        assert view.status_code == 200
+        assert view.json()["owner_email"] == "i@wragby.com"
+        assert view.json()["acknowledged"] is False
+
+        ack = client.post(f"/api/external/acknowledge/{token}")
+        assert ack.status_code == 200
+        assert ack.json()["acknowledged"] is True
+
+        resolved = client.post(f"/api/external/acknowledge/{token}/resolve")
+        assert resolved.status_code == 200
+        assert resolved.json()["status"] == RiskStatus.PENDING_RESOLUTION.value
 
 
 class TestExternalOwnerEmail:
@@ -212,14 +240,14 @@ class TestExternalOwnerEmail:
         body = NotificationService._email_body("You have been assigned a risk.", stored)
 
         assert "WRAGBY" in body and "RiskIntel" in body
-        assert "View Risk" in body
+        assert "Acknowledge Risk" in body
         assert "/acknowledge/" in body
         assert "Vendor migration" in body
         assert "SLA deadline" in body
         # An external owner must never be handed the internal app link.
         assert f"/risks/{risk['id']}" not in body
 
-    def test_internal_owner_email_has_no_external_link(
+    def test_internal_owner_email_uses_secure_link(
         self, client: TestClient, db_session: Session
     ) -> None:
         from riskapp.notifications import NotificationService
@@ -234,16 +262,19 @@ class TestExternalOwnerEmail:
         stored = db_session.get(models.Risk, risk["id"])
         assert stored is not None
         body = NotificationService._email_body("Update", stored)
-        assert "/risks/" in body
-        assert "/acknowledge/" not in body
+        # An internal owner is treated exactly like an external one: the email
+        # carries the single-risk secure link, not the internal app link.
+        assert "/acknowledge/" in body
+        assert "Acknowledge Risk" in body
+        assert f"/risks/{risk['id']}" not in body
 
 
 class TestExternalOwnerWorkflow:
-    def test_unacknowledged_external_owner_escalates_on_sla_breach(
+    def test_unacknowledged_external_owner_escalates_two_days_before_end(
         self, client: TestClient, db_session: Session
     ) -> None:
         from riskapp.notifications import NotificationService
-        from riskapp.scheduler import run_sla_monitor
+        from riskapp.scheduler import run_escalation_monitor
 
         project = _project(client)
         risk = _risk(client, project["id"])
@@ -252,19 +283,22 @@ class TestExternalOwnerWorkflow:
 
         stored = db_session.get(models.Risk, risk["id"])
         assert stored is not None
-        # Move the deadline into the past and run the monitor.
-        stored.sla_deadline = dt.datetime.now(dt.UTC).replace(tzinfo=None) - dt.timedelta(hours=1)
-        db_session.commit()
-
-        run_sla_monitor(
+        assert stored.risk_end_date is not None
+        # run_escalation_monitor on the day two before the end date.
+        run_escalation_monitor(
             db_session,
             NotificationService(),
-            dt.datetime.now(dt.UTC).replace(tzinfo=None),
+            stored.risk_end_date - dt.timedelta(days=2),
         )
         db_session.refresh(stored)
         assert stored.status == RiskStatus.ESCALATED.value
-        issue = db_session.query(models.Issue).filter_by(source_risk_id=stored.id).one()
-        assert issue is not None
+        # Escalation never creates an Issue; only materialization does.
+        issue = (
+            db_session.query(models.Issue)
+            .filter_by(source_risk_id=stored.id)
+            .first()
+        )
+        assert issue is None
 
     def test_acknowledged_external_owner_materializes_after_end_date(
         self, client: TestClient, db_session: Session

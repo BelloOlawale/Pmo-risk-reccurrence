@@ -7,11 +7,10 @@ from sqlalchemy.orm import Session
 
 from riskapp import models
 from riskapp.notifications import (
-    EVENT_BREACH,
+    EVENT_ESCALATION,
     EVENT_MATERIALIZED,
     EVENT_OWNER_ASSIGNMENT,
-    EVENT_RISK_START,
-    EVENT_SLA_WARNING,
+    EVENT_OWNER_REMINDER,
     EVENT_WEEKLY_SUMMARY,
     NotificationService,
     RecipientContext,
@@ -47,34 +46,32 @@ class TestResolveRecipients:
         assert r.to_emails == ("owner@example.com", "pm@example.com", "pmo@example.com")
         assert r.cc_emails == ("pl@example.com",)
 
-    def test_sla_warning_owner_only(self) -> None:
-        r = resolve_recipients(EVENT_SLA_WARNING, _ctx())
+    def test_owner_reminder_owner_only(self) -> None:
+        r = resolve_recipients(EVENT_OWNER_REMINDER, _ctx())
         assert r.to_emails == ("owner@example.com",)
         assert r.cc_emails == ()
 
-    def test_breach_includes_owner_pm_pmo(self) -> None:
-        r = resolve_recipients(EVENT_BREACH, _ctx())
-        assert r.to_emails == ("owner@example.com", "pm@example.com", "pmo@example.com")
-
-    def test_materialized_includes_owner_pm_pmo(self) -> None:
-        r = resolve_recipients(EVENT_MATERIALIZED, _ctx())
+    def test_escalation_includes_owner_and_pm(self) -> None:
+        r = resolve_recipients(EVENT_ESCALATION, _ctx())
         assert r.to_user_ids == (1, 2)
-        assert r.to_emails == ("owner@example.com", "pm@example.com", "pmo@example.com")
+        assert r.to_emails == ("owner@example.com", "pm@example.com")
         assert r.cc_emails == ()
 
-    def test_risk_start_owner_only(self) -> None:
-        r = resolve_recipients(EVENT_RISK_START, _ctx())
-        assert r.to_emails == ("owner@example.com",)
+    def test_materialized_goes_to_pm_with_pmo_cc(self) -> None:
+        r = resolve_recipients(EVENT_MATERIALIZED, _ctx())
+        assert r.to_user_ids == (2,)
+        assert r.to_emails == ("pm@example.com",)
+        assert r.cc_emails == ("pmo@example.com",)
 
     def test_weekly_summary_pm_and_pmo(self) -> None:
         r = resolve_recipients(EVENT_WEEKLY_SUMMARY, _ctx())
         assert r.to_emails == ("pm@example.com", "pmo@example.com")
 
     def test_deduplicates_overlapping_roles(self) -> None:
-        # owner is also the PM and the PMO lead
+        # owner is also the PM
         r = resolve_recipients(
-            EVENT_BREACH,
-            _ctx(pm_email="owner@example.com", pmo_lead_email="owner@example.com"),
+            EVENT_ESCALATION,
+            _ctx(pm_email="owner@example.com"),
         )
         assert r.to_emails == ("owner@example.com",)
 
@@ -122,21 +119,47 @@ class TestNotificationService:
 
         service.notify(
             db_session,
-            event=EVENT_SLA_WARNING,
-            title="SLA warning",
-            body="Deadline approaching",
+            event=EVENT_OWNER_REMINDER,
+            title="Acknowledgement reminder",
+            body="Please acknowledge this risk",
             risk=risk,
         )
 
         rows = db_session.scalars(select(models.Notification)).all()
         assert len(rows) == 1
         assert rows[0].recipient_user_id == risk.owner_user_id
-        assert rows[0].type == EVENT_SLA_WARNING
+        assert rows[0].type == EVENT_OWNER_REMINDER
         assert rows[0].risk_id == risk.id
 
         assert len(email.sent) == 1
         assert email.sent[0]["to"] == ["owner@example.com"]
-        assert f"/risks/{risk.id}" in email.sent[0]["body_html"]
+        # Risk Owners (internal or external) act from the emailed secure link.
+        assert "/acknowledge/" in email.sent[0]["body_html"]
+
+    def test_owner_assignment_splits_owner_and_staff_emails(
+        self, db_session: Session
+    ) -> None:
+        """The owner gets the secure link; PM/PMO get the app notification."""
+        db_session.add(models.Setting(key="pmo_lead_email", value="pmo@example.com"))
+        db_session.commit()
+        risk = self._risk_with_owner(db_session)
+        email = FakeEmail()
+        service = NotificationService(email=email)
+
+        service.notify(
+            db_session,
+            event=EVENT_OWNER_ASSIGNMENT,
+            title="Risk assigned",
+            body="Risk assigned to you",
+            risk=risk,
+        )
+
+        by_to = {tuple(m["to"]): m for m in email.sent}
+        owner_msg = by_to[("owner@example.com",)]
+        staff_msg = by_to[("pm@example.com", "pmo@example.com")]
+        assert "/acknowledge/" in owner_msg["body_html"]
+        assert f"/risks/{risk.id}" in staff_msg["body_html"]
+        assert "/acknowledge/" not in staff_msg["body_html"]
 
     def test_notify_without_email_provider_does_not_send(self, db_session: Session) -> None:
         risk = self._risk_with_owner(db_session)
@@ -144,9 +167,9 @@ class TestNotificationService:
 
         service.notify(
             db_session,
-            event=EVENT_SLA_WARNING,
-            title="SLA warning",
-            body="Deadline approaching",
+            event=EVENT_OWNER_REMINDER,
+            title="Acknowledgement reminder",
+            body="Please acknowledge this risk",
             risk=risk,
         )
         rows = db_session.scalars(select(models.Notification)).all()

@@ -11,14 +11,15 @@ const API_BASE: string = import.meta.env.VITE_API_BASE_URL ?? '';
 const LINK_INVALID_MESSAGE = 'This risk link is not valid or is no longer available.';
 
 /**
- * Public, token-scoped page for an external Risk Owner.
+ * Public, token-scoped page for a Risk Owner (internal or external).
  *
  * The secure, persistent token in the URL grants access to exactly one risk,
  * so this page deliberately uses a bare `fetch` (no session/auth headers) and is
- * mounted outside the application shell — an external owner has no Wragby
- * account and must never reach the internal app. The link does not expire while
- * the risk stays assigned to this owner, so they can acknowledge, resolve, and
- * act again if the Project Manager sends the resolution back.
+ * mounted outside the application shell — owners are not expected to sign in or
+ * reach the internal app, they act from the link emailed to them. The link does
+ * not expire while the risk stays assigned to this owner, so they can
+ * acknowledge, resolve, and act again if the Project Manager sends the
+ * resolution back.
  */
 export function ExternalAcknowledgePage() {
   const { token } = useParams();

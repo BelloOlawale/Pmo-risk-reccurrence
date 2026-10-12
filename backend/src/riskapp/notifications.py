@@ -24,9 +24,11 @@ from riskapp.external import acknowledgement_url
 logger = logging.getLogger(__name__)
 
 EVENT_OWNER_ASSIGNMENT = "owner_assignment"
-EVENT_SLA_WARNING = "sla_warning"
-EVENT_BREACH = "breach"
-EVENT_RISK_START = "risk_start"
+# Daily acknowledgement reminder, sent to the Risk Owner from the Risk Start
+# Date until (and including) the day three days before the Risk End Date.
+EVENT_OWNER_REMINDER = "owner_reminder"
+# Unacknowledged risk escalated two days before its Risk End Date.
+EVENT_ESCALATION = "escalation"
 EVENT_WEEKLY_SUMMARY = "weekly_summary"
 EVENT_MATERIALIZED = "materialized"
 # Risk Owner submitted a resolution -> the Project Manager reviews it.
@@ -98,31 +100,29 @@ def resolve_recipients(event: str, ctx: RecipientContext) -> Recipients:
             to_emails=_unique(ctx.owner_email, ctx.pm_email, ctx.pmo_lead_email),
             cc_emails=_unique(ctx.practice_lead_email),
         )
-    if event == EVENT_SLA_WARNING:
+    if event == EVENT_OWNER_REMINDER:
+        # Daily nudge to the owner until they acknowledge the risk.
         return Recipients(
             to_user_ids=_unique_ids(ctx.owner_user_id),
             to_emails=_unique(ctx.owner_email),
             cc_emails=(),
         )
-    if event == EVENT_BREACH:
+    if event == EVENT_ESCALATION:
+        # The owner is asked to acknowledge immediately and their Project
+        # Manager is put on notice that the acknowledgement was missed.
         return Recipients(
             to_user_ids=_unique_ids(ctx.owner_user_id, ctx.pm_user_id),
-            to_emails=_unique(ctx.owner_email, ctx.pm_email, ctx.pmo_lead_email),
+            to_emails=_unique(ctx.owner_email, ctx.pm_email),
             cc_emails=(),
         )
     if event == EVENT_MATERIALIZED:
-        # Risk owner + project manager are notified that the risk became an
-        # Event and an Issue was raised; the PMO Lead is emailed.
+        # The risk has left the owner's hands and become an Issue: the Project
+        # Manager receives the details and owns the follow-up, with the PMO Lead
+        # copied for governance.
         return Recipients(
-            to_user_ids=_unique_ids(ctx.owner_user_id, ctx.pm_user_id),
-            to_emails=_unique(ctx.owner_email, ctx.pm_email, ctx.pmo_lead_email),
-            cc_emails=(),
-        )
-    if event == EVENT_RISK_START:
-        return Recipients(
-            to_user_ids=_unique_ids(ctx.owner_user_id),
-            to_emails=_unique(ctx.owner_email),
-            cc_emails=(),
+            to_user_ids=_unique_ids(ctx.pm_user_id),
+            to_emails=_unique(ctx.pm_email),
+            cc_emails=_unique(ctx.pmo_lead_email),
         )
     if event == EVENT_WEEKLY_SUMMARY:
         return Recipients(
@@ -168,16 +168,22 @@ def _email_row(label: str, value: str) -> str:
     return f"<tr>{label_td}{value_td}</tr>"
 
 
-def _external_ack_email(risk: models.Risk, ack_link: str) -> str:
-    """A professional, self-contained email for an external Risk Owner.
+def _owner_email(
+    risk: models.Risk,
+    ack_link: str,
+    *,
+    heading: str,
+    lead_html: str,
+    cta: str = "View Risk",
+) -> str:
+    """A professional, self-contained action email for a Risk Owner.
 
-    It never links to the internal application and only exposes the single risk
-    the token grants access to.
+    Used for internal and external owners alike. It never links to the internal
+    application and only exposes the single risk the token grants access to.
     """
     owner = risk.owner
     owner_name = html.escape((owner.display_name if owner else "") or "there")
     project_name = risk.project.name if risk.project else "—"
-    code = html.escape(risk.risk_code)
     description = html.escape(risk.description or "")
     rows = "".join(
         [
@@ -185,6 +191,7 @@ def _external_ack_email(risk: models.Risk, ack_link: str) -> str:
             _email_row("Project", project_name),
             _email_row("Severity", risk.risk_rating),
             _email_row("Risk start date", _fmt_date(risk.risk_start_date)),
+            _email_row("Risk end date", _fmt_date(risk.risk_end_date)),
             _email_row("SLA deadline", _fmt_date(risk.sla_deadline)),
         ]
     )
@@ -200,11 +207,8 @@ def _external_ack_email(risk: models.Risk, ack_link: str) -> str:
   </div>
   <div style="padding:20px 24px 24px;">
     <p style="font-size:15px;">Dear {owner_name},</p>
-    <p style="font-size:14px;line-height:1.55;">
-      You have been assigned as the Risk Owner for the risk below. Please review
-      it and confirm that you accept ownership by acknowledging it.
-    </p>
-    <h2 style="font-size:16px;margin:18px 0 6px;">{code}</h2>
+    <h2 style="font-size:17px;margin:6px 0 10px;">{heading}</h2>
+    <p style="font-size:14px;line-height:1.55;">{lead_html}</p>
     <p style="font-size:14px;color:#374151;margin:0 0 12px;">{description}</p>
     <table style="border-collapse:collapse;margin:8px 0 18px;">{rows}</table>
     <p style="font-size:14px;line-height:1.55;">
@@ -216,13 +220,63 @@ def _external_ack_email(risk: models.Risk, ack_link: str) -> str:
       <a href="{link}"
          style="background:#ED1C2E;color:#ffffff;text-decoration:none;padding:12px 22px;
                 border-radius:6px;font-weight:700;font-size:14px;display:inline-block;"
-        >View Risk</a>
+        >{cta}</a>
     </p>
     <p style="font-size:13px;color:#64748B;line-height:1.55;">
       If you were not expecting this email, you can safely ignore it.
     </p>
   </div>
 </div>"""
+
+
+def _external_ack_email(risk: models.Risk, ack_link: str) -> str:
+    """Assignment email: the owner is asked to accept and acknowledge."""
+    return _owner_email(
+        risk,
+        ack_link,
+        heading=f"Risk ownership: {html.escape(risk.risk_code)}",
+        lead_html=(
+            "You have been assigned as the Risk Owner for the risk below. Please "
+            "review it and confirm that you accept ownership by acknowledging it."
+        ),
+        cta="Acknowledge Risk",
+    )
+
+
+def owner_reminder_email(risk: models.Risk, ack_link: str, *, days_left: int) -> str:
+    """Daily reminder email for a Risk Owner who has not acknowledged yet."""
+    code = html.escape(risk.risk_code)
+    day_word = "day" if days_left == 1 else "days"
+    return _owner_email(
+        risk,
+        ack_link,
+        heading="Daily acknowledgement reminder",
+        lead_html=(
+            f"This is your daily reminder to acknowledge risk {code}. It is still "
+            f"awaiting your acknowledgement and has {days_left} {day_word} left "
+            f"before its risk end date. If it is not acknowledged, it will be "
+            f"escalated to you and your Project Manager two days before that date."
+        ),
+        cta="Acknowledge Risk",
+    )
+
+
+def escalation_email(risk: models.Risk, ack_link: str) -> str:
+    """Escalation email: the acknowledgement deadline was missed."""
+    code = html.escape(risk.risk_code)
+    return _owner_email(
+        risk,
+        ack_link,
+        heading="Risk escalated — acknowledgement overdue",
+        lead_html=(
+            f"Risk {code} has been <strong>escalated</strong> because it was not "
+            f"acknowledged before the escalation deadline (two days before its "
+            f"risk end date). Your Project Manager has been notified. Please "
+            f"acknowledge the risk now and action the response plan before the "
+            f"risk end date."
+        ),
+        cta="Acknowledge Risk",
+    )
 
 
 def resolution_rejected_email(risk: models.Risk, reason: str, link: str) -> str:
@@ -347,6 +401,7 @@ class NotificationService:
         risk: models.Risk | None = None,
         project: models.Project | None = None,
         email_body: str | None = None,
+        owner_email_body: str | None = None,
     ) -> Recipients:
         """Resolve recipients, persist in-app rows, and send email."""
         ctx = self._build_context(db, risk, project)
@@ -360,6 +415,7 @@ class NotificationService:
             risk=risk,
             project=project,
             email_body=email_body,
+            owner_email_body=owner_email_body,
         )
 
     def notify_recipients(
@@ -373,6 +429,7 @@ class NotificationService:
         risk: models.Risk | None = None,
         project: models.Project | None = None,
         email_body: str | None = None,
+        owner_email_body: str | None = None,
     ) -> Recipients:
         """Persist and email for an already-resolved recipient set."""
         project_id = (
@@ -391,44 +448,122 @@ class NotificationService:
             )
         db.flush()
 
-        if self._email and recipients.to_emails:
-            try:
-                self._email.send_email(
-                    to=list(recipients.to_emails),
-                    cc=list(recipients.cc_emails) or None,
-                    subject=title,
-                    body_html=(
-                        email_body
-                        if email_body is not None
-                        else self._email_body(body, risk)
-                    ),
+        if self._email:
+            to = list(recipients.to_emails)
+            cc = list(recipients.cc_emails) or None
+            if email_body is not None:
+                # The caller supplied the exact body (e.g. a rejection reason
+                # that only concerns the Risk Owner) — send it unchanged.
+                self._send_email(
+                    to=to, cc=cc, subject=title, body_html=email_body, event=event
                 )
-            except Exception:
-                # Email is best-effort; never let a mail failure roll back the
-                # in-app notification or the surrounding transaction. Log it so
-                # silent delivery failures are visible in the container logs.
-                logger.exception(
-                    "Email delivery failed for event=%s to=%s", event, recipients.to_emails
+            else:
+                self._send_rendered(
+                    event=event,
+                    title=title,
+                    body=body,
+                    risk=risk,
+                    to=to,
+                    cc=cc,
+                    owner_email_body=owner_email_body,
                 )
         return recipients
 
+    def _send_rendered(
+        self,
+        *,
+        event: str,
+        title: str,
+        body: str,
+        risk: models.Risk | None,
+        to: list[str],
+        cc: list[str] | None,
+        owner_email_body: str | None = None,
+    ) -> None:
+        """Send the rendered notification, splitting the Risk Owner out.
+
+        A Risk Owner (internal or external) acts from the signed, single-risk
+        link emailed to them, so they must never receive the staff app link —
+        and staff (PM, PMO Lead, Practice Lead) must not be addressed as the
+        owner. When the owner is among the recipients, their email is sent
+        separately from everyone else's.
+        """
+        owner_email = risk.owner.upn if risk is not None and risk.owner else None
+        ack_link = acknowledgement_url(risk) if risk is not None else None
+        if risk is not None and owner_email and ack_link and owner_email in to:
+            self._send_email(
+                to=[owner_email],
+                cc=None,
+                subject=title,
+                body_html=(
+                    owner_email_body
+                    if owner_email_body is not None
+                    else self._email_body(body, risk)
+                ),
+                event=event,
+            )
+            others = [email for email in to if email != owner_email]
+            if others:
+                self._send_email(
+                    to=others,
+                    cc=cc,
+                    subject=title,
+                    body_html=self._staff_email_body(body, risk),
+                    event=event,
+                )
+            return
+        self._send_email(
+            to=to,
+            cc=cc,
+            subject=title,
+            body_html=self._staff_email_body(body, risk),
+            event=event,
+        )
+
+    def _send_email(
+        self,
+        *,
+        to: list[str],
+        cc: list[str] | None,
+        subject: str,
+        body_html: str,
+        event: str,
+    ) -> None:
+        """Best-effort send; a mail failure never rolls back the transaction."""
+        if not to or self._email is None:
+            return
+        try:
+            self._email.send_email(to=to, cc=cc, subject=subject, body_html=body_html)
+        except Exception:
+            # Log it so silent delivery failures are visible in the container logs.
+            logger.exception("Email delivery failed for event=%s to=%s", event, to)
+
     @staticmethod
-    def _email_body(body: str, risk: models.Risk | None) -> str:
+    def _staff_email_body(body: str, risk: models.Risk | None) -> str:
+        """Body for staff recipients: the notification plus the app link."""
         escaped = html.escape(body)
         if risk is None:
             return f"<p>{escaped}</p>"
-        # External owners have no Wragby account, so they get a signed, expiring
-        # link that grants access to this one risk only — and never the internal
-        # application link, which they are not permitted to open.
-        ack_link = acknowledgement_url(risk)
-        if ack_link:
-            return _external_ack_email(risk, ack_link)
         link = f"{settings.app_base_url}/risks/{risk.id}"
         code = html.escape(risk.risk_code)
         return (
             f"<p>{escaped}</p>"
             f'<p><a href="{link}">Open risk {code} in WRAGBY RiskIntel</a></p>'
         )
+
+    @staticmethod
+    def _email_body(body: str, risk: models.Risk | None) -> str:
+        """Owner-facing body: the signed single-risk link when there is one.
+
+        Every owner acts from email: they get a signed link that grants access
+        to this one risk only — and never the internal application link, which
+        they are not expected to open.
+        """
+        if risk is not None:
+            ack_link = acknowledgement_url(risk)
+            if ack_link:
+                return _external_ack_email(risk, ack_link)
+        return NotificationService._staff_email_body(body, risk)
 
     @staticmethod
     def _build_context(

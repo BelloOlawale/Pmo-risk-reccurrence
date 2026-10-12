@@ -160,8 +160,9 @@ def _notify_owner_assignment(db: Session, risk: models.Risk) -> None:
         event=EVENT_OWNER_ASSIGNMENT,
         title=f"Risk assigned: {risk.risk_code}",
         body=(
-            f"Risk {risk.risk_code}{owners} has been assigned to you.{deadline} "
-            "Open the app to review and acknowledge it."
+            f"Risk {risk.risk_code}{owners} has been assigned.{deadline} "
+            "A secure link to review and acknowledge it has been emailed to the "
+            "Risk Owner."
         ),
         risk=risk,
     )
@@ -181,11 +182,12 @@ def login_options() -> schemas.LoginOptions:
     )
 
 
-def _resolve_external_risk(db: Session, token: str) -> models.Risk:
-    """Resolve a signed acknowledgement token to its single external-owner risk.
+def _resolve_acknowledgement_risk(db: Session, token: str) -> models.Risk:
+    """Resolve a signed acknowledgement token to its single owner's risk.
 
-    Any failure (bad signature, expiry, wrong owner, non-external or inactive
-    owner) is reported as a 404 so the link leaks nothing about the risk.
+    Works for internal and external owners alike, since neither is expected to
+    sign in. Any failure (bad signature, wrong owner, inactive owner) is
+    reported as a 404 so the link leaks nothing about the risk.
     """
     claims = decode_acknowledgement_token(token)
     if claims is None:
@@ -210,7 +212,6 @@ def _resolve_external_risk(db: Session, token: str) -> models.Risk:
         risk is None
         or risk.owner_user_id != owner_id
         or owner is None
-        or owner.owner_type != EXTERNAL
         or not owner.is_active
     ):
         raise HTTPException(
@@ -271,8 +272,8 @@ def _external_ack_read(
 def external_acknowledge_info(
     token: str, db: DbDep
 ) -> schemas.ExternalAcknowledgeRead:
-    """Public: show the single risk behind an external acknowledgement link."""
-    return _external_ack_read(db, _resolve_external_risk(db, token))
+    """Public: show the single risk behind an acknowledgement link."""
+    return _external_ack_read(db, _resolve_acknowledgement_risk(db, token))
 
 
 @app.post(
@@ -280,8 +281,8 @@ def external_acknowledge_info(
     response_model=schemas.ExternalAcknowledgeRead,
 )
 def external_acknowledge(token: str, db: DbDep) -> schemas.ExternalAcknowledgeRead:
-    """Public: acknowledge the assigned risk (idempotent) for an external owner."""
-    risk = _resolve_external_risk(db, token)
+    """Public: acknowledge the assigned risk (idempotent) for its owner."""
+    risk = _resolve_acknowledgement_risk(db, token)
     if not risk.sla_acknowledged:
         risk = acknowledge_risk(db, risk, actor_user_id=risk.owner_user_id)
     return _external_ack_read(db, risk)
@@ -298,7 +299,7 @@ def external_resolve(token: str, db: DbDep) -> schemas.ExternalAcknowledgeRead:
     ``Resolved`` or ``Closed``. The Project Manager is notified to review the
     proposed resolution and accept or reject it.
     """
-    risk = _resolve_external_risk(db, token)
+    risk = _resolve_acknowledgement_risk(db, token)
     if risk.status in (
         RiskStatus.PENDING_RESOLUTION.value,
         RiskStatus.RESOLVED.value,
@@ -852,19 +853,23 @@ def patch_risk(
     if updated.owner_user_id is not None and updated.owner_user_id != owner_before:
         _notify_owner_assignment(db, updated)
 
-    # A manual transition to Event materializes the risk the same way the hourly
+    # A manual transition to Event materializes the risk the same way the daily
     # job does: update_risk has already created the single Issue, so mirror the
-    # materialization notification to the owner, PM, and PMO Lead.
+    # materialization notification to the Project Manager (PMO Lead copied).
     if not was_event and updated.status == RiskStatus.EVENT.value:
         issue = updated.issue
         assert issue is not None  # update_risk created it for the new Event risk
+        owner = updated.owner
+        owner_name = owner.display_name if owner else "Unassigned"
+        owner_email = owner.upn if owner else "—"
         build_notification_service().notify(
             db,
             event=EVENT_MATERIALIZED,
             title=f"Risk materialized: {updated.risk_code}",
             body=(
-                f"Risk {updated.risk_code} was marked as an Event (materialized) and "
-                f"Issue {issue.issue_code} has been created from the materialized risk."
+                f"Risk {updated.risk_code} was marked as an Event (materialized) "
+                f"and Issue {issue.issue_code} has been created. "
+                f"Risk Owner: {owner_name} ({owner_email})."
             ),
             risk=updated,
         )
@@ -952,7 +957,7 @@ def reject_risk_resolution(
 
     owner = updated.owner
     email_body = None
-    if owner is not None and owner.owner_type == EXTERNAL:
+    if owner is not None:
         link = acknowledgement_url(updated)
         if link:
             email_body = resolution_rejected_email(updated, reason, link)

@@ -313,10 +313,10 @@ def transition_risk(
         new_value=target_status.value,
         actor_user_id=actor_user_id,
     )
-    # Escalation and materialization both raise a tracked Issue. Creating it in
-    # the same transaction (idempotent) means an escalated or Event risk shows
-    # up in the Issues table immediately, not on the next backfill sweep.
-    if target_status in (RiskStatus.EVENT, RiskStatus.ESCALATED):
+    # Only materialization (Event) raises a tracked Issue. Escalation is a
+    # monitoring state: an escalated risk is still owned and worked by its Risk
+    # Owner and must NOT appear in the Issues table.
+    if target_status == RiskStatus.EVENT:
         ensure_issue_for_risk(db, risk, actor_user_id=actor_user_id)
     db.commit()
     db.refresh(risk)
@@ -361,12 +361,11 @@ def ensure_issue_for_risk(
     no matter how many times the automation runs.
 
     Raises:
-        ValueError: if ``risk`` is neither escalated nor in the ``Event``
-            (materialized) status.
+        ValueError: if ``risk`` is not in the ``Event`` (materialized) status.
     """
-    if risk.status not in (RiskStatus.EVENT.value, RiskStatus.ESCALATED.value):
+    if risk.status != RiskStatus.EVENT.value:
         raise ValueError(
-            f"Issues are only created for escalated or materialized (Event) risks; "
+            f"Issues are only created for materialized (Event) risks; "
             f"{risk.risk_code} is {risk.status!r}."
         )
     existing = db.scalar(
@@ -729,9 +728,10 @@ def update_risk(
             actor_user_id=actor_user_id,
         )
 
-    # Escalation and materialization both raise the single tracked Issue;
-    # repeated edits of an already-escalated/Event risk are idempotent.
-    if risk.status in (RiskStatus.EVENT.value, RiskStatus.ESCALATED.value):
+    # Only materialization (Event) raises the single tracked Issue; repeated
+    # edits of an already-Event risk are idempotent. Escalation is a monitoring
+    # state and never populates the Issues table.
+    if risk.status == RiskStatus.EVENT.value:
         ensure_issue_for_risk(db, risk, actor_user_id=actor_user_id)
 
     db.commit()

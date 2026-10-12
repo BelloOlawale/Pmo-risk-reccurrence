@@ -25,8 +25,8 @@ The end-to-end flow is a **closed loop** with eight phases:
 | 2 | Risk suggestion ("recurrence") | Project created | System (LLM + retrieval) |
 | 3 | Risk capture | Suggestions returned | PM / Risk Owner |
 | 4 | Scoring | Risk accepted / created | System (deterministic) |
-| 5 | SLA monitoring | Risk has a deadline | System (Celery Beat) |
-| 6 | Escalation | SLA breach | System → PMO Lead |
+| 5 | Daily reminders & monitoring | Risk has a start/end date | System (Celery Beat) |
+| 6 | Escalation | Unacknowledged at end − 2 days | System → Risk Owner + PM |
 | 7 | Resolution & closure | Owner resolves | Owner / PM |
 | 8 | Learning feedback | Risk closed | System |
 
@@ -39,9 +39,9 @@ The end-to-end flow is a **closed loop** with eight phases:
 | **System Admin** | Permission role | Manage users, config, imports; see all data. |
 | **PMO Lead** | Permission role | Portfolio view, handle escalations, de-escalate, settings, import. |
 | **Project Manager (PM)** | Permission role | Create projects; full control of *own* projects' risks. |
-| **Risk Owner** | Record-level | Per-risk assignee; edits own risks; receives SLA warnings. |
+| **Risk Owner** | Record-level | Per-risk assignee; acts from the emailed secure link; receives daily reminders. |
 | **Practice Lead** | Record-level | Department → person; CC'd on owner-assignment notifications. |
-| **System** | Automation | Celery scheduler, SLA monitor, LLM suggestion engine, notifier. |
+| **System** | Automation | Celery scheduler, reminder/escalation monitors, LLM suggestion engine, notifier. |
 
 Row-level scoping (enforced in the API layer):
 
@@ -61,11 +61,12 @@ flowchart TD
     D -->|"Accept"| E["Phase 4<br/>Risk → Open, scored,<br/>owner + SLA assigned"]
     D -->|"Dismiss"| F["Dismissed<br/>(never reappears for project)"]
     D -->|"Quick Add<br/>custom risk"| E
-    E --> G["Phase 5<br/>Hourly SLA monitor"]
-    G --> H{"Owner activity<br/>before deadline?"}
-    H -->|"Yes"| I["SLA satisfied<br/>(permanently)"]
-    H -->|"No — in warning window"| J["Reminder to owner"]
-    H -->|"No — deadline passed"| K["Phase 6<br/>Escalated + notify owner/PM/PMO Lead"]
+    E --> G["Phase 5<br/>Daily reminders & monitoring"]
+    G --> H{"Acknowledgement status<br/>by date window?"}
+    H -->|"Acknowledged"| I["Reminders stop<br/>(permanently)"]
+    H -->|"Unacknowledged, ≤ end − 3 days"| J["Daily reminder to owner"]
+    H -->|"Unacknowledged, ≥ end − 2 days"| K["Phase 6<br/>Escalated + notify owner/PM"]
+    H -->|"Unresolved past end date"| N["Phase 6<br/>Event + Issue (PM notified)"]
     K --> L{"De-escalate?"}
     L -->|"Yes (PM / PMO Lead,<br/>written rationale)"| M["Back to In Progress"]
     M --> G
@@ -227,69 +228,68 @@ The rating is recomputed whenever `likelihood`/`impact` change (audit-logged).
 
 ---
 
-## 9. Phase 5 — SLA monitoring
+## 9. Phase 5 — Daily reminders & monitoring
 
-Checked **hourly** by Celery Beat. The clock starts at `risk_start_date`
-(midnight in the business timezone, default `Africa/Lagos`) or falls back to
-`created_at`.
+Checked **daily** by Celery Beat in the business timezone (default
+`Africa/Lagos`). Given `start` = Risk Start Date and `end` = Risk End Date, the
+Risk End Date is both the SLA deadline and the resolution deadline.
 
-| Rating | SLA deadline | Warning window |
-|---|---|---|
-| High | 24 hours | 4 hours before |
-| Medium | 48 hours | 12 hours before |
-| Low | 120 hours (5 days) | 24 hours before |
-
-**Activity** = any of (a) an audit-log entry by the owner (field edit / status
-change / note), or (b) explicit **Acknowledge**. Once activity occurs, the SLA
-is **permanently satisfied** — no further reminders.
+**Activity** no longer stops the clock: only explicit **Acknowledge** does. Once
+acknowledged, reminders stop permanently.
 
 ```mermaid
 flowchart TD
-    A["Hourly Celery Beat tick<br/>(all active risks)"] --> B{"Owner activity?"}
-    B -->|"Yes"| C["SLA satisfied<br/>permanently — stop"]
-    B -->|"No"| D{"now ≥ deadline?"}
-    D -->|"Yes"| E["BREACH → escalate<br/>(Phase 6)"]
-    D -->|"No"| F{"now ≥ deadline −<br/>warning window?"}
-    F -->|"Yes"| G["WARNING → remind owner"]
-    F -->|"No"| H["OK — within SLA,<br/>no action"]
+    A["Daily Celery Beat tick<br/>(active, unacknowledged risks)"] --> B{"today within<br/>[start, end − 3 days]?"}
+    B -->|"Yes"| C["DAILY REMINDER → email owner"]
+    B -->|"No"| D{"today ≥ end − 2 days?"}
+    D -->|"Yes"| E["ESCALATE → Phase 6"]
+    D -->|"No"| F{"today > end?"}
+    F -->|"Yes"| G["MATERIALIZE → Event (Phase 6 note)"]
+    F -->|"No"| H["No action"]
 ```
 
-Changing `risk_rating` or `risk_start_date` **recomputes** the deadline unless
-it is manually overridden (`sla_manual_override`).
+- Reminders run from the Risk Start Date up to and including **three days before**
+  the Risk End Date, once per day (`last_reminder_on` keeps re-runs idempotent).
+- Changing `risk_rating` or `risk_start_date` no longer moves a PM-set deadline;
+  the Risk End Date is the deadline and the SLA is manually overridden only via
+  `sla_manual_override`.
 
 ---
 
 ## 10. Phase 6 — Escalation & de-escalation
 
-**Escalation is SLA-driven only** — no Critical flag, no score-change triggers.
+**Escalation is time-driven only** — no Critical flag, no score-change triggers.
 
 ```mermaid
 flowchart TD
-    A["SLA breach<br/>(deadline passed, no activity)"] --> B["Status → Escalated"]
-    B --> C["Notify: Owner + PM + PMO Lead"]
+    A["Unacknowledged at<br/>end − 2 days"] --> B["Status → Escalated"]
+    B --> C["Notify: Owner + PM<br/>(no Issue created)"]
     C --> D{"Resolution path?"}
     D -->|"De-escalate"| E["PM or PMO Lead only<br/>+ written rationale (audit-logged)"]
     E --> F["Status → In Progress"]
-    F --> G["Back under SLA monitoring"]
+    F --> G["Back under monitoring"]
     D -->|"Risk materialized"| H["Status → Event<br/>(displays as 'Materialized')"]
     D -->|"Resolve"| I["Status → Pending Resolution<br/>(owner) → Resolved (PM)"]
 ```
 
+- Escalation fires two days before the Risk End Date and emails the **Risk Owner
+  and the Project Manager**. It does **not** create an Issue and the risk does
+  **not** appear in the Issues table while escalated.
 - Only **PM or PMO Lead** may de-escalate, and it requires a written rationale
   recorded in the append-only audit log.
 - De-escalation returns the risk to `In Progress` and re-enters monitoring.
 
-> **Automatic materialization (Risk End Date).** Materialization is a separate,
-> backend-driven trigger from SLA escalation. The hourly end-date monitor
-> transitions any *unresolved* risk (`Open` / `In Progress` / `Escalated`) whose
-> **Risk End Date** (`risk_start_date` + the rating's SLA window) has fully
-> passed to `Event`, marks it Materialized, and automatically creates exactly
-> one **Issue** populated from the originating risk (idempotent per risk).
-> Acknowledgement satisfies the SLA *acknowledgement* requirement only — an
+> **Materialization (Risk End Date → Event → Issue).** Materialization is a
+> separate, backend-driven trigger from escalation. Once the Risk End Date has
+> fully passed, any *unresolved* risk (`Open` / `In Progress` / `Escalated`) is
+> transitioned to `Event`, marked Materialized, and exactly one **Issue** is
+> created from it (idempotent per risk). The **Project Manager** is emailed the
+> risk and owner details, and the risk then appears in the Issues table.
+> Acknowledgement satisfies the acknowledgement requirement only — an
 > acknowledged but unresolved risk still materializes once its Risk End Date
 > passes. A **manual** status change to `Event` by the owner/PM materializes the
 > risk identically and immediately (same Issue creation + notification), so the
-> outcome does not depend on the next hourly sweep. `Pending Resolution` /
+> outcome does not depend on the next daily sweep. `Pending Resolution` /
 > `Resolved` / `Closed` risks never materialize, the original risk is always
 > retained for audit, and a
 > materialized risk is never automatically closed (the PMO Lead keeps sole
@@ -339,10 +339,10 @@ stateDiagram-v2
     Suggested --> Open : accept / quick add
     Suggested --> Dismissed : dismiss
     Open --> InProgress : acknowledge / working
-    Open --> Escalated : SLA breach
+    Open --> Escalated : unacknowledged at end − 2 days
     Open --> Event : materializes
     Open --> PendingResolution : resolve (owner)
-    InProgress --> Escalated : SLA breach
+    InProgress --> Escalated : unacknowledged at end − 2 days
     InProgress --> Event : materializes
     InProgress --> PendingResolution : resolve (owner)
     Escalated --> InProgress : de-escalate (PM / PMO Lead)
@@ -364,7 +364,7 @@ stateDiagram-v2
 | Suggested | Created by LLM suggestion or Quick Add; not yet accepted. |
 | Open | Accepted and live; owner + SLA assigned; awaiting first action. |
 | In Progress | Owner acknowledged / working. |
-| Escalated | SLA breached (no activity before deadline). |
+| Escalated | Acknowledgement not received by two days before the Risk End Date; owner + PM notified, no Issue created. |
 | Event | Risk materialised (displays as "Materialized"). |
 | Pending Resolution | Risk Owner proposed a resolution; awaits the Project Manager's accept/reject. |
 | Resolved | Project Manager accepted the resolution; residual acceptable. |
@@ -381,11 +381,10 @@ timestamp / JSONB snapshot).
 
 | Trigger | Recipients | Channel |
 |---|---|---|
-| Owner assignment | Owner + PM + PMO Lead + Practice Lead (CC) | Email + in-app |
-| SLA warning | Owner | Email |
-| Breach / escalation | Owner + PM + PMO Lead | Email |
-| **Materialization (Event + Issue created)** | **Owner + PM** | **Email + in-app** |
-| Risk start date | Owner | Email + in-app |
+| Owner assignment | Owner (secure link) + PM + PMO Lead + Practice Lead (CC) | Email + in-app |
+| Daily reminder | Owner (secure link) | Email |
+| Escalation (unacknowledged at end − 2 days) | Owner (secure link) + PM | Email + in-app |
+| **Materialization (Event + Issue created)** | **PM (email) + PMO Lead (CC)** | **Email + in-app** |
 | Weekly summary (Mon 8 AM) | PM + PMO Lead | Email |
 | Closure confirmation | PM + PMO Lead | Email |
 
@@ -413,13 +412,16 @@ sequenceDiagram
     SYS->>SYS: Status = Open, score via 3x3, assign owner + SLA
     SYS-->>OW: Owner-assignment notification (+ PM, PMO Lead, Practice Lead)
 
-    loop Hourly (Celery Beat)
-        SYS->>SYS: Check SLA (activity / warning / breach)
-        alt No activity, within warning window
-            SYS-->>OW: Reminder
-        else Deadline passed
+    loop Daily (Celery Beat)
+        SYS->>SYS: Check acknowledgement by date window
+        alt Unacknowledged, start <= today <= end - 3
+            SYS-->>OW: Daily reminder
+        else Unacknowledged, today >= end - 2
             SYS->>SYS: Status = Escalated
-            SYS-->>OW: Breach email (owner + PM + PMO Lead)
+            SYS-->>OW: Escalation email (owner + PM)
+        else today > end and unresolved
+            SYS->>SYS: Status = Event + create Issue
+            SYS-->>PM: Materialized email (risk + owner details)
         end
     end
 
@@ -443,7 +445,7 @@ sequenceDiagram
 | Case | Behaviour |
 |---|---|
 | **Invalid status transition** | Rejected (`InvalidTransitionError`); no override without an audit-log entry. |
-| **Risk End Date passes, risk unresolved** | Hourly job sets status → `Event` (Materialized) and creates exactly one Issue (idempotent). `Resolved`/`Closed` risks excluded; comparison is timezone-safe against the business date. |
+| **Risk End Date passes, risk unresolved** | Daily job sets status → `Event` (Materialized), emails the PM, and creates exactly one Issue (idempotent). `Resolved`/`Closed` risks excluded; comparison is timezone-safe against the business date. |
 | **LLM cites a risk not retrieved** | Citation audit rejects it before display (groundedness check). |
 | **Risk has no `risk_start_date`** | SLA anchor falls back to `created_at`. |
 | **Suggestion dismissed** | Per-project exclusion; never reappears for that project. |
@@ -460,6 +462,6 @@ sequenceDiagram
 3. **Suggest** recurring risks (exact + keyword + semantic → LLM + citation audit).
 4. **Capture** — accept (Open) / dismiss (excluded) / quick add (Custom).
 5. **Score** via the deterministic 3×3 matrix.
-6. **Monitor** hourly; warn, then **escalate on breach**.
+6. **Monitor** daily; remind, then **escalate unacknowledged risks at end − 2 days**, then **materialize unresolved risks past the end date**.
 7. **Resolve** → **Close** with root cause + lessons learned.
 8. **Feed** learnings back so the next project's suggestions improve.

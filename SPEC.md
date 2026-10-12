@@ -15,8 +15,9 @@
 
 A **standalone web application** that automates project risk management: a PM creates
 a project, the system suggests recurring risks from historical data (hybrid search +
-LLM analysis with citations), risks are captured quickly, scored simply, monitored on
-SLA deadlines, escalated on breach, resolved, and closed — feeding learnings back so
+LLM analysis with citations), risks are captured quickly, scored simply, monitored with
+daily owner reminders, escalated when unacknowledged, materialized into an Issue when
+unresolved past the Risk End Date, resolved, and closed — feeding learnings back so
 future suggestions improve.
 
 **Explicitly NOT used:** SharePoint, Power Apps, Power BI, Power Automate.
@@ -130,7 +131,7 @@ Suggested ──► Open ──► In Progress ──► Escalated ──► Eve
 | Suggested | Created by an LLM/historical suggestion; not yet accepted |
 | Open | Live (accepted or manually added); SLA assigned, owner assigned manually; awaiting first action |
 | In Progress | Owner acknowledged / working |
-| Escalated | SLA breached (no activity before deadline) |
+| Escalated | Acknowledgement not received by two days before the Risk End Date; owner + PM notified, no Issue created |
 | Event | Risk materialised (displays as "Materialized"); set **automatically** when the Risk End Date passes with the risk still unresolved, or **deliberately** when the owner/PM changes the status to Event |
 | Pending Resolution | The Risk Owner proposed a resolution; the Project Manager reviews it |
 | Resolved | The Project Manager accepted the proposed resolution; residual acceptable |
@@ -171,43 +172,38 @@ Lead may perform the final closure (unchanged).
 
 ---
 
-## 6. SLA & Monitoring
+## 6. Monitoring, reminders & escalation
 
-| Rating | SLA deadline | Warning |
-|---|---|---|
-| High | 24 hours | 4 hours before |
-| Medium | 48 hours | 12 hours before |
-| Low | 5 days (120h) | 24 hours before |
+Monitoring is **day-based** (Celery Beat, daily) in the configured business
+timezone (env `RISKAPP_APP_TIMEZONE`, default `Africa/Lagos`). Dates are compared
+date-only, so risks are never acted on early because of a timezone or
+midnight-boundary skew. The **Risk End Date is both the SLA deadline and the
+resolution deadline** (end of that day).
 
-- The deadline is computed from **`risk_start_date`** (midnight of that day +
-  the rating's response window), **not** from when the risk was created. When a
-  risk has no `risk_start_date`, it falls back to `created_at`.
-- The anchor is **timezone-aware**: midnight is taken in the configured business
-  timezone (env `RISKAPP_APP_TIMEZONE`, default `Africa/Lagos`) and stored as
-  UTC. The SLA clock starts ticking when `risk_start_date` is reached.
-- Changing `risk_rating` or `risk_start_date` recomputes the deadline unless it
-  is manually overridden.
-- Checked **hourly** (Celery Beat).
-- **Activity** = any of: (a) an audit-log entry by the owner (field edit, status
-  change, note), or (b) explicit **Acknowledge**. Once activity occurs, the SLA is
-  **permanently satisfied** — no more reminders.
-- **Breach** = deadline passed with no activity → status **Escalated**, notify
-  Owner + PM + PMO Lead.
-- **Escalation is SLA-driven only** (no Critical flag, no score-change triggers).
+Given `start` = Risk Start Date and `end` = Risk End Date:
+
+1. **Daily acknowledgement reminders** — from `start` up to and including
+   `end − 3 days`, the Risk Owner is emailed **once per day** while the risk is
+   unacknowledged. Reminders stop as soon as the owner acknowledges. Each send
+   is stamped on the risk (`last_reminder_on`) so re-runs are idempotent.
+2. **Escalation** — from `end − 2 days`, a risk that is still **unacknowledged**
+   is escalated: status → `Escalated` and an escalation email is sent to the
+   **Risk Owner and the Project Manager**. Escalated risks keep their owner and
+   are worked as normal; **escalation never creates an Issue** and an escalated
+   risk **does not appear in the Issues table**.
+3. **Materialization** — once `end` has passed (`end < today`) and the risk is
+   still **unresolved** (`Open` / `In Progress` / `Escalated`), status → `Event`
+   (displays as "Materialized"), the **Project Manager** is emailed the risk and
+   owner details, and exactly one **Issue** is created. The risk then appears in
+   the Issues table. `Resolved` / `Closed` / `Dismissed` / `Suggested` risks
+   never materialize.
+
+- **Acknowledgement** (in-app or from the emailed secure link) permanently
+  satisfies the acknowledgement requirement and stops reminders; it does not
+  resolve the risk.
+- **Activity** no longer stops the clock: only acknowledgement does.
+- Escalation is time-driven only (no Critical flag, no score-change triggers).
 - De-escalation: PM or PMO Lead only, with written rationale (audit-logged).
-
-### Risk End Date = resolution deadline
-
-**Risk End Date** = `risk_start_date` + the rating's SLA window (High 24h → 1
-business day, Medium 48h → 2 days, Low 120h → 5 days) — the same `SLA_HOURS`
-duration that drives the response deadline, so the two never drift apart.
-
-It is the **deadline for resolution**: an hourly backend job (Celery Beat, at
-:30) transitions any risk that is still `Open` / `In Progress` / `Escalated`
-after `risk_end_date < today` (business timezone) to `Event` (Materialized) and
-auto-creates one Issue populated from the risk. The comparison is date-only in
-the business timezone, so risks are never materialized early because of a
-timezone or midnight-boundary skew.
 
 ---
 
@@ -242,14 +238,21 @@ existing `evaluation.py` groundedness check is ported).
 
 - Channels: **email (Azure Communication Services) + in-app** (React bell + unread count).
 - Email action buttons = **deep links** into the React app (not SharePoint forms).
-- Matrix (from the docs):
-  - Owner assignment → owner + PM + PMO Lead + Practice Lead (CC)
-  - SLA warning → owner
-  - Breach / escalation → owner + PM + PMO Lead
-  - **Materialization (Event → Issue created) → owner + PM + PMO Lead** (email + in-app)
-  - Risk start date → owner (email + in-app, sent on `risk_start_date`)
+- Risk Owners (internal and external) act from a **signed, single-risk link**
+  emailed to them — they are not expected to sign in to the app. Staff
+  notifications link into the React app as deep links.
+- Matrix:
+  - Owner assignment → owner (secure link) + PM + PMO Lead + Practice Lead (CC)
+  - Daily acknowledgement reminder → owner (secure link)
+  - Escalation (unacknowledged at `end − 2 days`) → owner (secure link) + PM
+  - **Materialization (Event → Issue created) → PM (email) + PMO Lead (CC)**, with
+    the risk and owner details
   - Weekly summary (Mon 8 AM) → PM + PMO Lead
   - Closure confirmation → PM + PMO Lead
+
+> Owner-specific emails (assignment, reminder, escalation) are sent to the owner
+> separately from the staff notification so the owner receives the signed
+> single-risk link and staff receive the in-app deep link.
 
 ---
 
@@ -295,10 +298,10 @@ Dropped from MVP: PMO Analyst, Data Scientist, Information Security Manager.
 
 ## 12. Background Jobs (Celery)
 
-- Hourly SLA monitor (remind / escalate).
-- Hourly **end-date monitor** (at :30): materialize overdue unresolved risks —
+- Daily **owner reminder** job (and daily **escalation** job at `end − 2 days`).
+- Daily **end-date monitor**: materialize overdue unresolved risks —
   `risk_end_date` passed and status still `Open` / `In Progress` / `Escalated`
-  — to `Event` and auto-create one Issue per risk (idempotent; also backfills an
+  — to `Event`, email the PM, and auto-create one Issue per risk (idempotent; also backfills an
   Issue for any Event risk that lacks one).
 - Daily start-date check — email the owner when `risk_start_date` is today.
 - Weekly summary (Monday 8 AM).
@@ -334,7 +337,7 @@ treatment workflow (residual risk scoring, management sign-off).
 3. Celery + Redis + Beat for all background work (scale now, not APScheduler).
 4. 3-level scoring (Low/Med/High); no Critical flag, no 1–25, no 5 dimensions.
 5. Status: Suggested → Open → In Progress → Escalated → Event → Pending Resolution → Resolved → Closed.
-6. Escalation = SLA breach only.
+6. Escalation = unacknowledged two days before the Risk End Date only.
 7. Light treatment (Response Strategy + Response Plan), no residual scoring.
 8. "Recurrence" = hybrid (exact + keyword + semantic) suggestion engine + LLM.
 9. One-time seed + admin upload; defer API connectors.

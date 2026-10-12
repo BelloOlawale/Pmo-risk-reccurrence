@@ -1,16 +1,21 @@
-"""External risk owners and secure acknowledgement.
+"""Risk owners and secure acknowledgement links.
 
-External owners (partners, vendors, consultants) are people who are not Wragby
-employees and are not in the Entra directory, yet still need to own a risk. They
-are stored as ordinary ``users`` rows flagged ``owner_type='External'`` so the
-existing ``risks.owner_user_id`` foreign key, SLA/escalation workflow and
-notifications keep working unchanged — they simply never authenticate and hold
-no application roles.
+Every Risk Owner acts from email, never by signing in to the app. That is
+unconditional for external owners (partners, vendors, consultants) — people who
+are not Wragby employees and are not in the Entra directory — and it applies
+equally to internal owners, who are Wragby employees but are still not expected
+to open the application to acknowledge or resolve a risk.
 
-Because they have no Wragby account, an external owner reaches their risk via
-a **signed, persistent, single-risk** link emailed to them. The token encodes
-only the owner id and the one risk id it grants access to, so it can never be
-used to reach other registers, projects, reports or admin functionality.
+External owners are stored as ordinary ``users`` rows flagged
+``owner_type='External'`` so the existing ``risks.owner_user_id`` foreign key,
+SLA/escalation workflow and notifications keep working unchanged — they simply
+never authenticate and hold no application roles. Internal owners are the
+regular ``users`` rows synced from Entra.
+
+Every owner reaches their risk via a **signed, persistent, single-risk** link
+emailed to them. The token encodes only the owner id and the one risk id it
+grants access to, so it can never be used to reach other registers, projects,
+reports or admin functionality.
 
 The link does **not** expire on a timer: it stays valid for the whole life of
 the risk so the owner can acknowledge, resolve, and act again if the Project
@@ -143,11 +148,13 @@ def decode_acknowledgement_token(token: str) -> dict[str, Any] | None:
 
 
 def acknowledgement_url(risk: models.Risk) -> str | None:
-    """The secure acknowledgement link for a risk, or None when not applicable.
+    """The secure acknowledgement link for a risk, or None when it has no owner.
 
-    Only external owners get a link: internal owners acknowledge in the app.
+    Both internal and external owners get the link: neither is expected to sign
+    in to act on the risk. Without an owner there is nobody to email, so emails
+    fall back to the generic in-app link.
     """
-    if risk.owner is None or risk.owner.owner_type != EXTERNAL:
+    if risk.owner is None:
         return None
     token = create_acknowledgement_token(owner_user_id=risk.owner.id, risk_id=risk.id)
     return f"{settings.app_base_url}/acknowledge/{token}"

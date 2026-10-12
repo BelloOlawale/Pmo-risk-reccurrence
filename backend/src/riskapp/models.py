@@ -176,6 +176,10 @@ class Risk(TimestampMixin, Base):
     risk_start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     risk_end_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
 
+    # The last business day on which a daily acknowledgement reminder was sent,
+    # used to keep the reminder job idempotent within a day.
+    last_reminder_on: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+
     accepted_date: Mapped[dt.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

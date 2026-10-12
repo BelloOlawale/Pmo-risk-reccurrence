@@ -124,13 +124,13 @@ class TestFindOverdueRisks:
         _risk(db_session, code="RSK-NOEND", end_date=None)
         assert find_overdue_risks(db_session, TODAY) == []
 
-    def test_unacknowledged_overdue_risk_is_not_materialized(
+    def test_unacknowledged_overdue_risk_is_materialized(
         self, db_session: Session
     ) -> None:
-        # An unacknowledged risk past its deadline escalates; it does not
-        # silently become an Event.
-        _risk(db_session, code="RSK-UNACK", acknowledged=False)
-        assert find_overdue_risks(db_session, TODAY) == []
+        # A risk never acknowledged and never resolved still materializes once
+        # its end date passes: it becomes an Event and raises an Issue.
+        risk = _risk(db_session, code="RSK-UNACK", acknowledged=False)
+        assert find_overdue_risks(db_session, TODAY) == [risk]
 
     def test_in_progress_and_escalated_are_materializable(self, db_session: Session) -> None:
         _risk(db_session, code="RSK-IP", status="In Progress")
@@ -326,7 +326,7 @@ class TestRunEndDateMonitor:
         assert "status_change" in actions  # Open -> Event
         assert "issue_created" in actions
 
-    def test_materialization_notifies_owner_and_pm(self, db_session: Session) -> None:
+    def test_materialization_notifies_the_project_manager(self, db_session: Session) -> None:
         risk = _risk(db_session, code="RSK-NOTIFY")
         db_session.refresh(risk)
 
@@ -335,13 +335,13 @@ class TestRunEndDateMonitor:
         notifications = db_session.scalars(
             select(models.Notification).where(models.Notification.type == "materialized")
         ).all()
-        assert len(notifications) == 2
-        assert {n.recipient_user_id for n in notifications} == {
-            risk.owner_user_id,
-            risk.project.pm_user_id,
-        }
+        # The PM owns the resulting Issue; the Risk Owner is not emailed because
+        # the risk has left their hands (the PMO Lead is copied by email only).
+        assert len(notifications) == 1
+        assert notifications[0].recipient_user_id == risk.project.pm_user_id
         issue = _issues(db_session)[0]
         assert any(issue.issue_code in n.body for n in notifications)
+        assert any(risk.owner.display_name in n.body for n in notifications)  # type: ignore[union-attr]
 
     def test_issue_population_end_to_end(self, db_session: Session) -> None:
         """The Issue carries the source risk's identity and rating information."""
@@ -410,4 +410,16 @@ class TestTransitionRiskMaterializes:
         transition_risk(db_session, risk, RiskStatus.IN_PROGRESS.value)
         transition_risk(db_session, risk, RiskStatus.PENDING_RESOLUTION.value)
 
+        assert _issues(db_session) == []
+
+    def test_transition_to_escalated_does_not_create_issue(
+        self, db_session: Session
+    ) -> None:
+        risk = _risk(db_session, code="RSK-ESC-NOISSUE")
+        db_session.refresh(risk)
+
+        transition_risk(db_session, risk, RiskStatus.ESCALATED.value)
+
+        db_session.refresh(risk)
+        assert risk.status == RiskStatus.ESCALATED.value
         assert _issues(db_session) == []

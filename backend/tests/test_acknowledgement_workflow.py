@@ -1,11 +1,11 @@
 """Risk acknowledgement workflow.
 
-No owner            -> Acknowledge hidden / rejected
-Owner assigned      -> status In Progress, Acknowledge available
-Acknowledged in SLA -> no escalation
-Not acknowledged    -> Escalated + Issue + escalation notification
-Acknowledged but
-unresolved at SLA   -> Event + Issue
+No owner              -> Acknowledge hidden / rejected
+Owner assigned        -> status In Progress, Acknowledge available
+Acknowledged          -> never escalates
+Not acknowledged,     -> Escalated (two days before end date), owner + PM emailed,
+  near end date           NO Issue created
+Unresolved past end   -> Event + Issue, PM emailed, appears in the Issues table
 """
 
 from __future__ import annotations
@@ -19,10 +19,10 @@ from sqlalchemy.orm import Session
 from riskapp import models
 from riskapp.domain.status import RiskStatus
 from riskapp.notifications import NotificationService
-from riskapp.scheduler import run_end_date_monitor, run_sla_monitor
+from riskapp.scheduler import run_end_date_monitor, run_escalation_monitor
 from riskapp.services import get_or_create_user
 
-NOW = dt.datetime(2026, 8, 24, 12, 0, 0)
+TODAY = dt.date(2026, 8, 24)
 PAST_DATE = dt.date(2026, 8, 20)
 
 
@@ -66,7 +66,7 @@ def test_assigning_owner_moves_risk_to_in_progress(
     assert read["sla_acknowledged"] is False
 
 
-def test_not_acknowledged_past_deadline_escalates_and_raises_issue(
+def test_unacknowledged_risk_escalates_two_days_before_end_without_issue(
     client: TestClient, db_session: Session
 ) -> None:
     project, risk = _project_and_risk(client)
@@ -74,27 +74,54 @@ def test_not_acknowledged_past_deadline_escalates_and_raises_issue(
 
     row = db_session.get(models.Risk, risk["id"])
     assert row is not None
-    row.sla_deadline = NOW - dt.timedelta(hours=1)
-    row.risk_end_date = PAST_DATE
+    row.risk_start_date = dt.date(2026, 8, 18)
+    # Escalation fires two days before the end date (2026-08-24).
+    row.risk_end_date = dt.date(2026, 8, 26)
     db_session.commit()
 
-    count = run_sla_monitor(db_session, NotificationService(), NOW)
+    count = run_escalation_monitor(db_session, NotificationService(), TODAY)
     assert count == 1
 
     db_session.refresh(row)
     assert row.status == RiskStatus.ESCALATED.value
+
+    # Escalation is a monitoring state: it never populates the Issues table.
+    issue = db_session.scalar(
+        select(models.Issue).where(models.Issue.source_risk_id == row.id)
+    )
+    assert issue is None
+    notices = db_session.scalars(
+        select(models.Notification).where(models.Notification.type == "escalation")
+    ).all()
+    assert notices
+
+    listed = client.get(f"/api/projects/{project['id']}/issues").json()
+    assert listed == []
+
+
+def test_unacknowledged_risk_past_end_date_becomes_event_and_issue(
+    client: TestClient, db_session: Session
+) -> None:
+    project, risk = _project_and_risk(client)
+    _assign_owner(client, db_session, risk["id"])
+
+    row = db_session.get(models.Risk, risk["id"])
+    assert row is not None
+    row.risk_end_date = PAST_DATE
+    db_session.commit()
+
+    count = run_end_date_monitor(db_session, NotificationService(), TODAY)
+    assert count == 1
+
+    db_session.refresh(row)
+    assert row.status == RiskStatus.EVENT.value
 
     issue = db_session.scalar(
         select(models.Issue).where(models.Issue.source_risk_id == row.id)
     )
     assert issue is not None
 
-    notices = db_session.scalars(
-        select(models.Notification).where(models.Notification.type == "breach")
-    ).all()
-    assert notices
-
-    # The escalated risk is visible in the register's Issues table.
+    # The materialized risk now populates the Issues table.
     listed = client.get(f"/api/projects/{project['id']}/issues").json()
     assert [i["source_risk_id"] for i in listed] == [row.id]
 
@@ -111,7 +138,7 @@ def test_acknowledged_but_unresolved_past_deadline_becomes_event(
     row.risk_end_date = PAST_DATE
     db_session.commit()
 
-    count = run_end_date_monitor(db_session, NotificationService(), dt.date(2026, 8, 24))
+    count = run_end_date_monitor(db_session, NotificationService(), TODAY)
     assert count == 1
 
     db_session.refresh(row)
@@ -140,12 +167,11 @@ def test_acknowledged_and_pending_resolution_does_not_escalate_or_materialize(
 
     row = db_session.get(models.Risk, risk["id"])
     assert row is not None
-    row.sla_deadline = NOW - dt.timedelta(hours=1)
     row.risk_end_date = PAST_DATE
     db_session.commit()
 
-    assert run_sla_monitor(db_session, NotificationService(), NOW) == 0
-    assert run_end_date_monitor(db_session, NotificationService(), dt.date(2026, 8, 24)) == 0
+    assert run_escalation_monitor(db_session, NotificationService(), TODAY) == 0
+    assert run_end_date_monitor(db_session, NotificationService(), TODAY) == 0
     assert (
         db_session.scalar(
             select(models.Issue).where(models.Issue.source_risk_id == row.id)

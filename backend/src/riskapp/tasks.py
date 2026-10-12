@@ -14,44 +14,41 @@ from riskapp.config import settings
 from riskapp.db import SessionLocal
 from riskapp.notifications import build_notification_service
 from riskapp.scheduler import (
+    run_daily_reminders,
     run_end_date_monitor,
-    run_sla_monitor,
-    run_start_date_check,
+    run_escalation_monitor,
     run_weekly_summary,
 )
 
 
-@celery_app.task(name="riskapp.tasks.monitor_sla")  # type: ignore[untyped-decorator]
-def monitor_sla() -> int:
-    """Hourly SLA monitor: warn approaching deadlines, escalate breaches."""
-    now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
+def _today() -> dt.date:
+    """Today in the configured business timezone."""
+    return dt.datetime.now(settings.tz).date()
+
+
+@celery_app.task(name="riskapp.tasks.send_daily_reminders")  # type: ignore[untyped-decorator]
+def send_daily_reminders() -> int:
+    """Daily: email Risk Owners whose risks await acknowledgement."""
     with SessionLocal() as db:
-        return run_sla_monitor(db, build_notification_service(), now)
+        return run_daily_reminders(db, build_notification_service(), _today())
 
 
-@celery_app.task(name="riskapp.tasks.check_start_dates")  # type: ignore[untyped-decorator]
-def check_start_dates() -> int:
-    """Hourly check: notify owners of risks whose active window starts today.
-
-    Runs hourly (not just once a day) so a risk whose start date is set to
-    "today" during the day is still picked up; already-notified risks are
-    filtered out so each owner is mailed once.
-    """
-    today = dt.datetime.now(settings.tz).date()
+@celery_app.task(name="riskapp.tasks.escalate_unacknowledged_risks")  # type: ignore[untyped-decorator]
+def escalate_unacknowledged_risks() -> int:
+    """Daily: escalate risks unacknowledged two days before their end date."""
     with SessionLocal() as db:
-        return run_start_date_check(db, build_notification_service(), today)
+        return run_escalation_monitor(db, build_notification_service(), _today())
 
 
 @celery_app.task(name="riskapp.tasks.materialize_overdue_risks")  # type: ignore[untyped-decorator]
 def materialize_overdue_risks() -> int:
-    """Hourly: materialize unresolved risks past their Risk End Date.
+    """Daily: materialize unresolved risks past their Risk End Date.
 
-    Overdue risks become Event ("Materialized") and each generates exactly one
-    Issue, populated from the originating risk.
+    Overdue unresolved risks become Event ("Materialized") and each generates
+    exactly one Issue, populated from the originating risk.
     """
-    today = dt.datetime.now(settings.tz).date()
     with SessionLocal() as db:
-        return run_end_date_monitor(db, build_notification_service(), today)
+        return run_end_date_monitor(db, build_notification_service(), _today())
 
 
 @celery_app.task(name="riskapp.tasks.weekly_summary")  # type: ignore[untyped-decorator]

@@ -1,31 +1,22 @@
-"""Tests for the PM-defined SLA deadline and the rating's warning window."""
+"""Tests for the PM-defined SLA deadline and day-based monitoring offsets."""
 
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-import pytest
-
 from riskapp.domain.sla import (
     as_naive_utc,
     deadline_from_end_date,
-    warning_hours,
+    escalation_date,
+    reminder_last_date,
 )
 
 
-class TestWarningHours:
-    @pytest.mark.parametrize(
-        ("rating", "hours"),
-        [("High", 4), ("Medium", 12), ("Low", 24)],
-    )
-    def test_values(self, rating: str, hours: int) -> None:
-        assert warning_hours(rating) == hours
+class TestMonitoringOffsets:
+    def test_reminder_last_date_is_three_days_before_end(self) -> None:
+        assert reminder_last_date(date(2026, 8, 30)) == date(2026, 8, 27)
 
-    def test_case_insensitive(self) -> None:
-        assert warning_hours("HIGH") == 4
-
-    def test_unknown_raises(self) -> None:
-        with pytest.raises(ValueError):
-            warning_hours("Critical")
+    def test_escalation_date_is_two_days_before_end(self) -> None:
+        assert escalation_date(date(2026, 8, 30)) == date(2026, 8, 28)
 
 
 class TestAsNaiveUtc:
