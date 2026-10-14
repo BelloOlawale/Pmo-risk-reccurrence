@@ -13,6 +13,9 @@ from sqlalchemy.orm import Session
 from riskapp import models
 from riskapp.external import create_acknowledgement_token, decode_acknowledgement_token
 
+# Resolution Summary used across the resolution tests.
+_SUMMARY = "Mitigated and monitored."
+
 
 def _headers(user_id: int | None = None, role: str = "System Admin") -> dict[str, str]:
     headers = {"X-User-Role": role}
@@ -97,7 +100,8 @@ class TestOwnerResolve:
         _pm, _project_, _risk_, _owner, token = self._setup(client, db_session)
 
         assert client.post(f"/api/external/acknowledge/{token}").status_code == 200
-        resolved = client.post(f"/api/external/acknowledge/{token}/resolve")
+        resolved = client.post(f"/api/external/acknowledge/{token}/resolve",
+            json={"resolution_summary": _SUMMARY})
         assert resolved.status_code == 200, resolved.text
         # The owner's proposal is not final: it awaits the Project Manager.
         assert resolved.json()["status"] == "Pending Resolution"
@@ -109,8 +113,10 @@ class TestOwnerResolve:
 
     def test_resolve_is_idempotent(self, client: TestClient, db_session: Session) -> None:
         _pm, _p, _r, _o, token = self._setup(client, db_session)
-        assert client.post(f"/api/external/acknowledge/{token}/resolve").status_code == 200
-        again = client.post(f"/api/external/acknowledge/{token}/resolve")
+        assert client.post(f"/api/external/acknowledge/{token}/resolve",
+            json={"resolution_summary": _SUMMARY}).status_code == 200
+        again = client.post(f"/api/external/acknowledge/{token}/resolve",
+            json={"resolution_summary": _SUMMARY})
         assert again.status_code == 200
         assert again.json()["status"] == "Pending Resolution"
 
@@ -130,7 +136,8 @@ class TestOwnerResolve:
         self, client: TestClient, db_session: Session
     ) -> None:
         pm, _p, _r, _o, token = self._setup(client, db_session)
-        client.post(f"/api/external/acknowledge/{token}/resolve")
+        client.post(f"/api/external/acknowledge/{token}/resolve",
+            json={"resolution_summary": _SUMMARY})
         rows = db_session.scalars(
             select(models.Notification).where(
                 models.Notification.recipient_user_id == pm.id,
@@ -148,7 +155,8 @@ class TestPmReview:
         owner = _external_owner(client, email)
         _assign(client, risk, owner, pm)
         token = create_acknowledgement_token(owner_user_id=owner["id"], risk_id=risk["id"])
-        client.post(f"/api/external/acknowledge/{token}/resolve")
+        client.post(f"/api/external/acknowledge/{token}/resolve",
+            json={"resolution_summary": _SUMMARY})
         return pm, project, risk, owner, token
 
     def test_pm_accept_marks_resolved(self, client: TestClient, db_session: Session) -> None:
@@ -190,6 +198,24 @@ class TestPmReview:
             f"/api/risks/{risk['id']}", headers=_headers(pm.id, "Project Manager")
         )
         assert current.json()["status"] == "Resolved"
+
+    def test_reject_after_accept_uses_the_transition_not_a_status_guard(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        """The reject endpoint relies on the transition engine, not a bespoke
+        "only a ... can be rejected" status guard, so the guard message is gone."""
+        pm, _p, risk, _o, _t = self._resolved(client, db_session)
+        client.post(
+            f"/api/risks/{risk['id']}/resolution/accept",
+            headers=_headers(pm.id, "Project Manager"),
+        )
+        reject = client.post(
+            f"/api/risks/{risk['id']}/resolution/reject",
+            json={"reason": "Too late."},
+            headers=_headers(pm.id, "Project Manager"),
+        )
+        assert reject.status_code == 422
+        assert reject.json()["detail"] == "Cannot transition from Resolved to In Progress"
 
     def test_pm_can_see_the_resolution_history(
         self, client: TestClient, db_session: Session
@@ -242,7 +268,8 @@ class TestPmReview:
             json={"reason": "Try again."},
             headers=_headers(pm.id, "Project Manager"),
         )
-        again = client.post(f"/api/external/acknowledge/{token}/resolve")
+        again = client.post(f"/api/external/acknowledge/{token}/resolve",
+            json={"resolution_summary": _SUMMARY})
         assert again.status_code == 200
         assert again.json()["status"] == "Pending Resolution"
         # After re-submission the stale rejection reason is no longer shown.
@@ -287,3 +314,116 @@ class TestLinkRevocation:
         assert client.get(f"/api/external/acknowledge/{token_a}").status_code == 404
         token_b = create_acknowledgement_token(owner_user_id=owner_b["id"], risk_id=risk["id"])
         assert client.get(f"/api/external/acknowledge/{token_b}").status_code == 200
+
+
+class TestResolutionSummary:
+    """The Resolution Summary is mandatory and auditable."""
+
+    def _assigned(self, client: TestClient, db: Session, email: str = "sum@ext.com"):
+        pm = _user(db, f"pm-{email}", "Pat Manager")
+        project = _project(client, pm)
+        risk = _risk(client, project, pm)
+        owner = _external_owner(client, email)
+        _assign(client, risk, owner, pm)
+        token = create_acknowledgement_token(owner_user_id=owner["id"], risk_id=risk["id"])
+        return pm, risk, owner, token
+
+    def test_empty_summary_is_rejected_on_the_api(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        _pm, risk, _owner, token = self._assigned(client, db_session)
+        resp = client.post(
+            f"/api/external/acknowledge/{token}/resolve",
+            json={"resolution_summary": "   "},
+        )
+        assert resp.status_code == 422
+        assert "Resolution Summary" in resp.json()["detail"]
+        # The risk stays in its current status until a summary is supplied.
+        view = client.get(f"/api/external/acknowledge/{token}").json()
+        assert view["status"] == "In Progress"
+        assert view["resolution_summary"] is None
+
+    def test_missing_summary_is_rejected_on_the_api(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        _pm, _risk_, _owner, token = self._assigned(client, db_session)
+        resp = client.post(f"/api/external/acknowledge/{token}/resolve")
+        assert resp.status_code == 422
+        assert "Resolution Summary" in resp.json()["detail"]
+
+    def test_summary_is_saved_and_visible_to_the_project_manager(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        pm, risk, _owner, token = self._assigned(client, db_session)
+        summary = "Replaced the failing interface and added a nightly reconciliation job."
+        resp = client.post(
+            f"/api/external/acknowledge/{token}/resolve",
+            json={"resolution_summary": summary},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["resolution_summary"] == summary
+        assert resp.json()["status"] == "Pending Resolution"
+
+        seen = client.get(
+            f"/api/risks/{risk['id']}", headers=_headers(pm.id, "Project Manager")
+        ).json()
+        assert seen["resolution_summary"] == summary
+        history = client.get(f"/api/risks/{risk['id']}/history").json()
+        assert any(
+            h["action"] == "resolution_summary_updated" and h["new_value"] == summary
+            for h in history
+        )
+
+    def test_resubmission_retains_the_previous_summary_in_history(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        pm, risk, _owner, token = self._assigned(client, db_session)
+        first = "First attempt at a fix."
+        second = "Second, more thorough fix."
+        client.post(
+            f"/api/external/acknowledge/{token}/resolve",
+            json={"resolution_summary": first},
+        )
+        client.post(
+            f"/api/risks/{risk['id']}/resolution/reject",
+            json={"reason": "Not sufficient."},
+            headers=_headers(pm.id, "Project Manager"),
+        )
+        resubmitted = client.post(
+            f"/api/external/acknowledge/{token}/resolve",
+            json={"resolution_summary": second},
+        )
+        assert resubmitted.status_code == 200
+        assert resubmitted.json()["resolution_summary"] == second
+
+        history = client.get(
+            f"/api/risks/{risk['id']}/history",
+            headers=_headers(pm.id, "Project Manager"),
+        ).json()
+        updates = [h for h in history if h["action"] == "resolution_summary_updated"]
+        assert len(updates) == 2
+        # The first submission is preserved as the old_value of the second.
+        assert updates[0]["new_value"] == first
+        assert updates[1]["old_value"] == first
+        assert updates[1]["new_value"] == second
+
+    def test_pm_cannot_accept_a_resolution_without_a_summary(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        """Defence in depth: no risk reaches Resolved without a summary."""
+        pm, risk, _owner, _token = self._assigned(client, db_session)
+        # Force the status to Pending Resolution on the record directly, without
+        # a summary, to prove the accept path is guarded independently of the
+        # submission path.
+        row = db_session.get(models.Risk, risk["id"])
+        assert row is not None
+        row.status = "Pending Resolution"
+        row.resolution_summary = None
+        db_session.commit()
+
+        resp = client.post(
+            f"/api/risks/{risk['id']}/resolution/accept",
+            headers=_headers(pm.id, "Project Manager"),
+        )
+        assert resp.status_code == 422
+        assert "Resolution Summary" in resp.json()["detail"]

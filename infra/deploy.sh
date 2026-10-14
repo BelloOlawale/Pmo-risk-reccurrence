@@ -244,6 +244,8 @@ if [[ "$SKIP_IMAGE_BUILD" != "true" ]] && [[ "$STAGE" == "all" || "$STAGE" == "i
     info "Building frontend image..."
     build_args=()
     build_args+=(--build-arg "VITE_AUTH_MODE=${VITE_AUTH_MODE:-password}")
+    [[ -n "${VITE_ENTRA_CLIENT_ID:-}" ]] && build_args+=(--build-arg "VITE_ENTRA_CLIENT_ID=${VITE_ENTRA_CLIENT_ID}")
+    [[ -n "${VITE_ENTRA_TENANT_ID:-}" ]] && build_args+=(--build-arg "VITE_ENTRA_TENANT_ID=${VITE_ENTRA_TENANT_ID}")
     docker build "${build_args[@]}" -t "${ACR_SERVER}/${FRONTEND_IMAGE}:${IMAGE_TAG}" "$FRONTEND_DIR" || error "Frontend build failed"
     docker push "${ACR_SERVER}/${FRONTEND_IMAGE}:${IMAGE_TAG}"                                      || error "Frontend push failed"
     success "Pushed ${ACR_SERVER}/${FRONTEND_IMAGE}:${IMAGE_TAG}"

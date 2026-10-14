@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
 import type { ExternalAcknowledge } from '../api/types';
+import { PRODUCT_NAME } from '../branding';
+import { BrandLockup } from '../components/BrandLockup';
 import { RatingBadge, StatusBadge } from '../components/Badges';
 import { formatDate, formatDateTime } from '../utils/format';
 
@@ -9,6 +11,10 @@ const API_BASE: string = import.meta.env.VITE_API_BASE_URL ?? '';
 
 /** Shown for bad or revoked links — leaks nothing internal. */
 const LINK_INVALID_MESSAGE = 'This risk link is not valid or is no longer available.';
+
+/** Mandatory-validation message (mirrors the server-side wording). */
+const SUMMARY_REQUIRED_MESSAGE =
+  'Please provide a Resolution Summary explaining the actions taken before resolving this risk.';
 
 /**
  * Public, token-scoped page for a Risk Owner (internal or external).
@@ -28,6 +34,8 @@ export function ExternalAcknowledgePage() {
   const [error, setError] = useState<string | null>(null);
   const [acknowledging, setAcknowledging] = useState(false);
   const [resolving, setResolving] = useState(false);
+  const [resolutionSummary, setResolutionSummary] = useState('');
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!token) {
@@ -40,7 +48,10 @@ export function ExternalAcknowledgePage() {
       if (!res.ok) {
         throw new Error(LINK_INVALID_MESSAGE);
       }
-      setRisk((await res.json()) as ExternalAcknowledge);
+      const data = (await res.json()) as ExternalAcknowledge;
+      setRisk(data);
+      // Prefill the owner's earlier account so they can review or amend it.
+      setResolutionSummary(data.resolution_summary ?? '');
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -74,16 +85,34 @@ export function ExternalAcknowledgePage() {
 
   async function resolve() {
     if (!token) return;
+    const summary = resolutionSummary.trim();
+    if (!summary) {
+      setSummaryError(SUMMARY_REQUIRED_MESSAGE);
+      return;
+    }
+    setSummaryError(null);
     setResolving(true);
     setError(null);
     try {
       const res = await fetch(`${API_BASE}/api/external/acknowledge/${token}/resolve`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resolution_summary: summary }),
       });
       if (!res.ok) {
-        throw new Error('We could not submit your resolution. Please try again.');
+        // Surface the server's validation message when it has one.
+        let detail = 'We could not submit your resolution. Please try again.';
+        try {
+          const body = (await res.json()) as { detail?: string };
+          if (body.detail) detail = body.detail;
+        } catch {
+          /* non-JSON error body */
+        }
+        throw new Error(detail);
       }
-      setRisk((await res.json()) as ExternalAcknowledge);
+      const data = (await res.json()) as ExternalAcknowledge;
+      setRisk(data);
+      setResolutionSummary(data.resolution_summary ?? summary);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -98,11 +127,7 @@ export function ExternalAcknowledgePage() {
       <header className="auth-brand">
         <img className="auth-logo" src="/wragby-logo.png" alt="Wragby" />
         <div className="auth-brand-rule" aria-hidden="true" />
-        <h1 className="auth-product-name">
-          <span className="brand-wragby">WRAGBY</span>{' '}
-          <span className="brand-intell">RiskIntel</span>
-        </h1>
-        <p className="auth-product-subtitle">PMO Risk Management</p>
+        <BrandLockup className="brand-lockup-auth" />
       </header>
 
       <main className="auth-main">
@@ -234,6 +259,29 @@ export function ExternalAcknowledgePage() {
                     When the risk has been addressed, mark it as resolved for the Project
                     Manager to review.
                   </div>
+                  <div className="field">
+                    <label htmlFor="resolution-summary">Resolution Summary</label>
+                    <textarea
+                      id="resolution-summary"
+                      value={resolutionSummary}
+                      onChange={(e) => {
+                        setResolutionSummary(e.target.value);
+                        if (summaryError && e.target.value.trim()) setSummaryError(null);
+                      }}
+                      placeholder="Describe the actions taken to resolve this risk, the mitigation implemented, and any measures put in place to prevent recurrence."
+                      rows={5}
+                      aria-invalid={summaryError ? true : undefined}
+                    />
+                    {summaryError ? (
+                      <span className="field-error" role="alert">
+                        {summaryError}
+                      </span>
+                    ) : (
+                      <span className="field-hint">
+                        Required before this risk can be submitted as Resolved.
+                      </span>
+                    )}
+                  </div>
                   <button
                     type="button"
                     className="btn btn-primary auth-primary-btn"
@@ -254,7 +302,7 @@ export function ExternalAcknowledgePage() {
         <span className="auth-footer-dot" aria-hidden="true">
           •
         </span>
-        <span>PMO Risk Management</span>
+        <span>{PRODUCT_NAME}</span>
       </footer>
     </div>
   );

@@ -2,6 +2,7 @@ import { Suspense, type ReactNode } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 
 import { DEV_ROLES, useAuth } from '../auth/AuthContext';
+import { BrandLockup } from './BrandLockup';
 import { SignInPage } from './auth/SignInPage';
 import { NotificationBell } from './NotificationBell';
 
@@ -126,11 +127,7 @@ export function Layout() {
         <header className="topbar">
           <div className="topbar-title">
             <div className="topbar-brand">
-              <span className="topbar-title-main">
-                <span className="brand-wragby">WRAGBY</span>{' '}
-                <span className="brand-intell">RiskIntel</span>
-              </span>
-              <span className="topbar-subtitle">PMO Risk Management</span>
+              <BrandLockup className="brand-lockup-topbar" />
             </div>
           </div>
           <div className="topbar-actions">

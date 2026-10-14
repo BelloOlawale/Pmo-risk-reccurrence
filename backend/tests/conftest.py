@@ -26,6 +26,11 @@ def _force_dev_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setattr(settings, "entra_tenant_id", "")
     monkeypatch.setattr(settings, "entra_client_id", "")
+    # Local sign-in is enabled in some developer .env files; default it off so
+    # the "disabled" tests stay deterministic (test_local_login enables it
+    # explicitly via the password_login_on fixture).
+    monkeypatch.setattr(settings, "local_login_enabled", False)
+    monkeypatch.setattr(settings, "local_login_secret", "")
     monkeypatch.setattr(settings, "blob_account_name", "")
     monkeypatch.setattr(settings, "blob_account_key", "")
     monkeypatch.setattr(settings, "blob_container", "")

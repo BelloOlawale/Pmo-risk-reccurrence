@@ -244,6 +244,8 @@ if (-not $SkipImageBuild -and ($Stage -eq 'all' -or $Stage -eq 'images')) {
     $buildArgs = @()
     $authMode = if ($env:VITE_AUTH_MODE) { $env:VITE_AUTH_MODE } else { 'password' }
     $buildArgs += '--build-arg', "VITE_AUTH_MODE=$authMode"
+    if ($env:VITE_ENTRA_CLIENT_ID) { $buildArgs += '--build-arg', "VITE_ENTRA_CLIENT_ID=$($env:VITE_ENTRA_CLIENT_ID)" }
+    if ($env:VITE_ENTRA_TENANT_ID) { $buildArgs += '--build-arg', "VITE_ENTRA_TENANT_ID=$($env:VITE_ENTRA_TENANT_ID)" }
     docker build @buildArgs -t "${AcrServer}/${FrontendImage}:${ImageTag}" $FrontendDir
     if ($LASTEXITCODE -ne 0) { Fail 'Frontend build failed' }
     docker push "${AcrServer}/${FrontendImage}:${ImageTag}"

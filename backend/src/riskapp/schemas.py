@@ -229,6 +229,9 @@ class RiskRead(BaseModel):
     root_cause: str | None = None
     what_worked: str | None = None
     resolution_category: str | None = None
+    resolution_summary: str | None = None
+    resolution_submitted_at: dt.datetime | None = None
+    resolution_submitted_by_user_id: int | None = None
     created_at: dt.datetime
 
 
@@ -249,6 +252,9 @@ class RiskUpdate(BaseModel):
     risk_start_date: dt.date | None = None
     risk_end_date: dt.date | None = None
     status: str | None = None
+    # Risk Owner's account of the action taken. Mandatory when ``status`` is
+    # ``Pending Resolution``; earlier submissions stay in the audit log.
+    resolution_summary: str | None = None
     actor_user_id: int | None = None
     identified_during: str | None = None
 
@@ -271,6 +277,18 @@ class ResolutionReject(BaseModel):
     """Payload for a Project Manager rejecting a Risk Owner's resolution."""
 
     reason: str = Field(min_length=1, max_length=2000)
+    actor_user_id: int | None = None
+
+
+class ResolutionSubmit(BaseModel):
+    """Payload for a Risk Owner submitting a resolution for review.
+
+    ``resolution_summary`` must contain more than whitespace; the service layer
+    enforces that and returns a clear, user-facing validation message (rather
+    than a generic schema error) when it is empty.
+    """
+
+    resolution_summary: str | None = None
     actor_user_id: int | None = None
 
 
@@ -426,6 +444,20 @@ class EscalationTrendRead(BaseModel):
     values: list[int]
 
 
+class WeeklyReportRead(BaseModel):
+    """A generated weekly portfolio report (HTML + plain-text) for preview/send."""
+
+    subject: str
+    scope: str
+    generated_at: dt.datetime
+    period_start: dt.date
+    period_end: dt.date
+    total_projects: int
+    total_risks: int
+    html: str
+    text: str
+
+
 class ExternalAcknowledgeRead(BaseModel):
     """Minimal, single-risk view returned to an external owner's ack link.
 
@@ -452,6 +484,10 @@ class ExternalAcknowledgeRead(BaseModel):
     project_manager: str = ""
     acknowledged: bool
     acknowledged_at: dt.datetime | None
+    # The owner's Resolution Summary, so a returning owner can review or amend
+    # it (e.g. after the Project Manager rejected a previous submission).
+    resolution_summary: str | None = None
+    resolution_submitted_at: dt.datetime | None = None
     # Set when the Project Manager has rejected a proposed resolution, so the
     # owner can see why the risk was returned to In Progress.
     resolution_rejected_reason: str | None = None

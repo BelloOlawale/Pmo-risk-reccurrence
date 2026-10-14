@@ -110,3 +110,43 @@ class TestDisplayLabel:
     def test_other_statuses_use_their_name(self) -> None:
         assert display_label(RiskStatus.OPEN) == "Open"
         assert display_label(RiskStatus.CLOSED) == "Closed"
+
+
+class TestTransitionMatrix:
+    """The documented actor matrix must match the enforced state machine."""
+
+    def test_matrix_covers_exactly_the_valid_transitions(self) -> None:
+        from riskapp.domain.status import TRANSITION_MATRIX, allowed_transitions
+
+        expected = {
+            (current, target)
+            for current in RiskStatus
+            for target in allowed_transitions(current)
+        }
+        assert set(TRANSITION_MATRIX) == expected
+
+    def test_every_matrix_edge_has_at_least_one_actor(self) -> None:
+        from riskapp.domain.status import TRANSITION_MATRIX
+
+        assert all(actors for actors in TRANSITION_MATRIX.values())
+
+    def test_closure_is_project_manager_or_higher(self) -> None:
+        from riskapp.domain.status import PM, PMO_LEAD, SYSTEM_ADMIN, actors_for_transition
+
+        actors = actors_for_transition(RiskStatus.RESOLVED, RiskStatus.CLOSED)
+        assert actors == frozenset({PM, PMO_LEAD, SYSTEM_ADMIN})
+
+    def test_owner_can_submit_a_resolution_but_never_close(self) -> None:
+        from riskapp.domain.status import OWNER, actors_for_transition
+
+        assert OWNER in actors_for_transition(
+            RiskStatus.IN_PROGRESS, RiskStatus.PENDING_RESOLUTION
+        )
+        assert OWNER not in actors_for_transition(
+            RiskStatus.RESOLVED, RiskStatus.CLOSED
+        )
+
+    def test_unknown_transition_has_no_actors(self) -> None:
+        from riskapp.domain.status import actors_for_transition
+
+        assert actors_for_transition(RiskStatus.OPEN, RiskStatus.CLOSED) == frozenset()

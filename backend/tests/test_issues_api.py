@@ -18,6 +18,9 @@ from riskapp import models
 from riskapp.notifications import NotificationService
 from riskapp.scheduler import run_end_date_monitor
 
+# Resolution Summary used across the resolution tests.
+_SUMMARY = "Mitigated and monitored."
+
 PAST = dt.date(2026, 8, 20)
 TODAY = dt.date(2026, 8, 24)
 
@@ -409,7 +412,11 @@ class TestManualEventMaterialization:
         # Proposing a resolution does not create an Issue.
         resp = client.patch(
             f"/api/risks/{risk['id']}",
-            json={"status": "Pending Resolution", "actor_user_id": 7},
+            json={
+                "status": "Pending Resolution",
+                "resolution_summary": _SUMMARY,
+                "actor_user_id": 7,
+            },
             headers=_headers(7, "Project Manager"),
         )
         assert resp.status_code == 200

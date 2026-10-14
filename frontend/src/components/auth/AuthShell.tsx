@@ -1,5 +1,8 @@
 import type { ReactNode } from 'react';
 
+import { PRODUCT_NAME } from '../../branding';
+import { BrandLockup } from '../BrandLockup';
+
 /**
  * Dedicated authentication layout.
  *
@@ -18,12 +21,8 @@ export function AuthShell({ children }: { children: ReactNode }) {
       <div className="auth-center">
         <header className="auth-brand">
           <img className="auth-logo" src="/wragby-logo.png" alt="Wragby" />
-          <p className="auth-product-name">
-            <span className="brand-wragby">WRAGBY</span>{' '}
-            <span className="brand-intell">RiskIntel</span>
-          </p>
+          <BrandLockup className="brand-lockup-auth" />
           <div className="auth-brand-rule" aria-hidden="true" />
-          <p className="auth-product-subtitle">PMO Risk Management</p>
         </header>
 
         <main className="auth-main">{children}</main>
@@ -34,7 +33,7 @@ export function AuthShell({ children }: { children: ReactNode }) {
         <span className="auth-footer-dot" aria-hidden="true">
           •
         </span>
-        <span>PMO Risk Management</span>
+        <span>{PRODUCT_NAME}</span>
       </footer>
     </div>
   );

@@ -177,16 +177,18 @@ for audit.
 
 ## 6. Authentication & authorization (deep dive)
 
-### 6.1 Two modes
+### 6.1 Three modes
 
-| | **Production (Entra)** | **Development** |
-|---|---|---|
-| Trigger | `RISKAPP_ENTRA_TENANT_ID` is set | `RISKAPP_ENTRA_TENANT_ID` is empty |
-| Identity | Entra OIDC bearer token | `X-User-Id` / `X-User-Role` headers |
-| Frontend | MSAL redirect sign-in | sidebar role/user switcher |
-| Default | — | System Admin (sees everything) |
+| | **Entra (production)** | **Password** | **Dev** |
+|---|---|---|---|
+| Trigger | `RISKAPP_ENTRA_TENANT_ID` set | `RISKAPP_LOCAL_LOGIN_ENABLED=true` | neither set |
+| Identity | Entra OIDC bearer token | app-managed email + password (`POST /api/auth/login`) | `X-User-Id` / `X-User-Role` headers |
+| Frontend (`VITE_AUTH_MODE`) | `entra` — MSAL redirect sign-in | `password` — sign-in form | `dev` — sidebar role/user switcher |
+| Role source | token `groups` claim | `users.role` | request header |
 
-The switch is **purely config-driven** — no code changes.
+Modes are **config-driven** — no code changes. Entra and local password may be
+enabled together: `get_principal` tries a locally-issued token first, then falls
+back to Entra OIDC validation.
 
 ### 6.2 Production flow (Entra ID OIDC)
 
@@ -214,10 +216,10 @@ The switch is **purely config-driven** — no code changes.
                                       Principal(user_id, upn, roles)
 ```
 
-1. **Frontend** signs the user in with an app-managed email + password; the
-   backend issues a short-lived HS256 bearer token (`POST /api/auth/login`).
-   Entra OIDC validation (steps 3–5) remains supported server-side, but the SPA
-   no longer uses MSAL.
+1. With `VITE_AUTH_MODE=entra` the **SPA** signs the user in with MSAL
+   (`loginRedirect`) and attaches the resulting OIDC access token. With
+   `VITE_AUTH_MODE=password` it instead calls `POST /api/auth/login` and receives
+   a short-lived HS256 bearer token. The backend accepts either.
 2. The API client (`src/api/client.ts`) attaches `Authorization: Bearer <token>`
    to every request.
 3. **Backend** (`auth.py` → `get_principal`) validates the token against the
@@ -449,9 +451,14 @@ cd app/frontend
 npm install && npm run dev           # http://localhost:5173
 ```
 
-**To switch to dev mode** (header auth + sidebar role switcher): comment out the
-`RISKAPP_ENTRA_*` and `RISKAPP_LOCAL_LOGIN_ENABLED` lines in `backend/.env` and set
-`VITE_AUTH_MODE=dev` in `frontend/.env`.
+**To switch modes** (SPA mode is a build-time value; backend is runtime):
+
+- **Entra SSO** — set the `RISKAPP_ENTRA_*` lines in `backend/.env`, set
+  `VITE_AUTH_MODE=entra` plus `VITE_ENTRA_CLIENT_ID` / `VITE_ENTRA_TENANT_ID` in
+  `frontend/.env`, and register the SPA redirect URI on the app registration.
+- **Password** — `RISKAPP_LOCAL_LOGIN_ENABLED=true` and `VITE_AUTH_MODE=password`.
+- **Dev** — comment out `RISKAPP_ENTRA_*` / `RISKAPP_LOCAL_LOGIN_ENABLED` and set
+  `VITE_AUTH_MODE=dev`.
 
 ---
 

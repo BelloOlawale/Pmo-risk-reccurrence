@@ -17,11 +17,27 @@ from typing import Any, Protocol
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from riskapp import models
+from riskapp import branding, models
 from riskapp.config import settings
 from riskapp.external import acknowledgement_url
 
 logger = logging.getLogger(__name__)
+
+# Shared, inline-styled header used by every notification email. Kept as a
+# constant so the two-line brand lockup is defined once. Email clients ignore
+# stylesheets, so this is deliberately inline CSS with web-safe fallbacks.
+_BRAND_HEADER = (
+    '<div style="border-top:4px solid ' + branding.BRAND_RED + ';padding:20px 24px 0;">'
+    '<div style="font-family:Inter\'Segoe UI\',Arial,sans-serif;font-size:17px;'
+    'font-weight:600;letter-spacing:0.12em;color:' + branding.BRAND_BLUE + ';">'
+    + branding.BRAND_LINE_1
+    + '</div>'
+    '<div style="font-family:Inter,\'Segoe UI\',Arial,sans-serif;font-size:22px;'
+    'font-weight:800;letter-spacing:0.03em;color:' + branding.BRAND_BLUE_DARK + ';">'
+    + branding.BRAND_LINE_2
+    + '</div>'
+    '</div>'
+)
 
 EVENT_OWNER_ASSIGNMENT = "owner_assignment"
 # Daily acknowledgement reminder, sent to the Risk Owner from the Risk Start
@@ -68,6 +84,7 @@ class EmailProvider(Protocol):
         cc: list[str] | None = None,
         subject: str,
         body_html: str,
+        body_text: str | None = None,
     ) -> None:
         ...
 
@@ -199,12 +216,7 @@ def _owner_email(
     return f"""\
 <div style="font-family:Inter,Segoe UI,Arial,sans-serif;max-width:600px;
             margin:0 auto;color:#111827;">
-  <div style="border-top:4px solid #ED1C2E;padding:20px 24px 0;">
-    <div style="font-size:20px;font-weight:800;letter-spacing:0.04em;">
-      <span style="color:#ED1C2E;">WRAGBY</span> RiskIntel
-    </div>
-    <div style="color:#64748B;font-size:13px;margin-top:2px;">PMO Risk Management</div>
-  </div>
+  {_BRAND_HEADER}
   <div style="padding:20px 24px 24px;">
     <p style="font-size:15px;">Dear {owner_name},</p>
     <h2 style="font-size:17px;margin:6px 0 10px;">{heading}</h2>
@@ -298,12 +310,7 @@ def resolution_rejected_email(risk: models.Risk, reason: str, link: str) -> str:
     return f"""\
 <div style="font-family:Inter,Segoe UI,Arial,sans-serif;max-width:600px;
             margin:0 auto;color:#111827;">
-  <div style="border-top:4px solid #ED1C2E;padding:20px 24px 0;">
-    <div style="font-size:20px;font-weight:800;letter-spacing:0.04em;">
-      <span style="color:#ED1C2E;">WRAGBY</span> RiskIntel
-    </div>
-    <div style="color:#64748B;font-size:13px;margin-top:2px;">PMO Risk Management</div>
-  </div>
+  {_BRAND_HEADER}
   <div style="padding:20px 24px 24px;">
     <p style="font-size:15px;">Dear {owner_name},</p>
     <h2 style="font-size:17px;margin:6px 0 10px;">Risk Resolution Rejected</h2>
@@ -353,6 +360,7 @@ class AzureCommunicationEmail:
         cc: list[str] | None = None,
         subject: str,
         body_html: str,
+        body_text: str | None = None,
     ) -> None:
         if not to:
             return
@@ -375,6 +383,8 @@ class AzureCommunicationEmail:
             "recipients": {"to": [{"address": address} for address in to]},
             "content": {"subject": subject, "html": body_html},
         }
+        if body_text:
+            message["content"]["plainText"] = body_text
         if cc:
             message["recipients"]["cc"] = [{"address": address} for address in cc]
 
@@ -401,6 +411,7 @@ class NotificationService:
         risk: models.Risk | None = None,
         project: models.Project | None = None,
         email_body: str | None = None,
+        email_text: str | None = None,
         owner_email_body: str | None = None,
     ) -> Recipients:
         """Resolve recipients, persist in-app rows, and send email."""
@@ -415,6 +426,7 @@ class NotificationService:
             risk=risk,
             project=project,
             email_body=email_body,
+            email_text=email_text,
             owner_email_body=owner_email_body,
         )
 
@@ -429,6 +441,7 @@ class NotificationService:
         risk: models.Risk | None = None,
         project: models.Project | None = None,
         email_body: str | None = None,
+        email_text: str | None = None,
         owner_email_body: str | None = None,
     ) -> Recipients:
         """Persist and email for an already-resolved recipient set."""
@@ -452,10 +465,16 @@ class NotificationService:
             to = list(recipients.to_emails)
             cc = list(recipients.cc_emails) or None
             if email_body is not None:
-                # The caller supplied the exact body (e.g. a rejection reason
-                # that only concerns the Risk Owner) — send it unchanged.
+                # The caller supplied the exact body (e.g. a detailed report or
+                # a rejection reason that only concerns the Risk Owner) — send
+                # it unchanged, with an optional plain-text alternative.
                 self._send_email(
-                    to=to, cc=cc, subject=title, body_html=email_body, event=event
+                    to=to,
+                    cc=cc,
+                    subject=title,
+                    body_html=email_body,
+                    body_text=email_text,
+                    event=event,
                 )
             else:
                 self._send_rendered(
@@ -528,12 +547,15 @@ class NotificationService:
         subject: str,
         body_html: str,
         event: str,
+        body_text: str | None = None,
     ) -> None:
         """Best-effort send; a mail failure never rolls back the transaction."""
         if not to or self._email is None:
             return
         try:
-            self._email.send_email(to=to, cc=cc, subject=subject, body_html=body_html)
+            self._email.send_email(
+                to=to, cc=cc, subject=subject, body_html=body_html, body_text=body_text
+            )
         except Exception:
             # Log it so silent delivery failures are visible in the container logs.
             logger.exception("Email delivery failed for event=%s to=%s", event, to)
@@ -548,7 +570,7 @@ class NotificationService:
         code = html.escape(risk.risk_code)
         return (
             f"<p>{escaped}</p>"
-            f'<p><a href="{link}">Open risk {code} in WRAGBY RiskIntel</a></p>'
+            f'<p><a href="{link}">Open risk {code} in {branding.PRODUCT_NAME}</a></p>'
         )
 
     @staticmethod

@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+# Resolution Summary used across the resolution tests.
+_SUMMARY = "Mitigated and monitored."
+
 
 def _headers(user_id: int | None, role: str) -> dict[str, str]:
     headers = {"X-User-Role": role}
@@ -191,7 +194,7 @@ def test_close_allowed_after_all_risks_resolved(client: TestClient) -> None:
     assert (
         client.patch(
             f"/api/risks/{risk['id']}",
-            json={"status": "Pending Resolution"},
+            json={"status": "Pending Resolution", "resolution_summary": _SUMMARY},
             headers=_headers(9, "Project Manager"),
         ).status_code
         == 200
@@ -233,7 +236,7 @@ def test_risk_status_does_not_change_project_status(client: TestClient) -> None:
         assert (
             client.patch(
                 f"/api/risks/{risk['id']}",
-                json={"status": "Pending Resolution"},
+                json={"status": "Pending Resolution", "resolution_summary": _SUMMARY},
                 headers=_headers(6, "Project Manager"),
             ).status_code
             == 200

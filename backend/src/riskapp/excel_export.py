@@ -16,7 +16,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from riskapp import models
+from riskapp import branding, models
 from riskapp.domain.sla import as_naive_utc
 from riskapp.external import EXTERNAL  # noqa: F401  (documents the Owner Type values)
 
@@ -126,9 +126,9 @@ def build_risk_register_workbook(
     rows = [_row(project, risk) for risk in risks]
 
     workbook = Workbook()
-    workbook.properties.title = "WRAGBY RiskIntel — Risk Register"
-    workbook.properties.subject = "PMO Risk Management"
-    workbook.properties.creator = "WRAGBY RiskIntel"
+    workbook.properties.title = f"{branding.PRODUCT_NAME} — Risk Register"
+    workbook.properties.subject = branding.PRODUCT_NAME
+    workbook.properties.creator = branding.PRODUCT_NAME
     sheet = workbook.active
     sheet.title = "Risk Register"
     sheet.append(list(HEADERS))

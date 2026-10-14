@@ -600,6 +600,10 @@ if [[ "$STAGE" == "all" || "$STAGE" == "images" ]] && [[ "$BUILD_IMAGES" == "tru
         vite_auth_mode="$(value VITE_AUTH_MODE)"
         vite_auth_mode="${vite_auth_mode:-password}"
         build_args+=(--build-arg "VITE_AUTH_MODE=${vite_auth_mode}")
+        vite_entra_client_id="$(value VITE_ENTRA_CLIENT_ID)"
+        vite_entra_tenant_id="$(value VITE_ENTRA_TENANT_ID)"
+        [[ -n "$vite_entra_client_id" ]] && build_args+=(--build-arg "VITE_ENTRA_CLIENT_ID=${vite_entra_client_id}")
+        [[ -n "$vite_entra_tenant_id" ]] && build_args+=(--build-arg "VITE_ENTRA_TENANT_ID=${vite_entra_tenant_id}")
         docker build "${build_args[@]}" -t "${ACR_SERVER}/${FRONTEND_IMAGE_NAME}:${IMAGE_TAG}" "$FRONTEND_DIR" \
             || error "Frontend build failed"
         docker push "${ACR_SERVER}/${FRONTEND_IMAGE_NAME}:${IMAGE_TAG}" || error "Frontend push failed"

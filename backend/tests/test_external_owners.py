@@ -11,6 +11,9 @@ from riskapp import models
 from riskapp.domain.status import RiskStatus
 from riskapp.external import create_acknowledgement_token
 
+# Resolution Summary used across the resolution tests.
+_SUMMARY = "Mitigated and monitored."
+
 
 def _project(client: TestClient, name: str = "P") -> dict:
     resp = client.post(
@@ -219,7 +222,8 @@ class TestExternalAcknowledgement:
         assert ack.status_code == 200
         assert ack.json()["acknowledged"] is True
 
-        resolved = client.post(f"/api/external/acknowledge/{token}/resolve")
+        resolved = client.post(f"/api/external/acknowledge/{token}/resolve",
+            json={"resolution_summary": _SUMMARY})
         assert resolved.status_code == 200
         assert resolved.json()["status"] == RiskStatus.PENDING_RESOLUTION.value
 
@@ -239,7 +243,7 @@ class TestExternalOwnerEmail:
         assert stored is not None
         body = NotificationService._email_body("You have been assigned a risk.", stored)
 
-        assert "WRAGBY" in body and "RiskIntel" in body
+        assert "PMO RISK" in body and "INTELLIGENCE" in body
         assert "Acknowledge Risk" in body
         assert "/acknowledge/" in body
         assert "Vendor migration" in body

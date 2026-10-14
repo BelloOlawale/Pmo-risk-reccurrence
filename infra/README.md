@@ -328,7 +328,7 @@ The deployment scripts also respect these environment variables:
 | `CHAT_MODEL_NAME` / `CHAT_MODEL_VERSION` | Chat model overrides (bash script) |
 | `POSTGRES_ADMIN_PASSWORD` | PostgreSQL password (skips the prompt) |
 | `SKIP_IMAGE_BUILD` | `true` to skip image build/push (bash script) |
-| `VITE_AUTH_MODE` | SPA auth mode: `password` (default) or `dev` (local sidebar switcher) |
+| `VITE_AUTH_MODE` | SPA auth mode: `entra` (Microsoft SSO), `password` (default) or `dev` (local sidebar switcher) |
 
 ### Examples
 

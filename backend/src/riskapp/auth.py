@@ -293,14 +293,35 @@ def can_close_project(principal: Principal, project: Any) -> bool:
     )
 
 
-def can_close_risk(principal: Principal) -> bool:
-    """True only for the PMO Lead (final closure authority) and System Admin.
+def can_close_risk(principal: Principal, risk: Any) -> bool:
+    """Who may finally close an individual risk.
 
-    The Project Manager reviews the Risk Owner's proposed resolution but cannot
-    close a risk; final closure is reserved to the PMO Lead (with System Admin
-    as the application superuser).
+    The Project Manager of the risk's project may close a risk once its
+    resolution has been reviewed and accepted (``Resolved``). The PMO Lead and
+    System Admin retain their existing portfolio-wide closure authority.
+
+    Eligibility of the *status* (only ``Resolved`` -> ``Closed``) is a separate
+    concern enforced by the state machine; this function answers only "is this
+    caller allowed to close risks for this project?".
     """
-    return principal.has_role(Role.PMO_LEAD, Role.SYSTEM_ADMIN)
+    if principal.is_pmo_or_admin:
+        return True
+    return (
+        principal.has_role(Role.PROJECT_MANAGER)
+        and principal.user_id is not None
+        and getattr(risk, "project", None) is not None
+        and risk.project.pm_user_id == principal.user_id
+    )
+
+
+def can_finally_close_risk(principal: Principal, risk: Any) -> bool:
+    """True when the caller may close this risk *and* it is eligible to close.
+
+    Combines the role/project check with the resolution lifecycle: only a
+    ``Resolved`` risk (resolution reviewed and accepted) can be closed. Used by
+    the UI and the API to give a precise reason when closure is blocked.
+    """
+    return can_close_risk(principal, risk) and risk.status == "Resolved"
 
 
 def can_review_resolution(principal: Principal, risk: Any) -> bool:

@@ -1,7 +1,8 @@
 """Risk closure permissions.
 
-The PMO Lead has the final authority to close a risk (System Admin as the app
-superuser). The Project Manager reviews resolutions but cannot close a risk.
+An authorized Project Manager may close a risk that has been reviewed and
+accepted (``Resolved``), as may the PMO Lead and System Admin. A risk that is
+still Open, In Progress or Pending Resolution can never be closed directly.
 Row-level access is still enforced, so an unrelated PM cannot touch someone
 else's risk even though PM is a permitted role for other actions.
 """
@@ -9,6 +10,9 @@ else's risk even though PM is a permitted role for other actions.
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+
+# Resolution Summary used across the resolution tests.
+_SUMMARY = "Mitigated and monitored."
 
 
 def _headers(user_id: int | None, role: str) -> dict[str, str]:
@@ -49,7 +53,7 @@ def _resolved_risk(client: TestClient, project: dict, *, pm_user_id: int) -> dic
     # then the PM accepts it (Resolved).
     pending = client.patch(
         f"/api/risks/{risk['id']}",
-        json={"status": "Pending Resolution"},
+        json={"status": "Pending Resolution", "resolution_summary": _SUMMARY},
         headers=_headers(pm_user_id, "Project Manager"),
     )
     assert pending.status_code == 200
@@ -72,8 +76,8 @@ def test_me_returns_role(client: TestClient) -> None:
     assert "Project Manager" in resp.json()["roles"]
 
 
-def test_pm_cannot_close_own_risk(client: TestClient) -> None:
-    """Final closure is PMO Lead-only; the PM reviews but cannot close."""
+def test_pm_can_close_own_resolved_risk(client: TestClient) -> None:
+    """A Project Manager may close their own resolved (reviewed) risk."""
     project = _create_project(client, user_id=7)
     risk = _resolved_risk(client, project, pm_user_id=7)
 
@@ -82,7 +86,41 @@ def test_pm_cannot_close_own_risk(client: TestClient) -> None:
         json={"status": "Closed", "actor_user_id": 7},
         headers=_headers(7, "Project Manager"),
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "Closed"
+
+    history = client.get(
+        f"/api/risks/{risk['id']}/history", headers=_headers(7, "Project Manager")
+    ).json()
+    closure = [
+        e for e in history if e["action"] == "status_change" and e["new_value"] == "Closed"
+    ]
+    assert len(closure) == 1
+    assert closure[0]["user_id"] == 7
+
+
+def test_pm_cannot_close_unresolved_risk(client: TestClient) -> None:
+    """A risk still Open (or In Progress / Pending Review) cannot be closed."""
+    project = _create_project(client, user_id=7)
+    risk = client.post(
+        "/api/risks",
+        json={
+            "project_id": project["id"],
+            "description": "Still open",
+            "likelihood": "Low",
+            "impact": "Low",
+        },
+        headers=_headers(7, "Project Manager"),
+    ).json()
+    assert risk["status"] == "Open"
+
+    resp = client.patch(
+        f"/api/risks/{risk['id']}",
+        json={"status": "Closed", "actor_user_id": 7},
+        headers=_headers(7, "Project Manager"),
+    )
+    assert resp.status_code == 409
+    assert "Resolved" in resp.json()["detail"]
 
 
 def test_other_pm_cannot_close_someone_elses_risk(client: TestClient) -> None:

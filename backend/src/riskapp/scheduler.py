@@ -29,13 +29,11 @@ from riskapp.notifications import (
     EVENT_ESCALATION,
     EVENT_MATERIALIZED,
     EVENT_OWNER_REMINDER,
-    EVENT_WEEKLY_SUMMARY,
     NotificationService,
-    Recipients,
-    _unique,
     escalation_email,
     owner_reminder_email,
 )
+from riskapp.reports import run_weekly_report
 from riskapp.services import ensure_issue_for_risk, transition_risk
 
 _ACTIVE_STATUSES = (RiskStatus.OPEN.value, RiskStatus.IN_PROGRESS.value)
@@ -192,37 +190,24 @@ def weekly_summary_data(db: Session) -> dict[str, int | float]:
 def run_weekly_summary(
     db: Session, notifier: NotificationService
 ) -> dict[str, int | float]:
-    """Send the weekly summary to every PM and the PMO Lead."""
-    summary = weekly_summary_data(db)
-    body = (
-        f"Weekly summary — {summary['total']} risks total, "
-        f"{summary['escalated']} escalated, {summary['closed']} closed. "
-        f"Resolution rate {summary['resolution_rate']:.0%}."
-    )
+    """Send the redesigned weekly portfolio report.
 
-    pm_users = list(
-        db.scalars(
-            select(models.User)
-            .join(models.Project, models.Project.pm_user_id == models.User.id)
-            .distinct()
-            .order_by(models.User.id)
-        ).all()
-    )
-    pmo_email = _get_setting(db, "pmo_lead_email")
-    recipients = Recipients(
-        to_user_ids=tuple(user.id for user in pm_users),
-        to_emails=_unique(*[user.upn for user in pm_users], pmo_email),
-        cc_emails=(),
-    )
-    notifier.notify_recipients(
-        db,
-        event=EVENT_WEEKLY_SUMMARY,
-        title="Weekly risk summary",
-        body=body,
-        recipients=recipients,
-    )
-    db.commit()
-    return summary
+    Delegates to :mod:`riskapp.reports`: the PMO Lead receives the full
+    portfolio report and each Project Manager a copy scoped to their own
+    projects. Returns a compact summary dict for backwards compatibility with
+    existing callers and tests.
+    """
+    result = run_weekly_report(db, notifier)
+    total = int(result.get("total", 0))
+    resolved = int(result.get("resolved", 0))
+    closed = int(result.get("closed", 0))
+    done = resolved + closed
+    return {
+        "total": total,
+        "escalated": int(result.get("escalated", 0)),
+        "closed": done,
+        "resolution_rate": (done / total) if total else 0.0,
+    }
 
 
 def find_overdue_risks(db: Session, today: dt.date) -> list[models.Risk]:
@@ -323,8 +308,3 @@ def run_end_date_monitor(db: Session, notifier: NotificationService, today: dt.d
 
     db.commit()
     return materialized
-
-
-def _get_setting(db: Session, key: str) -> str | None:
-    value = db.scalar(select(models.Setting.value).where(models.Setting.key == key))
-    return value or None

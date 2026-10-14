@@ -318,17 +318,17 @@ export function RiskDetailPage() {
     risk?.status === 'Dismissed' ||
     historyReadOnly;
   const transitions = risk ? allowedTransitions(risk.status) : [];
-  // PMO Lead has the final authority to close a risk; System Admin is the app
-  // superuser. Everyone else sees the lifecycle without the Closed transition
-  // (the backend enforces the same rule regardless of what the UI shows).
-  const canCloseRisk = (me?.roles ?? []).some(
-    (role) => role === 'PMO Lead' || role === 'System Admin',
-  );
+  // The risk's Project Manager may close it once Resolved; PMO Lead / System
+  // Admin retain portfolio-wide closure authority. Everyone else sees the
+  // lifecycle without the Closed transition (the backend enforces the same rule
+  // regardless of what the UI shows).
+  const canCloseRisk = isPmoOrAdmin || isProjectPm;
+  const canCloseNow = canCloseRisk && risk?.status === 'Resolved';
   const statusOptions = canCloseRisk
     ? transitions
     : transitions.filter((t) => t !== 'Closed');
-  const awaitingPmoClosure =
-    risk?.status === 'Resolved' && statusOptions.length === 0;
+  const awaitingClosure =
+    risk?.status === 'Resolved' && transitions.length > 0 && !canCloseRisk;
   // While a resolution is pending review, accepting/rejecting is the only
   // decision available — the generic status dropdown must not bypass it.
   const pendingResolution = risk?.status === 'Pending Resolution';
@@ -416,6 +416,17 @@ export function RiskDetailPage() {
             {risk.status === 'Escalated' ? (
               <button className="btn" onClick={deEscalate}>
                 De-escalate
+              </button>
+            ) : null}
+            {canCloseNow ? (
+              <button
+                className="btn btn-danger"
+                onClick={() => {
+                  setActionError(null);
+                  setConfirmCloseOpen(true);
+                }}
+              >
+                Close Risk
               </button>
             ) : null}
             {!readOnly ? (
@@ -631,6 +642,20 @@ export function RiskDetailPage() {
                       <div className="kv-value">{risk.what_worked}</div>
                     </div>
                   ) : null}
+
+                  {risk.resolution_summary ? (
+                    <div className="mt-20">
+                      <div className="kv-label">Resolution summary</div>
+                      <div className="kv-value" style={{ whiteSpace: 'pre-wrap' }}>
+                        {risk.resolution_summary}
+                      </div>
+                      {risk.resolution_submitted_at ? (
+                        <div className="muted">
+                          Submitted {formatDateTime(risk.resolution_submitted_at)}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </SectionCard>
               )}
             </div>
@@ -657,7 +682,7 @@ export function RiskDetailPage() {
                 </SectionCard>
               ) : null}
 
-              {!pendingResolution && !historyReadOnly && (statusOptions.length > 0 || awaitingPmoClosure) ? (
+              {!pendingResolution && !historyReadOnly && (statusOptions.length > 0 || awaitingClosure) ? (
                 <SectionCard title="Change status">
                   {statusOptions.length > 0 ? (
                     <>
@@ -689,8 +714,8 @@ export function RiskDetailPage() {
                     </>
                   ) : (
                     <p className="muted">
-                      This risk is Resolved and ready to close. You do not have permission to
-                      close it.
+                      This risk is Resolved. Only the project's Project Manager, a PMO Lead
+                      or a System Admin can close it.
                     </p>
                   )}
                 </SectionCard>
@@ -787,8 +812,9 @@ export function RiskDetailPage() {
               </button>
             </div>
             <p>
-              Are you sure you want to close this risk? Closing the risk indicates that the risk
-              has been formally closed.
+              Are you sure you want to close risk{' '}
+              <span className="mono">{risk?.risk_code}</span>? This marks the risk as
+              formally Closed and records the closure in its status history.
             </p>
             {actionError ? <div className="error-banner">{actionError}</div> : null}
             <div className="btn-group">

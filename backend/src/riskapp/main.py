@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from riskapp import models, schemas
+from riskapp import branding, models, schemas
 from riskapp.auth import (
     LOCAL_LOGIN_TTL_HOURS,
     Principal,
@@ -23,6 +23,7 @@ from riskapp.auth import (
     can_close_project,
     can_close_risk,
     can_delete_risk,
+    can_finally_close_risk,
     can_review_resolution,
     can_view_issue,
     can_view_project,
@@ -64,6 +65,12 @@ from riskapp.notifications import (
     build_notification_service,
     resolution_rejected_email,
 )
+from riskapp.reports import (
+    build_weekly_report,
+    render_html,
+    render_text,
+    run_weekly_report,
+)
 from riskapp.security import hash_password, verify_password
 from riskapp.services import (
     accept_resolution,
@@ -92,7 +99,7 @@ from riskapp.suggestions import (
     list_suggestions,
 )
 
-app = FastAPI(title="WRAGBY RiskIntel — PMO Risk Management")
+app = FastAPI(title=branding.PRODUCT_NAME)
 
 app.add_middleware(
     CORSMiddleware,
@@ -261,6 +268,8 @@ def _external_ack_read(
         project_manager=risk.project.pm_name or "" if risk.project else "",
         acknowledged=risk.sla_acknowledged,
         acknowledged_at=risk.acknowledged_at,
+        resolution_summary=risk.resolution_summary,
+        resolution_submitted_at=risk.resolution_submitted_at,
         resolution_rejected_reason=_latest_rejection_reason(db, risk),
     )
 
@@ -292,12 +301,16 @@ def external_acknowledge(token: str, db: DbDep) -> schemas.ExternalAcknowledgeRe
     "/api/external/acknowledge/{token}/resolve",
     response_model=schemas.ExternalAcknowledgeRead,
 )
-def external_resolve(token: str, db: DbDep) -> schemas.ExternalAcknowledgeRead:
+def external_resolve(
+    token: str, db: DbDep, payload: schemas.ResolutionSubmit | None = None
+) -> schemas.ExternalAcknowledgeRead:
     """Public: Risk Owner proposes a resolution (status -> ``Pending Resolution``).
 
     The owner may only move the risk into ``Pending Resolution`` — never
-    ``Resolved`` or ``Closed``. The Project Manager is notified to review the
-    proposed resolution and accept or reject it.
+    ``Resolved`` or ``Closed``. A meaningful Resolution Summary is mandatory and
+    is validated server-side, so a direct API call cannot bypass it. The Project
+    Manager is notified to review the proposed resolution and accept or reject
+    it.
     """
     risk = _resolve_acknowledgement_risk(db, token)
     if risk.status in (
@@ -306,9 +319,16 @@ def external_resolve(token: str, db: DbDep) -> schemas.ExternalAcknowledgeRead:
     ):
         return _external_ack_read(db, risk)  # idempotent re-submission
     try:
-        risk = resolve_risk(db, risk, actor_user_id=risk.owner_user_id)
-    except (InvalidTransitionError, ValueError) as exc:
+        risk = resolve_risk(
+            db,
+            risk,
+            resolution_summary=payload.resolution_summary if payload else None,
+            actor_user_id=risk.owner_user_id,
+        )
+    except InvalidTransitionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     build_notification_service().notify(
         db,
         event=EVENT_RESOLVED,
@@ -818,14 +838,27 @@ def patch_risk(
     # Closing a risk (status -> Closed) is reserved for the PMO Lead (final
     # closure authority). System Admin may also close as the app's superuser.
     # Enforced here, not just hidden in the UI.
-    if payload.status == RiskStatus.CLOSED.value and not can_close_risk(principal):
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "You are not authorized to close risks. Only a PMO Lead can "
-                "finally close a risk."
-            ),
-        )
+    if payload.status == RiskStatus.CLOSED.value:
+        if not can_close_risk(principal, risk):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "You are not authorized to close this risk. Only the "
+                    "project's Project Manager, a PMO Lead or a System Admin can "
+                    "close it."
+                ),
+            )
+        # The resolution must have been reviewed and accepted first: an Open or
+        # In Progress risk can never jump straight to Closed. Enforced here with
+        # a precise reason; the state machine would reject it anyway.
+        if not can_finally_close_risk(principal, risk):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Only a risk whose resolution has been reviewed and accepted "
+                    "(Resolved) can be closed."
+                ),
+            )
     # Sending a Pending Resolution risk back to In Progress is the PM's review
     # decision; it is not a generic status edit available to the Risk Owner.
     if (
@@ -1154,6 +1187,54 @@ def escalation_trend_report(
     return schemas.EscalationTrendRead(
         months=months, values=[buckets[month] for month in months]
     )
+
+
+@app.get(
+    "/api/reports/weekly",
+    response_model=schemas.WeeklyReportRead,
+)
+def weekly_report(
+    principal: PrincipalDep, db: DbDep
+) -> schemas.WeeklyReportRead:
+    """The weekly portfolio report, scoped to the caller's role.
+
+    PMO Lead / System Admin get the full portfolio; a Project Manager gets a
+    copy covering only the projects they manage. Risk Owners have no access.
+    """
+    today = dt.date.today()
+    if principal.is_pmo_or_admin:
+        report = build_weekly_report(db, today=today)
+    else:
+        if not principal.has_role(Role.PROJECT_MANAGER) or principal.user_id is None:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        report = build_weekly_report(
+            db, scope_pm_user_id=principal.user_id, today=today
+        )
+    return schemas.WeeklyReportRead(
+        subject=f"{branding.PRODUCT_NAME} — Weekly Portfolio Risk Report",
+        scope=report.scope_label,
+        generated_at=report.generated_at,
+        period_start=report.period_start,
+        period_end=report.period_end,
+        total_projects=report.total_projects,
+        total_risks=report.total_risks,
+        html=render_html(report),
+        text=render_text(report),
+    )
+
+
+@app.post("/api/reports/weekly/send")
+def send_weekly_report(
+    principal: PrincipalDep, db: DbDep, force: bool = False
+) -> dict[str, object]:
+    """Manually trigger the weekly report (PMO Lead / System Admin).
+
+    Idempotent per business day unless ``force=true`` is passed, so retries do
+    not duplicate the report or its in-app notifications.
+    """
+    if not principal.is_pmo_or_admin:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return dict(run_weekly_report(db, build_notification_service(), force=force))
 
 
 @app.post(

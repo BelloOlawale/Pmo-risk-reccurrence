@@ -22,6 +22,9 @@ from riskapp.notifications import NotificationService
 from riskapp.scheduler import run_end_date_monitor, run_escalation_monitor
 from riskapp.services import get_or_create_user
 
+# Resolution Summary used across the resolution tests.
+_SUMMARY = "Mitigated and monitored."
+
 TODAY = dt.date(2026, 8, 24)
 PAST_DATE = dt.date(2026, 8, 20)
 
@@ -160,7 +163,8 @@ def test_acknowledged_and_pending_resolution_does_not_escalate_or_materialize(
     client.post(f"/api/risks/{risk['id']}/acknowledge")
     assert (
         client.patch(
-            f"/api/risks/{risk['id']}", json={"status": "Pending Resolution"}
+            f"/api/risks/{risk['id']}",
+            json={"status": "Pending Resolution", "resolution_summary": _SUMMARY},
         ).status_code
         == 200
     )

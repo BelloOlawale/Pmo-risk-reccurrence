@@ -22,8 +22,16 @@ class FakeEmail:
     def __init__(self) -> None:
         self.sent: list[dict] = []
 
-    def send_email(self, *, to, cc=None, subject, body_html) -> None:
-        self.sent.append({"to": to, "cc": cc, "subject": subject, "body_html": body_html})
+    def send_email(self, *, to, cc=None, subject, body_html, body_text=None) -> None:
+        self.sent.append(
+            {
+                "to": to,
+                "cc": cc,
+                "subject": subject,
+                "body_html": body_html,
+                "body_text": body_text,
+            }
+        )
 
 
 def _ctx(**overrides) -> RecipientContext:

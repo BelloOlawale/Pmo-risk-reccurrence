@@ -199,9 +199,10 @@ docker compose logs -f web
 docker compose down
 ```
 
-The local frontend defaults to `VITE_AUTH_MODE=dev` (dev mode: no sign-in page,
-role switcher in the sidebar). Set `VITE_AUTH_MODE=password` to exercise the
-email + password sign-in locally.
+The local frontend currently defaults to `VITE_AUTH_MODE=entra` (Microsoft SSO;
+register `http://localhost:5173` as an SPA redirect URI on the app registration).
+Set `VITE_AUTH_MODE=password` to exercise the email + password sign-in locally,
+or `VITE_AUTH_MODE=dev` for the no-sign-in sidebar role switcher.
 
 ### CI
 

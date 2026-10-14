@@ -14,6 +14,11 @@ from riskapp.domain.scoring import compute_risk_rating
 from riskapp.domain.sla import as_naive_utc, deadline_from_end_date
 from riskapp.domain.status import RiskStatus, ensure_transition
 
+RESOLUTION_SUMMARY_REQUIRED = (
+    "Please provide a Resolution Summary explaining the actions taken before "
+    "resolving this risk."
+)
+
 
 def _next_project_code(db: Session) -> str:
     year = dt.date.today().year
@@ -520,7 +525,11 @@ def de_escalate_risk(
 
 
 def resolve_risk(
-    db: Session, risk: models.Risk, *, actor_user_id: int | None = None
+    db: Session,
+    risk: models.Risk,
+    *,
+    resolution_summary: str | None = None,
+    actor_user_id: int | None = None,
 ) -> models.Risk:
     """Risk Owner proposes a resolution: ``Open``/``In Progress`` -> ``Pending Resolution``.
 
@@ -528,10 +537,25 @@ def resolve_risk(
     Escalated / Event). The proposal is not final: it enters ``Pending
     Resolution`` until the Project Manager accepts or rejects it. The owner can
     never close a risk.
+
+    A meaningful Resolution Summary is mandatory: empty or whitespace-only
+    responses are rejected here, not merely in the UI, so a direct API call
+    cannot bypass the requirement. Earlier submissions are retained in the
+    append-only audit log when the owner resubmits after a rejection.
+
+    Raises:
+        ValueError: when no meaningful Resolution Summary is supplied.
+        InvalidTransitionError: when the risk is not in a resolvable state.
     """
+    cleaned = (resolution_summary or "").strip()
+    if not cleaned:
+        raise ValueError(RESOLUTION_SUMMARY_REQUIRED)
     target = ensure_transition(risk.status, RiskStatus.PENDING_RESOLUTION.value)
     old_status = risk.status
     risk.status = target.value
+    _apply_resolution_summary(
+        db, risk, summary=cleaned, actor_user_id=actor_user_id
+    )
     record_change(
         db,
         risk,
@@ -546,12 +570,48 @@ def resolve_risk(
     return risk
 
 
+def _apply_resolution_summary(
+    db: Session,
+    risk: models.Risk,
+    *,
+    summary: str,
+    actor_user_id: int | None,
+) -> None:
+    """Store the Resolution Summary and its submission metadata, auditing it.
+
+    The previous value (if any) is written to the audit log before it is
+    overwritten, so a rejected-then-resubmitted resolution never silently loses
+    the earlier account of what was done.
+    """
+    previous = risk.resolution_summary
+    if previous != summary:
+        record_change(
+            db,
+            risk,
+            action="resolution_summary_updated",
+            field="resolution_summary",
+            old_value=previous,
+            new_value=summary,
+            actor_user_id=actor_user_id,
+        )
+    risk.resolution_summary = summary
+    risk.resolution_submitted_at = dt.datetime.now(dt.UTC).replace(tzinfo=None)
+    risk.resolution_submitted_by_user_id = actor_user_id
+
+
 def accept_resolution(
     db: Session, risk: models.Risk, *, actor_user_id: int | None = None
 ) -> models.Risk:
-    """Project Manager accepts the owner's resolution: ``Pending Resolution`` -> ``Resolved``."""
+    """Project Manager accepts the owner's resolution: ``Pending Resolution`` -> ``Resolved``.
+
+    A non-empty Resolution Summary must already be recorded; this is a
+    defence-in-depth guard so a risk can never reach ``Resolved`` without the
+    owner having documented what was done.
+    """
     if risk.status != RiskStatus.PENDING_RESOLUTION.value:
         raise ValueError("Only a risk pending resolution has a resolution to accept.")
+    if not (risk.resolution_summary or "").strip():
+        raise ValueError(RESOLUTION_SUMMARY_REQUIRED)
     target = ensure_transition(risk.status, RiskStatus.RESOLVED.value)
     old_status = risk.status
     risk.status = target.value
@@ -581,8 +641,6 @@ def reject_resolution(
     cleaned = (reason or "").strip()
     if not cleaned:
         raise ValueError("A reason is required to reject a resolution.")
-    if risk.status != RiskStatus.PENDING_RESOLUTION.value:
-        raise ValueError("Only a risk pending resolution can be rejected.")
     target = ensure_transition(risk.status, RiskStatus.IN_PROGRESS.value)
     old_status = risk.status
     risk.status = target.value
@@ -675,6 +733,9 @@ def update_risk(
     if owner_upn:
         data["owner_user_id"] = get_or_create_user(db, owner_upn).id
     target_status = data.pop("status", None)
+    # The Resolution Summary carries submission metadata, so it is applied
+    # through its own audited helper rather than the generic field loop.
+    resolution_summary = data.pop("resolution_summary", None)
 
     _reject_immutable_edits(data, risk)
 
@@ -716,8 +777,24 @@ def update_risk(
 
     if target_status is not None and target_status != risk.status:
         target = ensure_transition(risk.status, target_status)
+        # Submitting a resolution requires a meaningful summary; accepting one
+        # requires that the owner already supplied it. Enforced here so the
+        # generic status endpoint cannot bypass the owner-resolution guard.
+        cleaned_summary = (resolution_summary or "").strip()
+        if target is RiskStatus.PENDING_RESOLUTION and not cleaned_summary:
+            raise ValueError(RESOLUTION_SUMMARY_REQUIRED)
+        if target is RiskStatus.RESOLVED and not (risk.resolution_summary or "").strip():
+            raise ValueError(RESOLUTION_SUMMARY_REQUIRED)
         old_status = risk.status
         risk.status = target.value
+        if target is RiskStatus.PENDING_RESOLUTION:
+            _apply_resolution_summary(
+                db, risk, summary=cleaned_summary, actor_user_id=actor_user_id
+            )
+        elif target is RiskStatus.RESOLVED:
+            risk.resolved_date = dt.datetime.now(dt.UTC).replace(tzinfo=None)
+        elif target is RiskStatus.CLOSED:
+            risk.closed_date = dt.datetime.now(dt.UTC).replace(tzinfo=None)
         record_change(
             db,
             risk,
@@ -727,6 +804,12 @@ def update_risk(
             new_value=target.value,
             actor_user_id=actor_user_id,
         )
+    elif resolution_summary is not None and resolution_summary.strip():
+        # A standalone Summary edit (no status change) is allowed and audited.
+        if resolution_summary.strip() != risk.resolution_summary:
+            _apply_resolution_summary(
+                db, risk, summary=resolution_summary.strip(), actor_user_id=actor_user_id
+            )
 
     # Only materialization (Event) raises the single tracked Issue; repeated
     # edits of an already-Event risk are idempotent. Escalation is a monitoring

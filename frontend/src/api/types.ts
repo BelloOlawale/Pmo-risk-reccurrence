@@ -99,6 +99,10 @@ export interface Risk {
   root_cause: string | null;
   what_worked: string | null;
   resolution_category: string | null;
+  /** Risk Owner's account of the action taken to resolve the risk. */
+  resolution_summary: string | null;
+  resolution_submitted_at: string | null;
+  resolution_submitted_by_user_id: number | null;
   created_at: string;
 }
 
@@ -259,6 +263,9 @@ export interface ExternalAcknowledge {
   project_manager: string;
   acknowledged: boolean;
   acknowledged_at: string | null;
+  /** The owner's Resolution Summary (editable while the risk is live). */
+  resolution_summary: string | null;
+  resolution_submitted_at: string | null;
   /** Set when the PM rejected a proposed resolution, so the owner can see why. */
   resolution_rejected_reason: string | null;
 }

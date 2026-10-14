@@ -194,6 +194,18 @@ class Risk(TimestampMixin, Base):
     what_worked: Mapped[str | None] = mapped_column(Text, nullable=True)
     resolution_category: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
+    # The Risk Owner's account of the action taken to resolve (or prevent
+    # recurrence of) the risk. Mandatory before a risk may be submitted for
+    # resolution; retained across rejections and resubmissions (earlier values
+    # stay in the append-only audit log).
+    resolution_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolution_submitted_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    resolution_submitted_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+
     project: Mapped[Project] = relationship(back_populates="risks")
     owner: Mapped[User | None] = relationship(foreign_keys=[owner_user_id])
     practice_lead: Mapped[User | None] = relationship(foreign_keys=[practice_lead_user_id])

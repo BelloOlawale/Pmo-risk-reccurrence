@@ -1,10 +1,12 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { MsalProvider, useMsal } from '@azure/msal-react';
 
 import { api } from '../api/client';
 import type { LoginOptions } from '../api/types';
 import { authMode } from './authMode';
+import { loginRequest, msalInstance } from './msal';
 import { clearSession, loadSession, saveSession } from './session';
 import type { StoredSession } from './session';
 import { setAuthState } from './authStore';
@@ -26,12 +28,18 @@ export interface AuthContextValue {
   user: AuthUser | null;
   userId: number | null;
   role: string;
+  /** True when Microsoft Entra ID SSO (MSAL) is the active mode. */
+  isEntraMode: boolean;
+  /** Begin the interactive Microsoft sign-in redirect (Entra mode only). */
+  login: () => void;
   logout: () => void;
   setDevIdentity: (userId: number | null, role: string) => void;
   /** Whether the backend offers app-managed email + password sign-in. */
   passwordLoginEnabled: boolean;
   /** Store a locally-issued bearer token and signed-in identity. */
   loginWithToken: (token: string, user: AuthUser) => void;
+  /** Set when Microsoft sign-in failed (e.g. admin consent required). */
+  entraError: string | null;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -53,6 +61,13 @@ interface DevIdentity {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  if (authMode === 'entra') {
+    return (
+      <MsalProvider instance={msalInstance}>
+        <EntraAuthGate>{children}</EntraAuthGate>
+      </MsalProvider>
+    );
+  }
   if (authMode === 'dev') {
     return <DevAuthProvider>{children}</DevAuthProvider>;
   }
@@ -129,6 +144,8 @@ function PasswordAuthProvider({ children }: { children: ReactNode }) {
       user: session ? { upn: session.upn, displayName: session.displayName } : null,
       userId: null,
       role: '',
+      isEntraMode: false,
+      login: () => undefined,
       logout: () => {
         clearSession();
         setSession(null);
@@ -146,6 +163,7 @@ function PasswordAuthProvider({ children }: { children: ReactNode }) {
         saveSession(next);
         setSession(next);
       },
+      entraError: null,
     }),
     [session, loginOptions],
   );
@@ -188,12 +206,139 @@ function DevAuthProvider({ children }: { children: ReactNode }) {
       },
       userId: identity.userId,
       role: identity.role,
+      isEntraMode: false,
+      login: () => undefined,
       logout: () => undefined,
       setDevIdentity: (userId, role) => setIdentity({ userId, role }),
       passwordLoginEnabled: false,
       loginWithToken: () => undefined,
+      entraError: null,
     }),
     [identity],
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+/**
+ * Microsoft Entra ID SSO via MSAL (redirect flow).
+ *
+ * Resolves the redirect response, then acquires an access token silently and
+ * attaches it as a Bearer token (see ``authStore.authHeaders``). Roles are
+ * resolved server-side from the token's ``groups`` claim — the SPA never
+ * authorizes.
+ */
+function EntraAuthGate({ children }: { children: ReactNode }) {
+  const { instance, accounts } = useMsal();
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [tokenError, setTokenError] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+
+  // Resolve the redirect response, then acquire a token. The app shell renders
+  // immediately; the API client defers requests until authReady so pages never
+  // fire token-less calls during sign-in.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function initialise() {
+      try {
+        // Idempotent (MsalProvider also calls it). Awaiting it here fixes the
+        // ordering race where a child effect ran handleRedirectPromise before
+        // the provider's effect had initialized MSAL.
+        await instance.initialize();
+        const result = await instance.handleRedirectPromise();
+        if (result?.account) {
+          instance.setActiveAccount(result.account);
+        }
+      } catch (err) {
+        if (!cancelled) setTokenError(err instanceof Error ? err.message : String(err));
+      }
+
+      try {
+        const account = instance.getActiveAccount() ?? instance.getAllAccounts()[0];
+        if (!account) {
+          return; // no session — the layout shows the sign-in prompt
+        }
+        try {
+          const silent = await instance.acquireTokenSilent({ ...loginRequest, account });
+          if (!cancelled) {
+            setAccessToken(silent.accessToken);
+            setTokenError(null);
+          }
+        } catch {
+          // Consent/MFA/expired session: fall back to an interactive redirect,
+          // which navigates away rather than leaving the app token-less.
+          try {
+            await instance.acquireTokenRedirect({ ...loginRequest, account });
+          } catch (err) {
+            if (!cancelled) setTokenError(err instanceof Error ? err.message : String(err));
+          }
+        }
+      } catch (err) {
+        if (!cancelled) setTokenError(err instanceof Error ? err.message : String(err));
+      } finally {
+        // Resolution is done either way; unblock deferred API calls (they 401
+        // only if the user genuinely has no session).
+        if (!cancelled) {
+          setAuthReady(true);
+          setAuthState({ ready: true });
+        }
+      }
+    }
+
+    void initialise();
+    return () => {
+      cancelled = true;
+    };
+  }, [instance]);
+
+  // When the active account changes (login/logout), refresh the token.
+  useEffect(() => {
+    const account = instance.getActiveAccount() ?? accounts[0];
+    if (account) {
+      instance
+        .acquireTokenSilent({ ...loginRequest, account })
+        .then((r) => setAccessToken(r.accessToken))
+        .catch(() => undefined);
+    } else {
+      setAccessToken(null);
+    }
+  }, [instance, accounts]);
+
+  useEffect(() => {
+    setAuthState({ bearer: true, accessToken, devUserId: null });
+  }, [accessToken]);
+
+  const account = accounts[0];
+  const user: AuthUser | null = account
+    ? { upn: account.username, displayName: account.name ?? account.username }
+    : null;
+  // A session only counts once we actually hold a token: an MSAL account with
+  // no token (e.g. consent blocked) must fall back to the sign-in page rather
+  // than rendering the app shell, which would 401 on every request.
+  const isAuthenticated = Boolean(accessToken);
+
+  const value = useMemo<AuthContextValue>(
+    () => ({
+      isAuthenticated,
+      isDevMode: false,
+      isEntraMode: true,
+      authReady,
+      user,
+      userId: null,
+      role: '',
+      // Always show the account picker so a stale cached account can be switched.
+      login: () => instance.loginRedirect({ ...loginRequest, prompt: 'select_account' }),
+      logout: () => {
+        setAccessToken(null);
+        instance.logoutRedirect();
+      },
+      setDevIdentity: () => undefined,
+      passwordLoginEnabled: false,
+      loginWithToken: () => undefined,
+      entraError: tokenError,
+    }),
+    [instance, accounts.length, account, user, isAuthenticated, tokenError, authReady],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -12,8 +12,12 @@
 FROM node:20-alpine AS build
 
 ARG VITE_API_BASE_URL=''
-# "password" (default, app-managed email + password) or "dev" (local only).
+# "password" (default, app-managed email + password), "entra" (Microsoft SSO)
+# or "dev" (local only).
 ARG VITE_AUTH_MODE='password'
+# Required when VITE_AUTH_MODE=entra: the app registration the SPA signs in to.
+ARG VITE_ENTRA_CLIENT_ID=''
+ARG VITE_ENTRA_TENANT_ID=''
 
 WORKDIR /app
 
@@ -23,7 +27,9 @@ RUN npm ci
 COPY . .
 # Bake the runtime configuration into the bundle.
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL \
-    VITE_AUTH_MODE=$VITE_AUTH_MODE
+    VITE_AUTH_MODE=$VITE_AUTH_MODE \
+    VITE_ENTRA_CLIENT_ID=$VITE_ENTRA_CLIENT_ID \
+    VITE_ENTRA_TENANT_ID=$VITE_ENTRA_TENANT_ID
 RUN npm run build
 
 FROM nginx:1.27-alpine

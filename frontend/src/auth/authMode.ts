@@ -1,15 +1,34 @@
 /**
  * Frontend authentication mode.
  *
- * The application signs users in with an app-managed email + password (see
- * ``PasswordLoginForm``). Set ``VITE_AUTH_MODE=dev`` to run with header-based
- * developer auth and the sidebar identity switcher instead — local development
- * only, never in a deployed build.
+ * Three modes, selected by ``VITE_AUTH_MODE`` (a build-time value):
+ *
+ *   ``entra``    — Microsoft Entra ID SSO via MSAL (production).
+ *   ``password`` — app-managed email + password sign-in (default).
+ *   ``dev``      — header-based developer auth + sidebar identity switcher
+ *                  (local development only, never in a deployed build).
+ *
+ * ``entra`` is also auto-selected when ``VITE_ENTRA_CLIENT_ID`` and
+ * ``VITE_ENTRA_TENANT_ID`` are both present and no explicit mode is set, which
+ * matches how the legacy build configured SSO.
  */
 const configured = (import.meta.env.VITE_AUTH_MODE as string | undefined)
   ?.trim()
   .toLowerCase();
+const entraClientId = import.meta.env.VITE_ENTRA_CLIENT_ID as string | undefined;
+const entraTenantId = import.meta.env.VITE_ENTRA_TENANT_ID as string | undefined;
 
-export type AuthMode = 'password' | 'dev';
+export type AuthMode = 'entra' | 'password' | 'dev';
 
-export const authMode: AuthMode = configured === 'dev' ? 'dev' : 'password';
+function resolveMode(): AuthMode {
+  if (configured === 'dev') return 'dev';
+  if (configured === 'password') return 'password';
+  if (configured === 'entra') return 'entra';
+  // Unset/unrecognised: prefer Entra when it is fully configured, else password.
+  return entraClientId && entraTenantId ? 'entra' : 'password';
+}
+
+export const authMode: AuthMode = resolveMode();
+
+/** True when MSAL-based Entra sign-in is the active mode. */
+export const isEntraMode = authMode === 'entra';
