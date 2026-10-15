@@ -3,25 +3,25 @@
 # Measure the app -> PostgreSQL round-trip from inside the web container
 # =============================================================================
 #
-# Use before and after the region move (infra/move-postgres-region.sh) to prove
-# the latency win. A same-region database should show a few ms per query; the
-# cross-region setup measured ~76 ms per query and ~580 ms per fresh connect.
+# Use to confirm the web app and PostgreSQL are co-located (a same-region
+# database shows a few ms per query; a cross-region split measured ~76 ms per
+# query and ~580 ms per fresh connect).
 #
 # USAGE
-#   bash infra/check-db-latency.sh                 # dev / riskapp-dev-web
-#   bash infra/check-db-latency.sh prod --app web
+#   bash infra/check-db-latency.sh                 # int / riskapp-int-web
+#   bash infra/check-db-latency.sh int --app worker
 #
 # =============================================================================
 
 set -euo pipefail
 
-ENV_NAME="dev"
+ENV_NAME="int"
 APP="web"
 RG=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        dev|prod|staging) ENV_NAME="$1"; shift ;;
+        int) ENV_NAME="$1"; shift ;;
         --app) APP="$2"; shift 2 ;;
         --resource-group) RG="$2"; shift 2 ;;
         -h|--help) sed -n '2,20p' "$0"; exit 0 ;;

@@ -1,9 +1,13 @@
 import { Suspense, type ReactNode } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 
-import { DEV_ROLES, useAuth } from '../auth/AuthContext';
+import { useAuth } from '../auth/AuthContext';
+import { api } from '../api/client';
+import type { Me } from '../api/types';
+import { useApi } from '../hooks/useApi';
 import { BrandLockup } from './BrandLockup';
 import { SignInPage } from './auth/SignInPage';
+import { ChangePasswordPage } from './auth/ChangePasswordPage';
 import { NotificationBell } from './NotificationBell';
 
 function NavIcon({ children }: { children: ReactNode }) {
@@ -42,21 +46,31 @@ export function Layout() {
 
   // While an Entra session resolves we render the app shell with a placeholder
   // so it paints immediately, instead of a blank screen then a sign-in flash.
-  const resolvingSession = !auth.isDevMode && !auth.authReady;
+  const resolvingSession = !auth.authReady;
+
+  // Fetch the caller once a session exists. Besides role-aware controls, this
+  // is what tells us an administrator-provisioned account must set its own
+  // password before any application screen is shown.
+  const { data: me, reload: reloadMe } = useApi<Me | null>(
+    () => (auth.isAuthenticated ? api.get<Me>('/api/me') : Promise.resolve(null)),
+    [auth.isAuthenticated],
+  );
 
   // Unauthenticated users get the dedicated sign-in layout. The application
   // shell (sidebar, topbar, navigation, page data) must never be rendered
   // before a session exists.
-  if (!auth.isDevMode && !auth.isAuthenticated && !resolvingSession) {
+  if (!auth.isAuthenticated && !resolvingSession) {
     return <SignInPage />;
   }
 
-  // Remount the active page whenever the dev identity changes so every page
-  // refetches with the new role/user (otherwise lists fetched under the old
-  // identity stay on screen and the Close/visible actions look wrong).
-  const outletKey = auth.isDevMode
-    ? `dev:${auth.role}:${auth.userId ?? 'none'}`
-    : 'sso';
+  // A temporary (admin-set) password must be replaced before the app is usable.
+  if (me?.must_change_password) {
+    return <ChangePasswordPage onDone={reloadMe} />;
+  }
+
+  // Remount the active page on identity change (sign-in/out) so every page
+  // refetches under the new session instead of showing stale data.
+  const outletKey = 'session';
 
   return (
     <div className="app-shell">
@@ -83,44 +97,16 @@ export function Layout() {
           </NavLink>
         </nav>
         <div className="sidebar-footer">
-          {auth.isDevMode ? (
-            <div className="dev-switcher">
-              <label>Dev mode role</label>
-              <select
-                value={auth.role}
-                onChange={(e) => auth.setDevIdentity(auth.userId, e.target.value)}
-              >
-                {DEV_ROLES.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-              <label>User ID (blank = admin)</label>
-              <input
-                type="number"
-                value={auth.userId ?? ''}
-                placeholder="admin"
-                onChange={(e) =>
-                  auth.setDevIdentity(
-                    e.target.value === '' ? null : Number(e.target.value),
-                    auth.role,
-                  )
-                }
-              />
+          <div className="user-card">
+            <div className="user-avatar">{auth.user?.displayName?.[0] ?? '?'}</div>
+            <div className="user-meta">
+              <div className="user-name">{auth.user?.displayName ?? 'Signed out'}</div>
+              <div className="user-upn">{auth.user?.upn ?? ''}</div>
             </div>
-          ) : (
-            <div className="user-card">
-              <div className="user-avatar">{auth.user?.displayName?.[0] ?? '?'}</div>
-              <div className="user-meta">
-                <div className="user-name">{auth.user?.displayName ?? 'Signed out'}</div>
-                <div className="user-upn">{auth.user?.upn ?? ''}</div>
-              </div>
-              <button className="btn btn-sm" onClick={auth.logout}>
-                Sign out
-              </button>
-            </div>
-          )}
+            <button className="btn btn-sm" onClick={auth.logout}>
+              Sign out
+            </button>
+          </div>
         </div>
       </aside>
       <div className="main">

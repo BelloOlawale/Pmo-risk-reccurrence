@@ -1,6 +1,6 @@
 #!/usr/bin/env pwsh
 # =============================================================================
-# PMO Risk Recurrence Predictor - Complete Azure Deployment Script (PowerShell)
+# PMO Risk Intelligence - Complete Azure Deployment Script (PowerShell)
 # =============================================================================
 #
 # Deploys the whole solution to Azure. Idempotent - safe to re-run at any time
@@ -13,10 +13,10 @@
 #     role assignments and Key Vault RBAC can be created
 #
 # USAGE
-#   .\deploy.ps1 -Environment dev
-#   .\deploy.ps1 -Environment prod -Location westus2
-#   .\deploy.ps1 -Environment dev -Stage infra
-#   .\deploy.ps1 -Environment dev -ChatModelName gpt-5.4 -ChatModelVersion 2026-03-05
+#   .\deploy.ps1 -Environment int
+#   .\deploy.ps1 -Environment int -Location uksouth
+#   .\deploy.ps1 -Environment int -Stage infra
+#   .\deploy.ps1 -Environment int -ChatModelName gpt-5.4 -ChatModelVersion 2026-03-05
 #
 # STAGES
 #   all     : infra -> images -> apps (default)
@@ -29,7 +29,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('dev', 'prod', 'int')]
+    [ValidateSet('int')]
     [string]$Environment,
 
     [ValidateSet('all', 'infra', 'images', 'apps')]
@@ -68,9 +68,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-# Default region per environment when -Location is not given (int is UK South).
+# Region. The integration/production environment lives in UK South.
 if ([string]::IsNullOrEmpty($Location)) {
-    $Location = if ($Environment -in @('int', 'integration', 'staging')) { 'uksouth' } else { 'eastus' }
+    $Location = 'uksouth'
 }
 
 $ScriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -86,7 +86,7 @@ function Fail          { param([string]$m) Write-Host "[ERROR] $m" -ForegroundCo
 
 Write-Host @"
 =============================================================================
-PMO Risk Recurrence Predictor - Azure Deployment
+PMO Risk Intelligence - Azure Deployment
 =============================================================================
 Environment : $Environment
 Stage       : $Stage
@@ -242,7 +242,7 @@ if (-not $SkipImageBuild -and ($Stage -eq 'all' -or $Stage -eq 'images')) {
 
     Write-Step 'Building frontend image...'
     $buildArgs = @()
-    $authMode = if ($env:VITE_AUTH_MODE) { $env:VITE_AUTH_MODE } else { 'password' }
+    $authMode = if ($env:VITE_AUTH_MODE) { $env:VITE_AUTH_MODE } else { 'entra' }
     $buildArgs += '--build-arg', "VITE_AUTH_MODE=$authMode"
     if ($env:VITE_ENTRA_CLIENT_ID) { $buildArgs += '--build-arg', "VITE_ENTRA_CLIENT_ID=$($env:VITE_ENTRA_CLIENT_ID)" }
     if ($env:VITE_ENTRA_TENANT_ID) { $buildArgs += '--build-arg', "VITE_ENTRA_TENANT_ID=$($env:VITE_ENTRA_TENANT_ID)" }
@@ -267,7 +267,7 @@ if ($Stage -eq 'all' -or $Stage -eq 'apps') {
 # =============================================================================
 
 Write-Step 'Checking Entra ID app registration...'
-$entraAppName = "PMO Risk Recurrence Predictor (${Environment})"
+$entraAppName = "PMO Risk Intelligence (${Environment})"
 $entraTenantId = $account.tenantId
 $entraClientId = ''
 $entraCallback = ''
@@ -368,7 +368,7 @@ Next steps
 1. Create Entra security groups and store their IDs in the 'entra-role-group-ids' secret.
 2. Set remaining secrets (ACS, blob) - see infra/README.md.
 3. If the frontend was built before the Entra app existed, rebuild it with
-   VITE_AUTH_MODE=password (default) and re-run -Stage images.
+   VITE_AUTH_MODE=entra (default) and re-run -Stage images.
 "@ -ForegroundColor Green
 
 if ($frontendFqdn) { $frontendUrlOut = "https://$frontendFqdn" } else { $frontendUrlOut = '' }

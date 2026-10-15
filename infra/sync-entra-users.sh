@@ -19,11 +19,10 @@
 # is safe to re-run (e.g. from a scheduled job / CI) at any time.
 #
 # USAGE
-#   bash infra/sync-entra-users.sh                 # dev, source=az-token
-#   bash infra/sync-entra-users.sh prod            # prod, source=az-token
-#   bash infra/sync-entra-users.sh dev --source graph
-#   bash infra/sync-entra-users.sh dev --env-file infra/deploy.dev.env
-#   bash infra/sync-entra-users.sh dev --include-guests
+#   bash infra/sync-entra-users.sh int                 # source=az-token
+#   bash infra/sync-entra-users.sh int --source graph
+#   bash infra/sync-entra-users.sh int --env-file infra/deploy.int.env
+#   bash infra/sync-entra-users.sh int --include-guests
 #
 # B2B guest accounts (#EXT# UPNs) are excluded and any already in the table are
 # pruned, unless --include-guests is passed.
@@ -46,6 +45,11 @@ usage()   { sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1
 [[ $# -lt 1 ]] && usage 1
 case "$1" in -h|--help) usage 0 ;; esac
 ENV_NAME="$1"; shift
+
+case "$ENV_NAME" in
+    int) ;;
+    *) echo "Unsupported environment '$ENV_NAME' — only 'int' is supported." >&2; exit 1 ;;
+esac
 
 SOURCE="az-token"
 ENV_FILE="$SCRIPT_DIR/deploy.${ENV_NAME}.env"

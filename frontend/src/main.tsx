@@ -34,16 +34,13 @@ if (authMode === 'password') {
   setAuthState({
     bearer: true,
     accessToken: session?.token ?? null,
-    devUserId: null,
     ready: true,
   });
-} else if (authMode === 'entra') {
+} else {
   // EntraAuthGate resolves the MSAL token and marks the store ready; until
   // then the API client defers requests so no page fires a token-less call
   // during the sign-in redirect.
-  setAuthState({ bearer: true, accessToken: null, devUserId: null, ready: false });
-} else {
-  setAuthState({ bearer: false, ready: true });
+  setAuthState({ bearer: true, accessToken: null, ready: false });
 }
 
 render();

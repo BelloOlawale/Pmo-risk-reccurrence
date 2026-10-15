@@ -1,4 +1,4 @@
-# PMO Risk Recurrence Predictor — Architecture
+# PMO Risk Intelligence — Architecture
 
 > Authoritative architecture overview. Complements `SPEC.md` (the product/spec
 > decisions) and `README.md` (quickstart). This document explains *how the
@@ -26,7 +26,7 @@ Explicitly **not** used: SharePoint, Power Apps, Power BI, Power Automate.
 
 ```
                          ┌───────────────────────────────────────────────┐
-                         │                    Azure (prod)               │
+                         │         Azure — int (production), UK South    │
                          │  ┌────────────────────┐  ┌─────────────────┐  │
   ┌──────────┐  HTTPS    │  │  Container Apps     │  │  Container Apps │  │
   │  Browser │──────────▶│  │  (web: FastAPI +   │  │  (Celery worker │  │
@@ -45,7 +45,8 @@ Explicitly **not** used: SharePoint, Power Apps, Power BI, Power Automate.
                           └───────────────────────────────────────────────┘
 
   Local (dev): the same components, but Postgres runs as a pgvector Docker
-  container, Celery/Redis optional, and auth has a header-based dev mode.
+  container, Celery/Redis optional, and the API can opt into header-based
+  test identity via RISKAPP_ALLOW_HEADER_AUTH=true.
 ```
 
 **Runtime topology**
@@ -60,7 +61,7 @@ Explicitly **not** used: SharePoint, Power Apps, Power BI, Power Automate.
 | Email | Azure Communication Services |
 | LLM | Azure OpenAI (GPT-4o-mini chat, text-embedding-3-small) |
 | Auth | Entra ID (M365) SSO via OIDC |
-| Secrets | Azure Key Vault (prod) / `.env` (dev) |
+| Secrets | Azure Container App secrets / Key Vault |
 | CI/CD | GitHub Actions → ACR → Container Apps |
 
 ---
@@ -94,8 +95,6 @@ app/
 │   │   ├── config.py          # pydantic-settings (RISKAPP_* env vars)
 │   │   └── db.py              # engine + session factory
 │   ├── migrations/            # Alembic migrations
-│   ├── tests/                 # pytest suite (275+ tests)
-│   ├── scripts/seed_demo_risks.py
 │   └── docker-compose.yml     # local pgvector Postgres
 ├── frontend/
 │   └── src/
@@ -177,18 +176,20 @@ for audit.
 
 ## 6. Authentication & authorization (deep dive)
 
-### 6.1 Three modes
+### 6.1 Sign-in modes
 
-| | **Entra (production)** | **Password** | **Dev** |
+| | **Entra ID SSO (production)** | **Password (break-glass)** | **Header (tests only)** |
 |---|---|---|---|
-| Trigger | `RISKAPP_ENTRA_TENANT_ID` set | `RISKAPP_LOCAL_LOGIN_ENABLED=true` | neither set |
+| Trigger | `RISKAPP_ENTRA_TENANT_ID` set | `RISKAPP_LOCAL_LOGIN_ENABLED=true` | `RISKAPP_ALLOW_HEADER_AUTH=true` and no tenant |
 | Identity | Entra OIDC bearer token | app-managed email + password (`POST /api/auth/login`) | `X-User-Id` / `X-User-Role` headers |
-| Frontend (`VITE_AUTH_MODE`) | `entra` — MSAL redirect sign-in | `password` — sign-in form | `dev` — sidebar role/user switcher |
+| Frontend (`VITE_AUTH_MODE`) | `entra` — MSAL redirect sign-in | `password` — sign-in form | n/a (no SPA build) |
 | Role source | token `groups` claim | `users.role` | request header |
 
 Modes are **config-driven** — no code changes. Entra and local password may be
 enabled together: `get_principal` tries a locally-issued token first, then falls
-back to Entra OIDC validation.
+back to Entra OIDC validation. With no Entra tenant and no explicit header-auth
+opt-in the API refuses every request (401); it never trusts client-supplied
+roles. Header auth exists only for the test suite and local tooling.
 
 ### 6.2 Production flow (Entra ID OIDC)
 
@@ -381,10 +382,12 @@ There are two suggestion surfaces:
 
 ## 12. Deployment
 
-- **dev** — local pgvector Postgres (`docker compose up -d`, port 5433), uvicorn
-  on `:8000`, Vite on `:5173` (proxies `/api` → `:8000`).
-- **prod** — GitHub Actions → build/push to Azure Container Registry → Azure
-  Container Apps (web + Celery worker + Beat), secrets in Key Vault.
+- **Local development** — pgvector Postgres (`docker compose up -d`, port 5433),
+  uvicorn on `:8000`, Vite on `:5173` (proxies `/api` → `:8000`).
+- **int (production)** — GitHub Actions → build/push to Azure Container Registry
+  → Azure Container Apps (web + Celery worker + Beat) in UK South, secrets as
+  Container App secrets / Key Vault. There is no separate dev or prod
+  environment.
 
 ### Scale & cost (scale-to-zero)
 
@@ -423,7 +426,7 @@ App scale to zero. Deferred unless the bill matters.
 |---|---|
 | `DATABASE_URL` | SQLAlchemy connection string (Postgres + pgvector). |
 | `AZURE_OPENAI_*` | endpoint, key, embedding/chat deployments, api-version. |
-| `ENTRA_TENANT_ID` | Empty = dev mode; set = Entra OIDC validation. |
+| `ENTRA_TENANT_ID` | Entra tenant for OIDC validation. Required in production; with it empty the API rejects all requests unless header auth is explicitly enabled. |
 | `ENTRA_CLIENT_ID` | Audience for token validation. |
 | `ENTRA_CLIENT_SECRET` | Stored for confidential-client flows (not used by JWKS validation). |
 | `ENTRA_ROLE_GROUP_IDS` | JSON mapping role → Entra group object id. |
@@ -434,7 +437,7 @@ App scale to zero. Deferred unless the bill matters.
 | `CORS_ORIGINS` | Allowed SPA origins (default `http://localhost:5173`). |
 
 Frontend (`VITE_*`): `VITE_API_BASE_URL` (empty = dev proxy), `VITE_AUTH_MODE`
-(`password` default; `dev` for the local sidebar switcher).
+(`entra` for the production SPA; `password` is a break-glass fallback).
 
 ---
 
@@ -446,7 +449,7 @@ cd app/backend
 docker compose up -d                 # local pgvector Postgres
 python -m uvicorn riskapp.main:app --reload --port 8000
 
-# Frontend (email + password sign-in; VITE_AUTH_MODE=dev for the dev switcher)
+# Frontend (Microsoft Entra ID SSO; VITE_AUTH_MODE defaults to entra)
 cd app/frontend
 npm install && npm run dev           # http://localhost:5173
 ```
@@ -456,9 +459,9 @@ npm install && npm run dev           # http://localhost:5173
 - **Entra SSO** — set the `RISKAPP_ENTRA_*` lines in `backend/.env`, set
   `VITE_AUTH_MODE=entra` plus `VITE_ENTRA_CLIENT_ID` / `VITE_ENTRA_TENANT_ID` in
   `frontend/.env`, and register the SPA redirect URI on the app registration.
-- **Password** — `RISKAPP_LOCAL_LOGIN_ENABLED=true` and `VITE_AUTH_MODE=password`.
-- **Dev** — comment out `RISKAPP_ENTRA_*` / `RISKAPP_LOCAL_LOGIN_ENABLED` and set
-  `VITE_AUTH_MODE=dev`.
+- **Password (break-glass)** — `RISKAPP_LOCAL_LOGIN_ENABLED=true` and
+  `VITE_AUTH_MODE=password`. Bypasses MFA/Conditional Access; keep disabled in
+  production.
 
 ---
 
@@ -469,8 +472,9 @@ npm install && npm run dev           # http://localhost:5173
 - Row-level scoping is enforced in the API layer, not trusted from the client.
 - The audit log is append-only (rows never updated/deleted).
 - LLM citations are audited for groundedness before display.
-- Secrets live in Key Vault (prod) / `.env` (dev, gitignored). `.env` must never
-  contain real secrets in version control.
+- Secrets live as Container App secrets / Key Vault in the deployed
+  environment and in a gitignored `.env` locally. `.env` must never contain
+  real secrets in version control.
 
 ### Azure portal prerequisites for SSO (one-time)
 

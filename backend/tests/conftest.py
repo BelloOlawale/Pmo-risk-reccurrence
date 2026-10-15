@@ -18,19 +18,23 @@ from riskapp.main import app
 
 
 @pytest.fixture(autouse=True)
-def _force_dev_auth(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Run the API in dev (header-based) auth mode, independent of local .env.
+def _force_test_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run the API in header-based auth mode, independent of local .env.
 
-    Keeps the suite green even when Entra credentials are present in .env.
-    Also blanks the Blob/Azure OpenAI config so no test ever calls live Azure.
+    Enables the explicit ``allow_header_auth`` opt-in the test suite relies on
+    and blanks Entra credentials so no test ever performs live token validation.
+    Also blanks the Blob/Azure OpenAI config so no test calls live Azure.
     """
     monkeypatch.setattr(settings, "entra_tenant_id", "")
     monkeypatch.setattr(settings, "entra_client_id", "")
-    # Local sign-in is enabled in some developer .env files; default it off so
-    # the "disabled" tests stay deterministic (test_local_login enables it
-    # explicitly via the password_login_on fixture).
+    monkeypatch.setattr(settings, "allow_header_auth", True)
+    # Local sign-in is enabled in some developer .env files; default the flag
+    # off so the "disabled" tests stay deterministic (test_local_login enables
+    # it explicitly via the password_login_on fixture). A fixed test signing key
+    # is always set so acknowledgement tokens can be minted without relying on
+    # a production secret.
     monkeypatch.setattr(settings, "local_login_enabled", False)
-    monkeypatch.setattr(settings, "local_login_secret", "")
+    monkeypatch.setattr(settings, "local_login_secret", "test-signing-key-000000000000000000")
     monkeypatch.setattr(settings, "blob_account_name", "")
     monkeypatch.setattr(settings, "blob_account_key", "")
     monkeypatch.setattr(settings, "blob_container", "")

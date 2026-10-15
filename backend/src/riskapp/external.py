@@ -105,12 +105,18 @@ def get_or_create_external_owner(
 
 
 def _signing_key() -> str:
-    """HMAC key for acknowledgement tokens (stable across replicas)."""
-    return (
-        settings.local_login_secret
-        or settings.entra_client_secret
-        or "riskapp-external-ack-dev-key"
-    )
+    """HMAC key for acknowledgement tokens (stable across replicas).
+
+    Required: there is deliberately no built-in fallback, because a known
+    default key would let anyone forge an acknowledgement link.
+    """
+    key = settings.local_login_secret or settings.entra_client_secret
+    if not key:
+        raise RuntimeError(
+            "No token signing secret is configured. Set RISKAPP_LOCAL_LOGIN_SECRET "
+            "(or RISKAPP_ENTRA_CLIENT_SECRET)."
+        )
+    return key
 
 
 def create_acknowledgement_token(*, owner_user_id: int, risk_id: int) -> str:

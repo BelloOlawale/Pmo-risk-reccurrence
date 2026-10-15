@@ -19,7 +19,6 @@ export interface AuthUser {
 
 export interface AuthContextValue {
   isAuthenticated: boolean;
-  isDevMode: boolean;
   /**
    * False only while a session is being resolved. The app shell renders during
    * this window and data fetching is deferred by the API client.
@@ -33,7 +32,6 @@ export interface AuthContextValue {
   /** Begin the interactive Microsoft sign-in redirect (Entra mode only). */
   login: () => void;
   logout: () => void;
-  setDevIdentity: (userId: number | null, role: string) => void;
   /** Whether the backend offers app-managed email + password sign-in. */
   passwordLoginEnabled: boolean;
   /** Store a locally-issued bearer token and signed-in identity. */
@@ -52,14 +50,6 @@ export function useAuth(): AuthContextValue {
   return ctx;
 }
 
-export const DEV_ROLES = ['System Admin', 'PMO Lead', 'Project Manager'];
-const DEV_STORAGE_KEY = 'riskapp.devIdentity';
-
-interface DevIdentity {
-  userId: number | null;
-  role: string;
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   if (authMode === 'entra') {
     return (
@@ -67,9 +57,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         <EntraAuthGate>{children}</EntraAuthGate>
       </MsalProvider>
     );
-  }
-  if (authMode === 'dev') {
-    return <DevAuthProvider>{children}</DevAuthProvider>;
   }
   return <PasswordAuthProvider>{children}</PasswordAuthProvider>;
 }
@@ -92,7 +79,6 @@ function PasswordAuthProvider({ children }: { children: ReactNode }) {
     setAuthState({
       bearer: true,
       accessToken: session?.token ?? null,
-      devUserId: null,
       ready: true,
     });
   }, [session]);
@@ -139,7 +125,6 @@ function PasswordAuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthContextValue>(
     () => ({
       isAuthenticated: Boolean(session),
-      isDevMode: false,
       authReady: true,
       user: session ? { upn: session.upn, displayName: session.displayName } : null,
       userId: null,
@@ -150,7 +135,6 @@ function PasswordAuthProvider({ children }: { children: ReactNode }) {
         clearSession();
         setSession(null);
       },
-      setDevIdentity: () => undefined,
       passwordLoginEnabled: loginOptions?.password_enabled ?? true,
       loginWithToken: (token, user) => {
         const next: StoredSession = {
@@ -166,55 +150,6 @@ function PasswordAuthProvider({ children }: { children: ReactNode }) {
       entraError: null,
     }),
     [session, loginOptions],
-  );
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-/**
- * Developer-only provider: header-based identity with the sidebar switcher.
- * Used when ``VITE_AUTH_MODE=dev``; the backend must also run in dev mode
- * (no ``RISKAPP_ENTRA_TENANT_ID`` and no local login).
- */
-function DevAuthProvider({ children }: { children: ReactNode }) {
-  const [identity, setIdentity] = useState<DevIdentity>(() => {
-    try {
-      const raw = localStorage.getItem(DEV_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as DevIdentity;
-        return { userId: parsed.userId ?? null, role: parsed.role ?? 'System Admin' };
-      }
-    } catch {
-      // fall through to defaults
-    }
-    return { userId: null, role: 'System Admin' };
-  });
-
-  useEffect(() => {
-    setAuthState({ bearer: false, accessToken: null, devUserId: identity.userId, devRole: identity.role });
-    localStorage.setItem(DEV_STORAGE_KEY, JSON.stringify(identity));
-  }, [identity]);
-
-  const value = useMemo<AuthContextValue>(
-    () => ({
-      isAuthenticated: true,
-      isDevMode: true,
-      authReady: true,
-      user: {
-        upn: identity.userId !== null ? `user-${identity.userId}@local` : 'dev-admin@local',
-        displayName: identity.userId !== null ? `Dev User ${identity.userId}` : 'Dev Admin',
-      },
-      userId: identity.userId,
-      role: identity.role,
-      isEntraMode: false,
-      login: () => undefined,
-      logout: () => undefined,
-      setDevIdentity: (userId, role) => setIdentity({ userId, role }),
-      passwordLoginEnabled: false,
-      loginWithToken: () => undefined,
-      entraError: null,
-    }),
-    [identity],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -306,7 +241,7 @@ function EntraAuthGate({ children }: { children: ReactNode }) {
   }, [instance, accounts]);
 
   useEffect(() => {
-    setAuthState({ bearer: true, accessToken, devUserId: null });
+    setAuthState({ bearer: true, accessToken });
   }, [accessToken]);
 
   const account = accounts[0];
@@ -321,7 +256,6 @@ function EntraAuthGate({ children }: { children: ReactNode }) {
   const value = useMemo<AuthContextValue>(
     () => ({
       isAuthenticated,
-      isDevMode: false,
       isEntraMode: true,
       authReady,
       user,
@@ -333,7 +267,6 @@ function EntraAuthGate({ children }: { children: ReactNode }) {
         setAccessToken(null);
         instance.logoutRedirect();
       },
-      setDevIdentity: () => undefined,
       passwordLoginEnabled: false,
       loginWithToken: () => undefined,
       entraError: tokenError,

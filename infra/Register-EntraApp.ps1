@@ -1,6 +1,6 @@
 #!/usr/bin/env pwsh
 # =============================================================================
-# Register / configure the PMO Risk Recurrence Predictor app in Entra ID
+# Register / configure the PMO Risk Intelligence app in Entra ID
 # =============================================================================
 #
 # Provisions everything the backend + SPA need for Entra SSO and RBAC:
@@ -12,9 +12,9 @@
 #   * the three RBAC security groups, resolved (or created with -CreateGroups)
 #
 # USAGE
-#   .\register-entra-app.ps1 -Environment dev -FrontendUrl https://app.example.com
-#   .\register-entra-app.ps1 -Environment dev -FrontendUrl https://app.example.com `
-#       -OutputEnv infra\deploy.dev.env -CreateGroups
+#   .\register-entra-app.ps1 -Environment int -FrontendUrl https://app.example.com
+#   .\register-entra-app.ps1 -Environment int -FrontendUrl https://app.example.com `
+#       -OutputEnv infra\deploy.int.env -CreateGroups
 #
 # REQUIRED PERMISSIONS
 #   Application Administrator (create app + secret). Group creation needs
@@ -25,7 +25,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('dev', 'prod')]
+    [ValidateSet('int')]
     [string]$Environment,
 
     [Parameter(Mandatory = $true)]
@@ -44,7 +44,7 @@ function Write-Ok   { param([string]$m) Write-Host "[OK] $m" -ForegroundColor Gr
 function Write-Warn { param([string]$m) Write-Host "[WARN] $m" -ForegroundColor Yellow }
 function Fail       { param([string]$m) Write-Host "[ERROR] $m" -ForegroundColor Red; exit 1 }
 
-if ([string]::IsNullOrEmpty($DisplayName)) { $DisplayName = "PMO Risk Recurrence Predictor ($Environment)" }
+if ([string]::IsNullOrEmpty($DisplayName)) { $DisplayName = "PMO Risk Intelligence ($Environment)" }
 $FrontendUrl = $FrontendUrl.TrimEnd('/')
 
 $SystemAdminGroup    = if ($env:SYSTEM_ADMIN_GROUP)    { $env:SYSTEM_ADMIN_GROUP }    else { 'RiskApp - System Admin' }

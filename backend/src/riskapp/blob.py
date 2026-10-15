@@ -33,7 +33,7 @@ def register_blob_name(project_id: int, job_id: str, file_name: str) -> str:
 
 
 class AzureBlobStorage:
-    """Blob-backed upload using account name + key (dev: .env, prod: Key Vault)."""
+    """Blob-backed upload using account name + key (local: .env, deployed: Container App secret)."""
 
     def __init__(
         self,

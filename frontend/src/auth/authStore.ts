@@ -2,16 +2,11 @@
 // so it never needs React context plumbing. AuthProvider keeps it in sync.
 
 export interface AuthState {
-  /** Locally-issued (email + password) access token, sent as a Bearer token. */
+  /** Bearer access token (Entra OIDC or a locally-issued password token). */
   accessToken: string | null;
-  /** Dev-mode user id, sent as the X-User-Id header. */
-  devUserId: number | null;
-  /** Dev-mode role, sent as the X-User-Role header. */
-  devRole: string;
   /**
-   * True when the session authenticates with a bearer token. In that mode ONLY
-   * a bearer token is sent — never the dev headers, which would mask "not
-   * signed in yet" as a confusing 401.
+   * True when the session authenticates with a bearer token. Only a bearer
+   * token is ever sent — the client never falls back to identity headers.
    */
   bearer: boolean;
   /**
@@ -23,8 +18,6 @@ export interface AuthState {
 
 let state: AuthState = {
   accessToken: null,
-  devUserId: null,
-  devRole: 'System Admin',
   bearer: false,
   ready: false,
 };
@@ -55,14 +48,5 @@ export function getAuthState(): AuthState {
 /** Headers to attach to every API request based on the current session. */
 export function authHeaders(): Record<string, string> {
   const s = getAuthState();
-
-  if (s.bearer) {
-    return s.accessToken ? { Authorization: `Bearer ${s.accessToken}` } : {};
-  }
-
-  const headers: Record<string, string> = { 'X-User-Role': s.devRole };
-  if (s.devUserId !== null) {
-    headers['X-User-Id'] = String(s.devUserId);
-  }
-  return headers;
+  return s.accessToken ? { Authorization: `Bearer ${s.accessToken}` } : {};
 }

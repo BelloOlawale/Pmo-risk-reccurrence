@@ -7,10 +7,11 @@ Two modes:
   with roles resolved from the ``groups`` claim via the configured group-object
   id mapping.
 
-* **Development** (no tenant configured): identity and role come from the
-  ``X-User-Id`` / ``X-User-Role`` headers, defaulting to ``System Admin`` so the
-  app remains usable and existing tests keep passing without tokens. Tests
-  inject a fake principal via FastAPI dependency overrides.
+* **Test / local tooling** (explicit ``RISKAPP_ALLOW_HEADER_AUTH=true`` and no
+  tenant): identity and role come from the ``X-User-Id`` / ``X-User-Role``
+  headers. This path is opt-in only; without it (the production default) an API
+  with no tenant rejects every request rather than trusting client-supplied
+  roles.
 
 The authorization *decisions* (who can see/edit what) are pure functions and are
 exhaustively unit-tested independently of Entra.
@@ -90,12 +91,18 @@ LOCAL_LOGIN_TTL_HOURS = 8
 
 
 def _local_login_key() -> str:
-    """Signing key for local tokens (stable across replicas)."""
-    return (
-        settings.local_login_secret
-        or settings.entra_client_secret
-        or "riskapp-local-login-dev-key"
-    )
+    """Signing key for local tokens (stable across replicas).
+
+    Required when local sign-in is enabled. There is deliberately no built-in
+    fallback: a known default key would let anyone mint a valid token.
+    """
+    key = settings.local_login_secret or settings.entra_client_secret
+    if not key:
+        raise RuntimeError(
+            "Local sign-in is enabled but no signing secret is configured. "
+            "Set RISKAPP_LOCAL_LOGIN_SECRET (or RISKAPP_ENTRA_CLIENT_SECRET)."
+        )
+    return key
 
 
 def create_local_token(
@@ -218,7 +225,7 @@ def get_principal(
     x_user_id: Annotated[str | None, Header()] = None,
     x_user_role: Annotated[str | None, Header()] = None,
 ) -> Principal:
-    """Resolve the current principal (Entra token, test token, or dev headers)."""
+    """Resolve the current principal (Entra token, local token, or test headers)."""
     token: str | None = None
     if authorization and authorization.lower().startswith("bearer "):
         token = authorization.split(" ", 1)[1].strip()
@@ -234,22 +241,32 @@ def get_principal(
             raise HTTPException(status_code=401, detail="Missing bearer token")
         return _principal_from_token(token, db)
 
+    # No Entra tenant is configured. In production this is a hard failure: the
+    # API must never trust client-supplied role headers, so it refuses the
+    # request outright. Header identity is available only behind an explicit
+    # opt-in (RISKAPP_ALLOW_HEADER_AUTH=true) used by tests and local tooling.
+    if not settings.allow_header_auth:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication is not configured on the server.",
+        )
+
     role_name = x_user_role or Role.SYSTEM_ADMIN.value
     try:
         role = Role(role_name)
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=f"Unknown role {role_name!r}") from exc
     user_id = int(x_user_id) if x_user_id else None
-    dev_upn = "dev.pm@local" if role == Role.PROJECT_MANAGER else "dev@local"
+    header_upn = "test.pm@local" if role == Role.PROJECT_MANAGER else "test@local"
     if user_id is None and role == Role.PROJECT_MANAGER:
-        user_id = get_or_create_user(db, dev_upn).id
+        user_id = get_or_create_user(db, header_upn).id
         db.commit()
     elif user_id is None and role == Role.SYSTEM_ADMIN:
-        admin = db.scalar(select(models.User).where(models.User.upn == dev_upn))
+        admin = db.scalar(select(models.User).where(models.User.upn == header_upn))
         user_id = admin.id if admin else None
     return Principal(
         user_id=user_id,
-        upn=x_user_id or dev_upn,
+        upn=x_user_id or header_upn,
         roles=frozenset({role}),
     )
 

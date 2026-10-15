@@ -66,6 +66,11 @@ class User(TimestampMixin, Base):
     # claims instead, so both stay null for them).
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # True when an administrator set the current password: the user must choose
+    # their own before using the app. Cleared by POST /api/auth/change-password.
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
 
     # Risk-owner classification. Internal users come from the Entra directory;
     # external owners (partners, vendors, consultants) are captured by a PM and

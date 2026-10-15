@@ -1,5 +1,5 @@
 // =============================================================================
-// PMO Risk Recurrence Predictor — Deploy any service (Container Apps)
+// PMO Risk Intelligence — Deploy any service (Container Apps)
 // =============================================================================
 //
 // One template, every service. Use it to (re)deploy the whole application or a
@@ -37,7 +37,7 @@ targetScope = 'resourceGroup'
 // CORE PARAMETERS
 // -----------------------------------------------------------------------------
 
-@description('Environment suffix: dev | prod.')
+@description('Environment suffix. Only the integration/production environment (int) is deployed.')
 param environmentName string
 
 @description('Azure region.')

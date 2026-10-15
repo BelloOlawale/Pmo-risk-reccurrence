@@ -3,7 +3,7 @@
 - **Type:** AFK
 - **Spec:** SPEC.md §3, §5, §6, §9, §11, §12
 - **Blocked by:** #01, #02, #08, #09, #12
-- **Status:** Done (see `progress.txt`)
+- **Status:** Done
 
 ## What was built
 

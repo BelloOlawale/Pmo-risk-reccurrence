@@ -1,4 +1,4 @@
-# PMO Risk Recurrence Predictor — Consolidated Build Spec
+# PMO Risk Intelligence — Consolidated Build Spec
 
 > Result of the design grill session (2026-08-20).
 > This merges two source documents:
@@ -41,7 +41,7 @@ future suggestions improve.
 | Secrets | **Azure Key Vault** |
 | Compute | **Azure Container Apps** (web app + Celery worker + Beat) |
 | CI/CD | GitHub Actions → Azure Container Registry → Container Apps |
-| Environments | **dev + prod** (no staging) |
+| Environments | **int** (single production environment, UK South) |
 
 ---
 
@@ -322,7 +322,7 @@ Dropped from MVP: PMO Analyst, Data Scientist, Information Security Manager.
 5. Suggestions: hybrid retrieval + pgvector + LLM analysis + citation audit.
 6. Accept / Edit / Dismiss; SLA monitoring + Celery; email + in-app notifications.
 7. Project + portfolio dashboards; weekly summary.
-8. Deploy (dev + prod).
+8. Deploy (single `int` production environment).
 
 **Deferred (later phases):** ML recurrence classifier, PDF reports, trend analysis,
 API connectors (Jira/Azure DevOps), Data Scientist / InfoSec roles, full FRD

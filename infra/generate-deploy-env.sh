@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# PMO Risk Recurrence Predictor — Generate a deployment environment file
+# PMO Risk Intelligence — Generate a deployment environment file
 # =============================================================================
 #
 # Creates a dedicated, git-ignored deployment env file (default:
@@ -21,16 +21,16 @@
 # --env KEY=VALUE. DATABASE_URL / BLOB_* are NEVER copied from the seed file.
 #
 # USAGE
-#   bash infra/generate-deploy-env.sh dev
-#   bash infra/generate-deploy-env.sh dev --seed-from backend/.env
-#   bash infra/generate-deploy-env.sh dev --reset-postgres-password
-#   bash infra/generate-deploy-env.sh dev --postgres-password 'S3cret...'
-#   bash infra/generate-deploy-env.sh dev --key-vault riskapp-dev-kv
+#   bash infra/generate-deploy-env.sh int
+#   bash infra/generate-deploy-env.sh int --seed-from backend/.env
+#   bash infra/generate-deploy-env.sh int --reset-postgres-password
+#   bash infra/generate-deploy-env.sh int --postgres-password 'S3cret...'
+#   bash infra/generate-deploy-env.sh int --key-vault riskapp-int-kv
 #
 # OPTIONS
 #   --resource-group <rg>          default: rg-<prefix>-<env>
 #   --prefix <p>                   default: riskapp
-#   --location <region>            default: eastus
+#   --location <region>            default: uksouth
 #   --output <path>                default: infra/deploy.<env>.env
 #   --postgres-server <name>       default: first PostgreSQL server in the RG
 #   --postgres-user <name>         default: riskappadmin
@@ -87,8 +87,14 @@ usage() { sed -n '2,49p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-
 case "$1" in -h|--help) usage 0 ;; esac
 ENV_NAME="$1"; shift
 
+# The integration environment is the single deployed (production) environment.
+case "$ENV_NAME" in
+    int) ;;
+    *) error "Unsupported environment '$ENV_NAME' — only 'int' is deployable." ;;
+esac
+
 PREFIX="${APP_PREFIX:-riskapp}"
-LOCATION="${AZURE_LOCATION:-eastus}"
+LOCATION="${AZURE_LOCATION:-uksouth}"
 RG_NAME=""
 OUTPUT=""
 POSTGRES_SERVER=""

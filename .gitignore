@@ -26,6 +26,10 @@ infra/deployment-info-*.json
 *.db
 *.sqlite3
 
+# Provisioning output — contains one-time passwords; never commit
+provisioned-credentials.csv
+people.csv
+
 # Celery Beat schedule files (generated at runtime)
 celerybeat-schedule*
 

@@ -16,7 +16,7 @@ param location string
 @description('Resource name prefix.')
 param prefix string
 
-@description('Environment name (dev/prod).')
+@description('Environment name (int).')
 param environmentName string
 
 @description('Unique suffix appended to globally-unique names.')

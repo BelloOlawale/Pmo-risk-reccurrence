@@ -234,25 +234,6 @@ a:hover {
   gap: 8px;
 }
 
-.dev-switcher {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.dev-switcher label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-faint);
-}
-
-.dev-switcher select,
-.dev-switcher input {
-  background: var(--wragby-white);
-  color: var(--text);
-}
-
 .user-card {
   display: flex;
   align-items: center;

@@ -124,7 +124,7 @@ class TestAddProjectEndpoint:
         pm_id = created.json()["pm_user_id"]
         assert pm_id is not None
         users = client.get("/api/users").json()
-        assert any(user["id"] == pm_id and user["upn"] == "dev@local" for user in users)
+        assert any(user["id"] == pm_id and user["upn"] == "test@local" for user in users)
 
     def test_pmo_lead_can_create_register(self, client: TestClient) -> None:
         """The PMO Lead has system-admin-level authority and may create registers."""

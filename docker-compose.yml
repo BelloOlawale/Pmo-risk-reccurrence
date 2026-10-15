@@ -1,4 +1,4 @@
-# Full local stack for the PMO Risk Recurrence Predictor.
+# Full local stack for the PMO Risk Intelligence app.
 #
 #   docker compose up --build
 #

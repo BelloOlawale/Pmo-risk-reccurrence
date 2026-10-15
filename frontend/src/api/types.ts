@@ -32,6 +32,8 @@ export interface LoginToken {
   role: string;
   upn: string;
   display_name: string;
+  /** True when the password was set by an admin and must be changed. */
+  must_change_password?: boolean;
 }
 
 export interface Project {
@@ -163,6 +165,8 @@ export interface Me {
   user_id: number | null;
   upn: string;
   roles: string[];
+  /** True when the local account must set a new password before proceeding. */
+  must_change_password: boolean;
 }
 
 export interface SuggestedRisk {

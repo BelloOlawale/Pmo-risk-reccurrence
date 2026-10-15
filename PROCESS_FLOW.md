@@ -1,4 +1,4 @@
-# PMO Risk Recurrence Predictor — End-to-End Process Flow
+# PMO Risk Intelligence — End-to-End Process Flow
 
 > Authoritative process-flow reference. Complements `SPEC.md` (product decisions),
 > `ARCHITECTURE.md` (how the system is built), and `README.md` (quickstart).

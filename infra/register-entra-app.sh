@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Register / configure the PMO Risk Recurrence Predictor app in Entra ID
+# Register / configure the PMO Risk Intelligence app in Entra ID
 # =============================================================================
 #
 # Provisions everything the backend + SPA need for Entra SSO and RBAC:
@@ -18,9 +18,9 @@
 # plus the two SPA build args: VITE_ENTRA_CLIENT_ID, VITE_ENTRA_TENANT_ID
 #
 # USAGE
-#   bash infra/register-entra-app.sh <dev|prod> <frontend-url>
-#   bash infra/register-entra-app.sh dev https://app.example.com --output-env infra/deploy.dev.env
-#   bash infra/register-entra-app.sh dev https://app.example.com --create-groups
+#   bash infra/register-entra-app.sh int <frontend-url>
+#   bash infra/register-entra-app.sh int https://app.example.com --output-env infra/deploy.int.env
+#   bash infra/register-entra-app.sh int https://app.example.com --create-groups
 #
 # OPTIONS
 #   --output-env <file>    append/replace the six keys in this env file
@@ -52,10 +52,16 @@ usage()   { sed -n '2,44p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1
 case "$1" in -h|--help) usage 0 ;; esac
 
 ENV_NAME="$1"; FRONTEND_URL="$2"; shift 2
+
+case "$ENV_NAME" in
+    int) ;;
+    *) error "Unsupported environment '$ENV_NAME' — only 'int' is supported." ;;
+esac
+
 FRONTEND_URL="${FRONTEND_URL%/}"
 OUTPUT_ENV=""
 CREATE_GROUPS="false"
-DISPLAY_NAME="PMO Risk Recurrence Predictor (${ENV_NAME})"
+DISPLAY_NAME="PMO Risk Intelligence"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in

@@ -76,6 +76,7 @@ class TestPasswordLogin:
         assert me.status_code == 200
         assert me.json()["roles"] == ["PMO Lead"]
         assert me.json()["upn"] == "pm@example.com"
+        assert me.json()["must_change_password"] is False
 
     def test_email_is_case_insensitive(
         self, client: TestClient, db_session: Session, password_login_on: None
@@ -134,6 +135,22 @@ class TestAdminOnboarding:
         )
         assert login.status_code == 200
         assert login.json()["role"] == "Project Manager"
+        # An admin-set password is temporary and must be changed on first use.
+        assert login.json()["must_change_password"] is True
+
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        assert (
+            client.get("/api/me", headers=headers).json()["must_change_password"] is True
+        )
+        changed = client.post(
+            "/api/auth/change-password",
+            json={"current_password": "BrandNew123", "new_password": "MyOwnPass123"},
+            headers=headers,
+        )
+        assert changed.status_code == 200
+        assert (
+            client.get("/api/me", headers=headers).json()["must_change_password"] is False
+        )
 
     def test_project_manager_cannot_set_credentials(
         self, client: TestClient, db_session: Session, password_login_on: None
@@ -155,12 +172,14 @@ class TestChangePassword:
         user = get_or_create_user(db_session, "changer@example.com", "Changer")
         user.password_hash = hash_password("OldPass123")
         user.role = "System Admin"
+        user.must_change_password = True
         db_session.commit()
 
         login = client.post(
             "/api/auth/login",
             json={"email": "changer@example.com", "password": "OldPass123"},
         ).json()
+        assert login["must_change_password"] is True
         headers = {"Authorization": f"Bearer {login['access_token']}"}
 
         bad = client.post(
@@ -188,8 +207,8 @@ class TestChangePassword:
             client.post(
                 "/api/auth/login",
                 json={"email": "changer@example.com", "password": "NewPass123"},
-            ).status_code
-            == 200
+            ).json()["must_change_password"]
+            is False
         )
 
 
@@ -201,4 +220,5 @@ class TestMigrationColumns:
         assert row is not None
         assert row.password_hash is None
         assert row.role is None
+        assert row.must_change_password is False
         assert user.password_hash is None

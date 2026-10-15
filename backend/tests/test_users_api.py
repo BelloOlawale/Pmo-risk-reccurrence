@@ -60,7 +60,7 @@ class TestListUsers:
         assert data[0]["owner_type"] == "Internal"
 
     def test_requires_authentication(self, client: TestClient) -> None:
-        # Dev mode defaults to System Admin, so the endpoint is reachable; this
+        # Header (test) auth defaults to System Admin, so the endpoint is reachable; this
         # guards the shape of the response rather than a 401 (Entra mode is
         # covered by the auth tests).
         resp = client.get("/api/users", headers={"X-User-Role": "Project Manager"})

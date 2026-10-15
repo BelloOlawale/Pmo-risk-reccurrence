@@ -1,4 +1,4 @@
-# Backend image for the PMO Risk Recurrence Predictor.
+# Backend image for the PMO Risk Intelligence app.
 #
 # One image, three entrypoints:
 #   web    (default)  uvicorn riskapp.main:app

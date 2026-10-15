@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# PMO Risk Recurrence Predictor — Deploy any service (Bicep)
+# PMO Risk Intelligence — Deploy any service (Bicep)
 # =============================================================================
 #
 # A single script to deploy the whole application, or any individual service, to
@@ -29,18 +29,20 @@
 #     Administrator if you also need role assignments)
 #
 # USAGE
-#   bash infra/deploy-service.sh dev                          # everything
-#   bash infra/deploy-service.sh dev --service frontend       # only the SPA
-#   bash infra/deploy-service.sh dev --service web,worker     # two services
-#   bash infra/deploy-service.sh prod --service beat --stage apps
-#   bash infra/deploy-service.sh dev --no-build               # skip image build
-#   bash infra/deploy-service.sh dev --image-tag "$(git rev-parse --short HEAD)"
-#   RISKAPP_DATABASE_URL=... bash infra/deploy-service.sh dev --service web
+#   bash infra/deploy-service.sh int                          # everything
+#   bash infra/deploy-service.sh int --service frontend       # only the SPA
+#   bash infra/deploy-service.sh int --service web,worker     # two services
+#   bash infra/deploy-service.sh int --service beat --stage apps
+#   bash infra/deploy-service.sh int --no-build               # skip image build
+#   bash infra/deploy-service.sh int --allow-local-login       # break-glass override
+#   bash infra/deploy-service.sh int --image-tag "$(git rev-parse --short HEAD)"
+#   RISKAPP_DATABASE_URL=... bash infra/deploy-service.sh int --service web
 #
 # SAFETY PREFLIGHTS (automatic; fail fast instead of half-deploying)
 #   - refuses to deploy the API when RISKAPP_ENTRA_TENANT_ID is empty, because
-#     the backend then trusts unauthenticated `X-User-Role` headers
-#     (override deliberately with --allow-dev-auth)
+#     the API then rejects every request (401) and no identity is resolved
+#   - refuses to deploy with app-managed password login enabled unless
+#     --allow-local-login is passed (it bypasses Entra MFA / Conditional Access)
 #   - refuses to deploy without a database URL
 #   - checks free disk space before building (a full disk makes docker hang)
 #   - warns when the built tree is dirty, because the default image tag is the
@@ -135,13 +137,13 @@ BACKEND_IMAGE_NAME="${BACKEND_IMAGE_NAME:-riskapp-backend}"
 FRONTEND_IMAGE_NAME="${FRONTEND_IMAGE_NAME:-riskapp-frontend}"
 # True once --image-tag is passed explicitly (suppresses the default-SHA warning).
 IMAGE_TAG_EXPLICIT="false"
-# Set by --allow-dev-auth: permits deploying an API with no Entra tenant, which
-# leaves it accepting unauthenticated `X-User-Role` headers.
-ALLOW_DEV_AUTH="false"
 
 # Ad-hoc overrides collected from --env / --secret
 declare -a CLI_ENV_PAIRS=()
 declare -a CLI_SECRET_PAIRS=()
+# Set by --allow-local-login: permits deploying with app-managed password login
+# enabled even though it bypasses Entra MFA and Conditional Access.
+ALLOW_LOCAL_LOGIN="false"
 
 # -----------------------------------------------------------------------------
 # Output helpers
@@ -186,6 +188,12 @@ usage() {
 case "$1" in -h|--help) usage 0 ;; esac
 ENV_NAME="$1"; shift
 
+# The integration environment is the single deployed (production) environment.
+case "$ENV_NAME" in
+    int) ;;
+    *) error "Unsupported environment '$ENV_NAME' — only 'int' is deployable." ;;
+esac
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --service|--services)   SERVICES="$2"; shift 2 ;;
@@ -204,9 +212,9 @@ while [[ $# -gt 0 ]]; do
         --frontend-image)       FRONTEND_IMAGE_NAME="$2"; shift 2 ;;
         --env)                  CLI_ENV_PAIRS+=("$2"); shift 2 ;;
         --secret)               CLI_SECRET_PAIRS+=("$2"); shift 2 ;;
-        --allow-dev-auth)       ALLOW_DEV_AUTH="true"; shift ;;
         --no-build)             BUILD_IMAGES="false"; shift ;;
         --build)                BUILD_IMAGES="true"; shift ;;
+        --allow-local-login)    ALLOW_LOCAL_LOGIN="true"; shift ;;
         -h|--help)              usage 0 ;;
         *) error "Unknown option: $1 (see --help)" ;;
     esac
@@ -214,15 +222,11 @@ done
 
 case "$STAGE" in all|infra|images|apps) ;; *) error "Invalid --stage: $STAGE" ;; esac
 
-# Default region per environment when neither AZURE_LOCATION nor --location is
-# given. Some environments live outside East US (int is UK South — its ACR and
-# Container Apps environment were created there), and deploying with the wrong
-# region makes Bicep try to recreate same-named resources in a new region.
+# Region. The integration/production environment lives in UK South (its ACR
+# and Container Apps environment were created there); deploying with a
+# different region makes Bicep try to recreate same-named resources elsewhere.
 if [[ -z "$LOCATION" ]]; then
-    case "$ENV_NAME" in
-        int|integration|staging) LOCATION="uksouth" ;;
-        *)                       LOCATION="eastus" ;;
-    esac
+    LOCATION="uksouth"
 fi
 
 # Configuration file precedence: explicit --env-file > generated deploy env
@@ -358,24 +362,18 @@ Set it in $ENV_FILE (see infra/generate-deploy-env.sh), or pass
     fi
 
     if [[ -z "$(value RISKAPP_ENTRA_TENANT_ID)" ]]; then
-        if [[ "$ALLOW_DEV_AUTH" != "true" ]]; then
-            error "RISKAPP_ENTRA_TENANT_ID is empty — refusing to deploy an unauthenticated API.
-With no Entra tenant the backend trusts 'X-User-Role: System Admin' headers with
-no credentials (see get_principal in backend/src/riskapp/auth.py), so anyone who
-can reach the URL is an administrator.
+        error "RISKAPP_ENTRA_TENANT_ID is empty — refusing to deploy an unauthenticated API.
+With no Entra tenant configured the backend rejects every request (401), so the
+deployment would be unusable and no identity is resolved (see get_principal in
+backend/src/riskapp/auth.py).
 
-Set RISKAPP_ENTRA_TENANT_ID in $ENV_FILE, or pass --allow-dev-auth if you truly
-mean to run an open API (never on a shared or internet-facing environment)."
-        fi
-        warn "Deploying with NO Entra tenant (--allow-dev-auth)."
-        warn "The API will accept unauthenticated X-User-Role headers."
+Set RISKAPP_ENTRA_TENANT_ID in $ENV_FILE."
     fi
 
-    if [[ "$ENV_NAME" != "dev" ]]; then
-        if [[ "$(value RISKAPP_LOCAL_LOGIN_ENABLED)" == "true" ]]; then
-            warn "App-managed email + password login is ENABLED for '$ENV_NAME'."
-            warn "It bypasses Entra MFA and Conditional Access; keep it dev-only."
-        fi
+    if [[ "$(value RISKAPP_LOCAL_LOGIN_ENABLED)" == "true" ]] && [[ "$ALLOW_LOCAL_LOGIN" != "true" ]]; then
+        error "RISKAPP_LOCAL_LOGIN_ENABLED is true — refusing to deploy production with app-managed password login.
+It bypasses Entra MFA and Conditional Access. Set RISKAPP_LOCAL_LOGIN_ENABLED=false
+in $ENV_FILE, or pass --allow-local-login to override deliberately."
     fi
 }
 
@@ -598,7 +596,7 @@ if [[ "$STAGE" == "all" || "$STAGE" == "images" ]] && [[ "$BUILD_IMAGES" == "tru
         info "Building frontend image..."
         build_args=()
         vite_auth_mode="$(value VITE_AUTH_MODE)"
-        vite_auth_mode="${vite_auth_mode:-password}"
+        vite_auth_mode="${vite_auth_mode:-entra}"
         build_args+=(--build-arg "VITE_AUTH_MODE=${vite_auth_mode}")
         vite_entra_client_id="$(value VITE_ENTRA_CLIENT_ID)"
         vite_entra_tenant_id="$(value VITE_ENTRA_TENANT_ID)"

@@ -78,6 +78,8 @@ class LoginToken(BaseModel):
     role: str
     upn: str
     display_name: str
+    # True when the password was set by an administrator and must be changed.
+    must_change_password: bool = False
 
 
 class LoginOptions(BaseModel):

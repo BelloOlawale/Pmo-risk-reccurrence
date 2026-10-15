@@ -1,6 +1,6 @@
 #!/usr/bin/env pwsh
 # =============================================================================
-# PMO Risk Recurrence Predictor - Deploy any service (Bicep)
+# PMO Risk Intelligence - Deploy any service (Bicep)
 # =============================================================================
 #
 # A single script to deploy the whole application, or any individual service, to
@@ -27,12 +27,12 @@
 #   - Permissions: Contributor on the target resource group
 #
 # USAGE
-#   .\deploy-service.ps1 -Environment dev                              # everything
-#   .\deploy-service.ps1 -Environment dev -Services frontend          # only the SPA
-#   .\deploy-service.ps1 -Environment dev -Services web,worker        # two services
-#   .\deploy-service.ps1 -Environment prod -Services beat -Stage apps
-#   .\deploy-service.ps1 -Environment dev -NoBuild                    # skip image build
-#   .\deploy-service.ps1 -Environment dev -Env @{ RISKAPP_CORS_ORIGINS = 'https://app.example.com' }
+#   .\deploy-service.ps1 -Environment int                              # everything
+#   .\deploy-service.ps1 -Environment int -Services frontend          # only the SPA
+#   .\deploy-service.ps1 -Environment int -Services web,worker        # two services
+#   .\deploy-service.ps1 -Environment int -Services beat -Stage apps
+#   .\deploy-service.ps1 -Environment int -NoBuild                    # skip image build
+#   .\deploy-service.ps1 -Environment int -Env @{ RISKAPP_CORS_ORIGINS = 'https://app.example.com' }
 #
 # CONFIGURATION SOURCES (highest priority first)
 #   1. Process environment variables (e.g. CI secrets)
@@ -45,6 +45,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
+    [ValidateSet('int')]
     [string]$Environment,
 
     [string]$Services = 'all',
@@ -94,12 +95,10 @@ if ([string]::IsNullOrEmpty($ImageTag)) {
     else { $ImageTag = (Get-Date -Format 'yyyyMMddHHmmss') }
 }
 
-# Default region per environment when -Location is not given. Some environments
-# live outside East US (int is UK South — its ACR and Container Apps environment
-# were created there); the wrong region makes Bicep try to recreate same-named
-# resources in a new region.
+# Region. The integration/production environment lives in UK South (its ACR
+# and Container Apps environment were created there); -Location overrides it.
 if ([string]::IsNullOrEmpty($Location)) {
-    $Location = if ($Environment -in @('int', 'integration', 'staging')) { 'uksouth' } else { 'eastus' }
+    $Location = 'uksouth'
 }
 
 # -----------------------------------------------------------------------------
@@ -177,7 +176,7 @@ function Get-SecretName {
 
 Write-Host @"
 =============================================================================
-PMO Risk Recurrence Predictor - Deploy Service
+PMO Risk Intelligence - Deploy Service
 =============================================================================
 Environment : $Environment
 Services    : $Services
@@ -386,7 +385,7 @@ if (($Stage -eq 'all' -or $Stage -eq 'images') -and -not $NoBuild) {
         Write-Step 'Building frontend image...'
         $buildArgs = @()
         $authMode = Resolve-Value -Name 'VITE_AUTH_MODE' -FileMap $fileMap
-        if (-not $authMode) { $authMode = 'password' }
+        if (-not $authMode) { $authMode = 'entra' }
         $buildArgs += '--build-arg', "VITE_AUTH_MODE=$authMode"
         $entraClientId = Resolve-Value -Name 'VITE_ENTRA_CLIENT_ID' -FileMap $fileMap
         $entraTenantId = Resolve-Value -Name 'VITE_ENTRA_TENANT_ID' -FileMap $fileMap

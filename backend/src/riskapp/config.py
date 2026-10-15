@@ -11,7 +11,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="RISKAPP_", env_file=".env")
 
     database_url: str = "sqlite:///./riskapp.db"
-    environment: str = "dev"
+    # The only deployed environment is the integration/production one (``int``).
+    environment: str = "int"
     app_timezone: str = "Africa/Lagos"
 
     # Azure OpenAI (embeddings + chat completions)
@@ -40,7 +41,9 @@ class Settings(BaseSettings):
     # Redis broker for Celery (scheduler + worker).
     redis_url: str = "redis://localhost:6379/0"
 
-    # Entra ID (M365) SSO / RBAC. Empty values mean dev mode (header-based).
+    # Entra ID (M365) SSO / RBAC. Required in production. When the tenant is
+    # empty the API refuses requests (401) unless header auth is explicitly
+    # opted into below.
     entra_tenant_id: str = ""
     entra_client_id: str = ""
     entra_client_secret: str = ""
@@ -52,6 +55,13 @@ class Settings(BaseSettings):
     # HMAC key for locally-issued tokens (login + external acknowledgements).
     # Falls back to the Entra client secret when unset.
     local_login_secret: str = ""
+
+    # Test/local escape hatch: trust ``X-User-Id`` / ``X-User-Role`` headers
+    # when no Entra tenant is configured. MUST stay false in production — with
+    # it unset, a misconfigured API rejects every request instead of silently
+    # granting the caller System Admin. Enabled only by the test suite and
+    # local tooling.
+    allow_header_auth: bool = False
 
     @property
     def tz(self) -> ZoneInfo:

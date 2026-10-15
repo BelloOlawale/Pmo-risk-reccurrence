@@ -1,5 +1,11 @@
 # AGENTS.md
 
+> **Historical reference.** This is the original FRD-era implementation plan for
+> a SharePoint / Azure Functions / FAISS approach. The delivered application is a
+> FastAPI + PostgreSQL + React app under `backend/` and `frontend/`; see
+> `SPEC.md` and `ARCHITECTURE.md` for what was actually built. The conventions
+> below (TDD, small PRs, conventional commits) still apply.
+
 > **Purpose:** Engineering playbook for implementing the  issues. Every PR is small, tested, and reviewable in under 10 minutes.
 >
 > **Audience:** AI coding agents and human contributors.

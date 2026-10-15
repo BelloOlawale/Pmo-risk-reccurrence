@@ -131,8 +131,8 @@ def get_blob_provider() -> BlobStorageProvider:
     return AzureBlobStorage()
 
 
-# Role-gated dependencies (dev mode defaults to System Admin, so these are no-ops
-# locally; production resolves roles from the Entra token).
+# Role-gated dependencies (production resolves roles from the Entra token; the
+# test-only header path defaults to System Admin).
 ProjectManagerDep = Annotated[
     Principal,
     Depends(require_roles(Role.PROJECT_MANAGER, Role.PMO_LEAD, Role.SYSTEM_ADMIN)),
@@ -372,6 +372,7 @@ def password_login(
         role=role.value,
         upn=user.upn,
         display_name=user.display_name,
+        must_change_password=user.must_change_password,
     )
 
 
@@ -388,6 +389,7 @@ def change_password(
     if not verify_password(payload.current_password, user.password_hash):
         raise HTTPException(status_code=401, detail="Current password is incorrect")
     user.password_hash = hash_password(payload.new_password)
+    user.must_change_password = False
     db.commit()
     return {"status": "ok"}
 
@@ -409,6 +411,8 @@ def set_user_credentials(
             detail="External risk owners cannot be granted application access.",
         )
     user.password_hash = hash_password(payload.password)
+    # An admin-set password is temporary: force the user to choose their own.
+    user.must_change_password = True
     if payload.role is not None:
         user.role = payload.role
     db.commit()
@@ -417,12 +421,17 @@ def set_user_credentials(
 
 
 @app.get("/api/me")
-def me(principal: PrincipalDep) -> dict[str, object]:
+def me(principal: PrincipalDep, db: DbDep) -> dict[str, object]:
     """The current caller's identity and roles (used by the UI for role-aware controls)."""
+    must_change_password = False
+    if principal.user_id is not None:
+        user = db.get(models.User, principal.user_id)
+        must_change_password = bool(user and user.must_change_password)
     return {
         "user_id": principal.user_id,
         "upn": principal.upn,
         "roles": sorted(role.value for role in principal.roles),
+        "must_change_password": must_change_password,
     }
 
 

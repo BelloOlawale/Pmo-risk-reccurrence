@@ -1,5 +1,5 @@
 // =============================================================================
-// PMO Risk Recurrence Predictor — Complete Azure Infrastructure
+// PMO Risk Intelligence — Complete Azure Infrastructure
 // =============================================================================
 //
 // Deploys the full solution into a single resource group:
@@ -26,7 +26,7 @@ targetScope = 'resourceGroup'
 // PARAMETERS
 // -----------------------------------------------------------------------------
 
-@description('Environment name: dev | prod')
+@description('Environment name. Only the integration/production environment (int) is deployed.')
 param environmentName string
 
 @description('Azure region for all resources')
@@ -228,7 +228,7 @@ module keyVault './modules/keyvault.bicep' = {
     keyVaultName: keyVaultName
     managedIdentityPrincipalId: managedIdentityPrincipalId
     adminObjectId: keyVaultAdminObjectId
-    enablePurgeProtection: environmentName == 'prod'
+    enablePurgeProtection: true
     softDeleteRetentionInDays: 7
   }
 }

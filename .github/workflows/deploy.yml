@@ -1,11 +1,14 @@
-# Deploy the PMO Risk Recurrence Predictor to Azure Container Apps.
+# Deploy PMO Risk Intelligence to Azure Container Apps (integration/production).
 #
 # Manual trigger (workflow_dispatch). See infra/README.md for the required
 # GitHub secrets (AZURE_CREDENTIALS service principal + RISKAPP_* values) and
 # the subscription/RBAC prerequisites.
 #
-# If Entra SSO is wanted in the SPA, also add VITE_ENTRA_CLIENT_ID and
-# VITE_ENTRA_TENANT_ID secrets (and set RISKAPP_ENTRA_* above).
+# The single deployed environment is 'int' (UK South). Sign-in is chosen by
+# config: Microsoft Entra ID SSO (VITE_AUTH_MODE=entra) and/or app-managed
+# email + password (VITE_AUTH_MODE=password, RISKAPP_LOCAL_LOGIN_ENABLED=true).
+# See docs/AUTHENTICATION.md. Set VITE_ENTRA_CLIENT_ID / VITE_ENTRA_TENANT_ID
+# secrets so the SPA can request a token for the app the API validates.
 name: Deploy
 
 on:
@@ -15,11 +18,9 @@ on:
         description: Deployment environment
         type: choice
         required: true
-        default: dev
+        default: int
         options:
-          - dev
           - int
-          - prod
       stage:
         description: Deployment stage
         type: choice
@@ -70,10 +71,12 @@ jobs:
           bash infra/deploy-service.sh "${{ inputs.environment }}" \
             --service "${{ inputs.service }}" \
             --stage "${{ inputs.stage }}" \
-            --image-tag "${{ github.sha }}"
+            --image-tag "${{ github.sha }}" \
+            --allow-local-login
         env:
-          # Leave empty to let deploy-service.sh pick the per-environment
-          # default (int -> uksouth, everything else -> eastus).
+          # The only deployed environment is 'int' (UK South); the deploy
+          # script hard-codes that region, so this stays empty unless a
+          # deliberate override is needed.
           AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
           # --- Runtime configuration (source of truth for the deployed app) ---
           RISKAPP_DATABASE_URL: ${{ secrets.RISKAPP_DATABASE_URL }}
@@ -95,9 +98,12 @@ jobs:
           RISKAPP_ENTRA_ROLE_GROUP_IDS: ${{ secrets.RISKAPP_ENTRA_ROLE_GROUP_IDS }}
           RISKAPP_APP_BASE_URL: ${{ vars.RISKAPP_APP_BASE_URL }}
           RISKAPP_CORS_ORIGINS: ${{ vars.RISKAPP_CORS_ORIGINS }}
+          # App-managed email + password sign-in (see docs/AUTHENTICATION.md).
+          # Off unless the repo variable is set to 'true'.
+          RISKAPP_LOCAL_LOGIN_ENABLED: ${{ vars.RISKAPP_LOCAL_LOGIN_ENABLED || 'false' }}
           # --- SPA build args ---
-          # "entra" for Microsoft SSO, "password" for app-managed sign-in.
-          VITE_AUTH_MODE: ${{ vars.VITE_AUTH_MODE || 'password' }}
+          # "entra" = Microsoft SSO, "password" = app-managed email + password.
+          VITE_AUTH_MODE: ${{ vars.VITE_AUTH_MODE || 'entra' }}
           # Required when VITE_AUTH_MODE=entra (repo secrets/vars).
           VITE_ENTRA_CLIENT_ID: ${{ secrets.VITE_ENTRA_CLIENT_ID }}
           VITE_ENTRA_TENANT_ID: ${{ secrets.VITE_ENTRA_TENANT_ID }}

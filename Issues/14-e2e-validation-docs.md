@@ -2,7 +2,7 @@
 
 - **Type:** HITL
 - **Spec:** SPEC.md §13
-- **Blocked by:** #13
+- **Environment:** `int` (production)
 
 ## What to build
 

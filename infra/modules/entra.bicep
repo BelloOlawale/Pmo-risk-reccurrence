@@ -1,7 +1,7 @@
 // Entra ID (Azure AD) app registration for SSO.
 // Uses Microsoft Graph API for app registration.
 // Note: Requires 'Microsoft.Graph' resource provider registration.
-@description('Environment name (dev/prod) for app display name.')
+@description('Environment name (int) for app display name.')
 param environmentName string
 
 @description('Frontend SPA URL for redirect URI.')
@@ -13,7 +13,7 @@ param apiUrl string = ''
 @description('Reply URLs for the application.')
 param replyUrls array = []
 
-var displayName = 'PMO Risk Recurrence Predictor (${environmentName})'
+var displayName = 'PMO Risk Intelligence (${environmentName})'
 var appId = '00000000-0000-0000-0000-000000000000'  // Placeholder - filled by Graph API call
 
 // Note: Bicep cannot directly create Entra ID app registrations.

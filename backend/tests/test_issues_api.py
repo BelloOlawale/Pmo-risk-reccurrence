@@ -356,7 +356,7 @@ class TestManualEventMaterialization:
         project = _create_project(client, user_id=7, name="Audit register")
         risk = _open_risk(client, project, user_id=7)
 
-        # Dev-mode auth does not create user rows, so give the risk real owner/PM
+        # Header (test) auth does not create user rows, so give the risk real owner/PM
         # rows (the same setup the scheduler notification tests use).
         owner = models.User(upn="owner@example.com", display_name="Owner")
         pm = models.User(upn="pm@example.com", display_name="PM")

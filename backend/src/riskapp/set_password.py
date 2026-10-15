@@ -58,6 +58,7 @@ def main() -> None:
 
         user.password_hash = hash_password(password)
         user.role = args.role
+        user.must_change_password = True
         db.commit()
         print(f"Local login set for {user.upn} (role: {args.role})")
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# PMO Risk Recurrence Predictor - Complete Azure Deployment Script
+# PMO Risk Intelligence - Complete Azure Deployment Script
 # =============================================================================
 #
 # Deploys the whole solution to Azure. Idempotent - safe to re-run at any time
@@ -13,13 +13,12 @@
 #     (or Owner), so role assignments and Key Vault RBAC can be created
 #
 # USAGE:
-#   bash infra/deploy.sh dev                     # full deployment
-#   bash infra/deploy.sh prod --stage all
-#   bash infra/deploy.sh dev --stage infra       # infrastructure only
-#   bash infra/deploy.sh dev --stage images      # build + push images
-#   bash infra/deploy.sh dev --stage apps        # deploy/refresh container apps
-#   bash infra/deploy.sh dev --location westus2
-#   bash infra/deploy.sh dev --use-private-networking
+#   bash infra/deploy.sh int                     # full deployment
+#   bash infra/deploy.sh int --stage infra       # infrastructure only
+#   bash infra/deploy.sh int --stage images      # build + push images
+#   bash infra/deploy.sh int --stage apps        # deploy/refresh container apps
+#   bash infra/deploy.sh int --location uksouth
+#   bash infra/deploy.sh int --use-private-networking
 #
 # STAGES:
 #   all     : infra -> images -> apps (default)
@@ -46,18 +45,20 @@ usage() {
 ENV_NAME="$1"
 shift
 
+# The integration environment is the single deployed (production) environment.
+case "$ENV_NAME" in
+    int) ;;
+    *) echo "Unsupported environment '$ENV_NAME' — only 'int' is deployable." >&2; exit 1 ;;
+esac
+
 # ---- Defaults (overridable by environment variables) ------------------------
 STAGE="all"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
-# Per-environment default region (int is UK South — its ACR/Container Apps
-# environment live there). --location or AZURE_LOCATION override it.
+# Region. The integration/production environment lives in UK South.
 if [[ -n "${AZURE_LOCATION:-}" ]]; then
     LOCATION="$AZURE_LOCATION"
 else
-    case "$ENV_NAME" in
-        int|integration|staging) LOCATION="uksouth" ;;
-        *)                       LOCATION="eastus" ;;
-    esac
+    LOCATION="uksouth"
 fi
 PREFIX="${APP_PREFIX:-riskapp}"
 ACR_NAME="${ACR_NAME:-}"
@@ -243,7 +244,8 @@ if [[ "$SKIP_IMAGE_BUILD" != "true" ]] && [[ "$STAGE" == "all" || "$STAGE" == "i
 
     info "Building frontend image..."
     build_args=()
-    build_args+=(--build-arg "VITE_AUTH_MODE=${VITE_AUTH_MODE:-password}")
+    # Microsoft Entra ID SSO is the production sign-in method.
+    build_args+=(--build-arg "VITE_AUTH_MODE=${VITE_AUTH_MODE:-entra}")
     [[ -n "${VITE_ENTRA_CLIENT_ID:-}" ]] && build_args+=(--build-arg "VITE_ENTRA_CLIENT_ID=${VITE_ENTRA_CLIENT_ID}")
     [[ -n "${VITE_ENTRA_TENANT_ID:-}" ]] && build_args+=(--build-arg "VITE_ENTRA_TENANT_ID=${VITE_ENTRA_TENANT_ID}")
     docker build "${build_args[@]}" -t "${ACR_SERVER}/${FRONTEND_IMAGE}:${IMAGE_TAG}" "$FRONTEND_DIR" || error "Frontend build failed"
@@ -264,7 +266,7 @@ fi
 # =============================================================================
 
 info "Checking Entra ID app registration..."
-ENTRA_APP_NAME="PMO Risk Recurrence Predictor (${ENV_NAME})"
+ENTRA_APP_NAME="PMO Risk Intelligence (${ENV_NAME})"
 ENTRA_TENANT_ID="$ACCOUNT_TENANT"
 ENTRA_CLIENT_ID=""
 
@@ -369,7 +371,7 @@ Next steps
 1. Create Entra security groups and store their IDs in the 'entra-role-group-ids' secret.
 2. Set remaining secrets (ACS, blob) - see infra/README.md.
 3. If the frontend was built before the Entra app existed, rebuild it with
-   VITE_AUTH_MODE=password (default) and re-run --stage images.
+   VITE_AUTH_MODE=entra (default) and re-run --stage images.
 EOF
 
 cat > "$SCRIPT_DIR/deployment-info-${ENV_NAME}.json" <<JSON

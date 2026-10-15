@@ -15,7 +15,7 @@
 //   * API version 2025-06-01 is required for GPT-5.x model deployments.
 //
 // PARAMETERS:
-//   environmentName            : Environment name (dev/prod)
+//   environmentName            : Environment name (int)
 //   location                   : Azure region
 //   prefix                     : Resource name prefix
 //   keyVaultId                 : Key Vault resource ID for storing endpoint/API key

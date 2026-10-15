@@ -1,18 +1,41 @@
-# Deploy Runbook — PMO Risk Recurrence Predictor
+# Deploy Runbook — PMO Risk Intelligence
 
-Quick reference for deploying. Full detail lives in `README.md`.
+Operational quick reference. Full detail lives in `README.md`.
 
-All commands are run from the **`app/`** directory (that is where the git repo,
+All commands are run from the **`app/`** directory (where the git repo,
 `infra/`, `backend/` and `frontend/` live).
+
+> **One environment.** The integration environment (`int`) **is** the production
+> environment. There is no separate dev or prod. The deploy scripts accept only
+> `int` and default to the UK South region.
 
 ---
 
-## 0. Once per session
+## 0. Environment facts
+
+| Thing | Value |
+|---|---|
+| Subscription | `INT - Wragby AI Processes` (`853e06f6-…`) |
+| Tenant | `7085725b-…` |
+| Resource group | **`rg-riskapp-int`** |
+| Region | **UK South** (app + PostgreSQL co-located) |
+| ACR | `riskappintacr5629c9eb.azurecr.io` |
+| Frontend | https://riskapp-int-frontend.wonderfulsky-6f3252fb.uksouth.azurecontainerapps.io |
+| API | https://riskapp-int-web.wonderfulsky-6f3252fb.uksouth.azurecontainerapps.io |
+| Postgres | `riskapp-int-postgres.postgres.database.azure.com` |
+| Entra app | `PMO Risk Intelligence` (client `fe7b73a3-…`) |
+| Sign-in | **Microsoft Entra ID SSO** (production) |
+| Runtime config | `infra/deploy.int.env` — git-ignored, generated, contains secrets |
+
+---
+
+## 1. Once per session
 
 ```bash
 cd app
 az login                              # skip if already signed in
-az account show                       # confirm: Datazone@alawani_wragby / e56d44da-…
+az account set --subscription 853e06f6-36ff-4a98-9591-50d75629c9eb
+az account show                       # confirm: INT - Wragby AI Processes
 docker info >/dev/null && echo "docker OK"
 ```
 
@@ -21,23 +44,13 @@ checks disk space itself and refuses to build when the host is nearly full.
 
 ---
 
-## 1. The only script you normally need
+## 2. The only script you normally need
 
 ### `infra/deploy-service.sh` — deploy one service, a few, or everything
 
 ```bash
-bash infra/deploy-service.sh <dev|int|prod> [options]
+bash infra/deploy-service.sh int [options]
 ```
-
-| Environment | Subscription | Resource group | Region |
-|-------------|--------------|----------------|--------|
-| `dev` | Datazone@alawani_wragby | `rg-riskapp-dev` | `eastus` |
-| `int` | INT - Wragby AI Processes | `rg-riskapp-int` | `uksouth` |
-
-The script picks the region from the environment name (`int` → `uksouth`,
-otherwise `eastus`); `--location` / `AZURE_LOCATION` still override it. Switch
-the Azure CLI subscription (`az account set --subscription <id>`) before
-deploying a non-default environment.
 
 | Service | Image | When to deploy it |
 |---------|-------|-------------------|
@@ -54,20 +67,20 @@ deploying a non-default environment.
 
 ```bash
 # UI change
-bash infra/deploy-service.sh dev --service frontend --image-tag "ui-$(date +%m%d%H%M)"
+bash infra/deploy-service.sh int --service frontend --image-tag "ui-$(date +%m%d%H%M)"
 
 # API change (one image covers all three)
-bash infra/deploy-service.sh dev --service web,worker,beat --image-tag "api-$(date +%m%d%H%M)"
+bash infra/deploy-service.sh int --service web,worker,beat --image-tag "api-$(date +%m%d%H%M)"
 
 # Everything
-bash infra/deploy-service.sh dev
+bash infra/deploy-service.sh int
 
 # Reuse an image that is already in the registry (no build, fast)
-bash infra/deploy-service.sh dev --service frontend --stage apps --no-build --image-tag <existing-tag>
+bash infra/deploy-service.sh int --service frontend --stage apps --no-build --image-tag <existing-tag>
 
 # Infrastructure only, or images only
-bash infra/deploy-service.sh dev --stage infra
-bash infra/deploy-service.sh dev --stage images
+bash infra/deploy-service.sh int --stage infra
+bash infra/deploy-service.sh int --stage images
 ```
 
 ### Pass `--image-tag` whenever you have uncommitted changes
@@ -75,10 +88,8 @@ bash infra/deploy-service.sh dev --stage images
 The default tag is the **git commit short SHA**. Container Apps will **not** roll
 a new revision for a tag string it has already seen — so if you edited files
 without committing, the default tag points at an image that already exists and
-your change silently never ships.
-
-The script now warns when `frontend/` or `backend/` are dirty and you used the
-default tag. Obey the warning: pass `--image-tag`.
+your change silently never ships. The script warns when `frontend/` or
+`backend/` are dirty and you used the default tag. Obey the warning.
 
 ### Safety preflights (automatic, bash only)
 
@@ -87,108 +98,109 @@ The script refuses to deploy when the result would be broken or insecure:
 | Condition | Result |
 |-----------|--------|
 | `RISKAPP_DATABASE_URL` empty | **Refuses** — API cannot start |
-| `RISKAPP_ENTRA_TENANT_ID` empty | **Refuses** — API would trust unauthenticated `X-User-Role` headers, making anyone who can reach the URL an admin |
+| `RISKAPP_ENTRA_TENANT_ID` empty | **Refuses** — with no tenant the API refuses all requests (401); this guards against an accidentally unauthenticated deployment |
 | < 3 GB free disk before a build | **Refuses** — a full disk makes `docker build` hang |
 | Uncommitted `frontend/`/`backend/` + default SHA tag | **Warns** — no new revision would roll |
-| App-managed password login enabled for non-`dev` | **Warns** — bypasses Entra MFA |
-
-To intentionally deploy an API with no tenant (local/dev only):
-
-```bash
-bash infra/deploy-service.sh dev --allow-dev-auth
-```
+| App-managed password login enabled | **Refuses** — bypasses Entra MFA and Conditional Access; override with `--allow-local-login` |
 
 ---
 
-## 2. Configuration changes
+## 3. Configuration changes
 
-Runtime config lives in **`infra/deploy.dev.env`** (git-ignored, generated).
+Runtime config lives in **`infra/deploy.int.env`** (git-ignored, generated).
 
 Re-generate it from the **live** Azure resources after changing infrastructure
 (DB, storage, URLs). External values (OpenAI, ACS, Entra) are seeded from
 `backend/.env` or passed with `--env`:
 
 ```bash
-bash infra/generate-deploy-env.sh dev --seed-from backend/.env
+bash infra/generate-deploy-env.sh int --seed-from backend/.env
 ```
 
 Then deploy normally. Verify what it resolved without printing secrets:
 
 ```bash
-grep -oE '^[A-Z_]+=' infra/deploy.dev.env        # names only
-awk -F= '/^VITE_/{print $1, length($2)" chars"}' infra/deploy.dev.env
+grep -oE '^[A-Z_]+=' infra/deploy.int.env        # names only
+awk -F= '/^VITE_/{print $1, length($2)" chars"}' infra/deploy.int.env
 ```
 
 ---
 
-## 3. Entra ID (only when auth changes)
+## 4. Entra ID (auth)
+
+Microsoft Entra ID SSO is the production sign-in method. The SPA is built with
+`VITE_AUTH_MODE=entra`; the API validates the token and resolves roles from the
+`groups` claim.
 
 ```bash
-# Provision/refresh the app registration, scope, groups + write the six keys
-bash infra/register-entra-app.sh dev https://riskapp-dev-frontend.lemonsand-ee3845bc.eastus.azurecontainerapps.io \
-  --output-env infra/deploy.dev.env
+# Provision/refresh the app registration, scope, groups + write the keys
+bash infra/register-entra-app.sh int \
+  https://riskapp-int-frontend.wonderfulsky-6f3252fb.uksouth.azurecontainerapps.io \
+  --output-env infra/deploy.int.env
 
 # Refresh the user directory shown in owner/PM pickers (safe to re-run)
-bash infra/sync-entra-users.sh dev
-
-# Include B2B guests (excluded by default)
-bash infra/sync-entra-users.sh dev --include-guests
+bash infra/sync-entra-users.sh int
 ```
 
-> Changing `VITE_AUTH_MODE` requires a **frontend rebuild** (build-time value).
-> Changing `RISKAPP_LOCAL_LOGIN_ENABLED` requires a **backend deploy**
-> (runtime value).
+> Changing `VITE_AUTH_MODE` / `VITE_ENTRA_*` requires a **frontend rebuild**
+> (build-time value). Changing `RISKAPP_ENTRA_*` or
+> `RISKAPP_LOCAL_LOGIN_ENABLED` requires a **backend deploy** (runtime value).
+
+**App-managed email + password.** For people without an Entra account, the app
+can hold the password itself. Full detail and the provisioning workflow are in
+[`docs/AUTHENTICATION.md`](../docs/AUTHENTICATION.md); the short version:
+
+```bash
+# 1. Provision people from a CSV (email,name,role) — creates/updates rows
+cd backend && .venv/Scripts/python.exe -m riskapp.provision_users \
+    --file ../../people.csv --out ../../provisioned-credentials.csv
+
+# 2. Set in infra/deploy.int.env:
+#      RISKAPP_LOCAL_LOGIN_ENABLED=true
+#      VITE_AUTH_MODE=password
+
+# 3. Deploy (the flag acknowledges the MFA/Conditional-Access trade-off)
+bash infra/deploy-service.sh int --allow-local-login
+```
+
+Passwords are stored as salted scrypt hashes and cannot be read back, so the
+generated credentials CSV must be delivered to each person out-of-band and then
+deleted. The deploy refuses to enable local login without `--allow-local-login`.
 
 ---
 
-## 4. Verify a deploy
+## 5. Verify a deploy
 
 ```bash
 # What is running right now (images + revisions)
-az containerapp list -g rg-riskapp-dev \
+az containerapp list -g rg-riskapp-int \
   --query "[].{name:name, image:properties.template.containers[0].image, ready:properties.latestReadyRevisionName}" -o table
 
 # What the last run actually deployed
-cat infra/deployment-info-dev.json
+cat infra/deployment-info-int.json
 
 # Health + auth gate (401 without a token is correct)
-curl -s -o /dev/null -w "health:%{http_code}\n"  https://riskapp-dev-web.lemonsand-ee3845bc.eastus.azurecontainerapps.io/health
-curl -s -o /dev/null -w "auth:%{http_code}\n"    https://riskapp-dev-web.lemonsand-ee3845bc.eastus.azurecontainerapps.io/api/projects
+curl -s -o /dev/null -w "health:%{http_code}\n"  https://riskapp-int-web.wonderfulsky-6f3252fb.uksouth.azurecontainerapps.io/health
+curl -s -o /dev/null -w "auth:%{http_code}\n"    https://riskapp-int-web.wonderfulsky-6f3252fb.uksouth.azurecontainerapps.io/api/projects
 ```
 
-Frontend: <https://riskapp-dev-frontend.lemonsand-ee3845bc.eastus.azurecontainerapps.io>
-API docs: <https://riskapp-dev-web.lemonsand-ee3845bc.eastus.azurecontainerapps.io/docs>
+Frontend: <https://riskapp-int-frontend.wonderfulsky-6f3252fb.uksouth.azurecontainerapps.io>
+API docs: <https://riskapp-int-web.wonderfulsky-6f3252fb.uksouth.azurecontainerapps.io/docs>
 
 ---
 
-## 5. Other scripts
+## 6. Other scripts
 
 | Script | Use it for |
 |--------|-----------|
 | `infra/deploy-service.sh` | **Normal deploys** (above) |
 | `infra/deploy-service.ps1` | PowerShell twin — **no safety preflights** |
-| `infra/generate-deploy-env.sh` | Rebuild `deploy.<env>.env` from live Azure |
+| `infra/generate-deploy-env.sh` | Rebuild `deploy.int.env` from live Azure |
 | `infra/register-entra-app.sh` | Entra app registration / SSO keys |
 | `infra/sync-entra-users.sh` | Import Entra users into the `users` table |
-| `python -m riskapp.seed_temp_users` | Create/refresh temporary local logins (see below) |
+| `infra/check-db-latency.sh` | Measure app → PostgreSQL round-trip |
 | `infra/deploy.sh` | Legacy whole-stack (infra + images + apps) |
-| `docker-compose.yml` | Local stack (see below) |
-
-### Temporary local logins
-
-App-managed email + password accounts are created with `set_password` (one at a
-time) or the bundled temporary-accounts seeder (idempotent, one shared
-password):
-
-```bash
-cd app/backend
-python -m riskapp.seed_temp_users --password 'Wragby@2026'
-```
-
-That seeds `PM@automation.dev` (Project Manager), `PMO@automation.dev`
-(PMO Lead) and `RiskOwner@automation.dev` (Project Manager — Risk Owner is a
-per-risk assignment, not a permission role). Point `RISKAPP_DATABASE_URL` at
-the target database, or run it inside a container that already has it.
+| `docker-compose.yml` | Local stack (not Azure) |
 
 ### Local stack (not Azure)
 
@@ -199,33 +211,31 @@ docker compose logs -f web
 docker compose down
 ```
 
-The local frontend currently defaults to `VITE_AUTH_MODE=entra` (Microsoft SSO;
-register `http://localhost:5173` as an SPA redirect URI on the app registration).
-Set `VITE_AUTH_MODE=password` to exercise the email + password sign-in locally,
-or `VITE_AUTH_MODE=dev` for the no-sign-in sidebar role switcher.
+Set `VITE_AUTH_MODE=password` to exercise the fallback sign-in locally, or point
+`RISKAPP_ENTRA_*` at the tenant to mirror production SSO.
 
 ### CI
 
-GitHub → **Actions → Deploy → Run workflow** (`workflow_dispatch`), choosing
-environment / stage / service. It calls `deploy-service.sh` with
-`--image-tag ${{ github.sha }}` and reads `RISKAPP_*` from repo secrets.
+GitHub → **Actions → Deploy → Run workflow** (`workflow_dispatch`). It calls
+`deploy-service.sh int` with `--image-tag ${{ github.sha }}` and reads
+`RISKAPP_*` from repo secrets.
 
 ---
 
-## 6. If something goes wrong
+## 7. If something goes wrong
 
 ```bash
 # Recent app deployments and their outcome (filters out Azure Policy noise)
-az deployment group list -g rg-riskapp-dev \
-  --query "[?starts_with(name,'riskapp-dev-')].{name:name,state:properties.provisioningState,time:properties.timestamp} | sort_by(@, &time)[-4:]" -o table
+az deployment group list -g rg-riskapp-int \
+  --query "[?starts_with(name,'riskapp-int-')].{name:name,state:properties.provisioningState,time:properties.timestamp} | sort_by(@, &time)[-4:]" -o table
 
 # Why one failed
-az deployment group show -g rg-riskapp-dev -n <deployment-name> \
+az deployment group show -g rg-riskapp-int -n <deployment-name> \
   --query "properties.error" -o json
 
 # Container logs
-az containerapp logs show -g rg-riskapp-dev -n riskapp-dev-web --tail 100
-az containerapp logs show -g rg-riskapp-dev -n riskapp-dev-frontend --tail 50
+az containerapp logs show -g rg-riskapp-int -n riskapp-int-web --tail 100
+az containerapp logs show -g rg-riskapp-int -n riskapp-int-frontend --tail 50
 ```
 
 **Disk full / build hangs for 20+ minutes** → the host disk is out of space.
@@ -235,51 +245,8 @@ az containerapp logs show -g rg-riskapp-dev -n riskapp-dev-frontend --tail 50
 with a fresh `--image-tag`.
 
 **Roll back** → redeploy the previous tag:
-`bash infra/deploy-service.sh dev --service frontend --stage apps --no-build --image-tag <previous-tag>`
+`bash infra/deploy-service.sh int --service frontend --stage apps --no-build --image-tag <previous-tag>`
 
----
-
-## 7. Performance — co-locate the database (maintenance window)
-
-The Container Apps run in **East US**; the PostgreSQL flexible server was
-created in **UK South**. Every query crosses regions (~76 ms/query, ~580 ms per
-fresh connection — measured from inside the web container), which makes the app
-feel slow even though both the app and the database are idle.
-
-The fix is to move the database into the app's region. This is a maintenance
-window task (it briefly restarts web/worker/beat); `deploy.dev.env` is backed
-up automatically before any cutover. See the prepared, step-by-step plan in
-[`MAINTENANCE-window-postgres-move.md`](./MAINTENANCE-window-postgres-move.md).
-
-Measure the current round-trip before/after with `bash infra/check-db-latency.sh dev`.
-
-```bash
-cd app
-export PG_ADMIN_PASSWORD='<password for the new server admin>'
-
-# 1. Create the target server + schema and copy the data (production untouched)
-bash infra/move-postgres-region.sh dev --yes
-
-# 2. After reviewing the copy, repoint the app and restart it
-bash infra/move-postgres-region.sh dev --yes --cutover
-```
-
-Verify the win from inside the container:
-
-```bash
-az containerapp exec -g rg-riskapp-dev -n riskapp-dev-web \
-  --command "python -c \"import os,time,psycopg;u=os.environ['RISKAPP_DATABASE_URL'].replace('+psycopg','');c=psycopg.connect(u);cur=c.cursor();[ (lambda s:(cur.execute('select 1'),print('query_ms',round((time.time()-s)*1000))))(time.time()) for _ in range(5)]\""
-```
-
-Rollback (the old server is left running):
-
-```bash
-cp infra/deploy.dev.env.bak.<timestamp> infra/deploy.dev.env
-bash infra/deploy-service.sh dev --service web,worker,beat --stage apps
-```
-
-Once satisfied, decommission the old server:
-`az postgres flexible-server delete -g rg-riskapp-dev -n riskapp-dev-postgres --yes`
-
-> Note: the target admin password is not retrievable from Azure; set
-> `PG_ADMIN_PASSWORD` (or reuse the existing one) when running the script.
+**Performance** → the Container Apps and PostgreSQL both run in **UK South**, so
+queries are same-region. Confirm with `bash infra/check-db-latency.sh int`
+(expect single-digit ms per query).
