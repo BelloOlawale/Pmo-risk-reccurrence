@@ -2,10 +2,14 @@ name: CI
 
 on:
   pull_request:
+    # Every PR, including PRs targeting the protected 'prod' release branch.
   push:
     branches:
       - main
       - master
+      - prod
+  # Re-run the gate when a merge queue batches PRs for 'prod'.
+  merge_group:
 
 permissions:
   contents: read
