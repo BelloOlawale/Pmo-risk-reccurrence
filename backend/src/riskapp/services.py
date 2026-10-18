@@ -224,19 +224,41 @@ def validate_risk_dates(start: dt.date | None, end: dt.date | None) -> None:
         )
 
 
-def validate_risk_start_within_project(
-    risk_start: dt.date | None, project_start: dt.date | None
+def validate_risk_within_project(
+    risk_start: dt.date | None,
+    risk_end: dt.date | None,
+    project_start: dt.date | None,
 ) -> None:
-    """Raise when a Risk Start Date precedes its project's Start Date.
+    """Raise when a Risk Start/End Date precedes its project's Start Date.
 
-    A risk belongs to a project, so it cannot start before the project does.
-    Enforced in the service layer so every caller (API, importer, suggestion
-    acceptance) is protected — not only the Create Risk form.
+    A risk belongs to a project, so neither of its dates can fall before the
+    project begins. Enforced in the service layer so every caller (API,
+    suggestion acceptance) is protected — not only the Create/Edit Risk forms.
     """
-    if risk_start is not None and project_start is not None and risk_start < project_start:
+    if project_start is None:
+        return
+    if risk_start is not None and risk_start < project_start:
         raise ValueError(
             "Risk start date cannot be earlier than the project start date."
         )
+    if risk_end is not None and risk_end < project_start:
+        raise ValueError(
+            "Risk end date cannot be earlier than the project start date."
+        )
+
+
+def business_today() -> dt.date:
+    """Today in the configured business timezone."""
+    return dt.datetime.now(settings.tz).date()
+
+
+def start_date_arrived(risk_start: dt.date | None) -> bool:
+    """True when a Risk Start Date is set and has arrived (or is in the past).
+
+    This is the only thing that moves a live risk from ``Open`` to
+    ``In Progress``: owner assignment and acknowledgement do not.
+    """
+    return risk_start is not None and risk_start <= business_today()
 
 
 def create_risk(
@@ -254,18 +276,25 @@ def create_risk(
 
     The Risk Start Date and Risk End Date are set by the PM. The Risk End Date
     *is* the SLA deadline (never derived from the risk rating). Assigning an
-    owner at creation moves the risk straight to ``In Progress``.
+    owner at creation does not advance the status: the risk moves to
+    ``In Progress`` once its Risk Start Date has arrived.
     """
     rating = compute_risk_rating(payload.likelihood, payload.impact)
     validate_risk_dates(payload.risk_start_date, payload.risk_end_date)
     project = db.get(models.Project, payload.project_id)
     if project is not None:
-        validate_risk_start_within_project(
-            payload.risk_start_date, project.start_date
+        validate_risk_within_project(
+            payload.risk_start_date, payload.risk_end_date, project.start_date
         )
     now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
+    # A risk starts ``Open``. Assigning an owner does NOT advance it: it becomes
+    # ``In Progress`` only once its Risk Start Date has arrived. A risk created
+    # with a start date at or before today is activated straight away; a future
+    # date is picked up later by the daily start-date activation job.
     initial_status = status
-    if payload.owner_user_id is not None and status == RiskStatus.OPEN.value:
+    if initial_status == RiskStatus.OPEN.value and start_date_arrived(
+        payload.risk_start_date
+    ):
         initial_status = RiskStatus.IN_PROGRESS.value
     risk = models.Risk(
         project_id=payload.project_id,
@@ -739,8 +768,6 @@ def update_risk(
 
     _reject_immutable_edits(data, risk)
 
-    owner_before = risk.owner_user_id
-
     for field, new_value in data.items():
         if new_value is None and field in _NON_NULLABLE_FIELDS:
             raise ValueError(f"Field {field!r} cannot be cleared")
@@ -760,18 +787,21 @@ def update_risk(
 
     if "risk_start_date" in data or "risk_end_date" in data:
         validate_risk_dates(risk.risk_start_date, risk.risk_end_date)
-        validate_risk_start_within_project(
+        validate_risk_within_project(
             risk.risk_start_date,
+            risk.risk_end_date,
             risk.project.start_date if risk.project is not None else None,
         )
         _refresh_sla_deadline(db, risk, actor_user_id)
 
-    # Assigning an owner moves a live, unowned Open risk into the workflow.
-    newly_assigned = risk.owner_user_id is not None and owner_before is None
+    # A risk is activated by its Risk Start Date, not by owner assignment.
+    # Reflect the arrival of a start date immediately when one is supplied (or
+    # already present) on an Open risk; later-arriving dates are handled by the
+    # daily start-date activation job.
     if (
-        newly_assigned
-        and target_status is None
+        target_status is None
         and risk.status == RiskStatus.OPEN.value
+        and start_date_arrived(risk.risk_start_date)
     ):
         target_status = RiskStatus.IN_PROGRESS.value
 

@@ -26,6 +26,10 @@ celery_app.conf.update(
     # Register the task module so the worker picks up riskapp.tasks on boot.
     include=["riskapp.tasks"],
     beat_schedule={
+        "activate-risks-on-start-date": {
+            "task": "riskapp.tasks.activate_risks_on_start_date",
+            "schedule": crontab(hour=6, minute=5),
+        },
         "daily-owner-reminders": {
             "task": "riskapp.tasks.send_daily_reminders",
             "schedule": crontab(hour=6, minute=0),

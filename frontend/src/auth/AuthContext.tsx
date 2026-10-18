@@ -17,6 +17,20 @@ export interface AuthUser {
   displayName: string;
 }
 
+/**
+ * Where a fresh page load and a fresh sign-in always start.
+ *
+ * The app must never resume the route the browser restored (a reload/reopen of
+ * ``/report`` or ``/risks/5`` lands here instead). The public owner
+ * acknowledgement route (``/acknowledge/:token``) is exempt so emailed links
+ * keep working.
+ */
+const START_ROUTE = '/active-risk';
+
+function startRouteFor(pathname: string): string {
+  return pathname.startsWith('/acknowledge') ? pathname : START_ROUTE;
+}
+
 export interface AuthContextValue {
   isAuthenticated: boolean;
   /**
@@ -102,8 +116,10 @@ function PasswordAuthProvider({ children }: { children: ReactNode }) {
     armedRef.current = true;
     // Record the index below which Back means "leaving the app".
     boundaryIdxRef.current = window.history.state?.idx ?? 0;
-    navigate(location.pathname + location.search, { state: {} });
-  }, [session, location.pathname, location.search, navigate]);
+    // A fresh load / fresh sign-in always opens Active Risk, not the restored
+    // route, while the public acknowledge link is left untouched.
+    navigate(startRouteFor(location.pathname), { state: {} });
+  }, [session, location.pathname, navigate]);
 
   useEffect(() => {
     if (!session) return;
@@ -252,6 +268,25 @@ function EntraAuthGate({ children }: { children: ReactNode }) {
   // no token (e.g. consent blocked) must fall back to the sign-in page rather
   // than rendering the app shell, which would 401 on every request.
   const isAuthenticated = Boolean(accessToken);
+
+  // A fresh load / fresh sign-in always opens Active Risk (see START_ROUTE),
+  // never the route the browser restored. Runs once per authenticated session.
+  const navigate = useNavigate();
+  const location = useLocation();
+  const startRedirectedRef = useRef(false);
+  useEffect(() => {
+    if (!isAuthenticated) {
+      startRedirectedRef.current = false;
+      return;
+    }
+    if (startRedirectedRef.current) return;
+    startRedirectedRef.current = true;
+    const target = startRouteFor(location.pathname);
+    // Skip when already on the target (and for the exempt public route).
+    if (target !== location.pathname) {
+      navigate(target, { replace: true });
+    }
+  }, [isAuthenticated, location.pathname, navigate]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

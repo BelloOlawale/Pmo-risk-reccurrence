@@ -128,6 +128,46 @@ class TestRiskDates:
         )
         assert resp.status_code == 201, resp.text
 
+    def test_risk_end_before_project_start_is_rejected(self, client: TestClient) -> None:
+        project = _project(client, start="2026-10-20", end=None)
+        resp = client.post(
+            "/api/risks",
+            json={
+                "project_id": project["id"],
+                "description": "Ends too early",
+                "likelihood": "High",
+                "impact": "High",
+                "risk_end_date": "2026-10-10",
+            },
+            headers=_headers(7, "Project Manager"),
+        )
+        assert resp.status_code == 422
+        assert "risk end date" in resp.text.lower()
+
+    def test_editing_risk_end_before_project_start_is_rejected(
+        self, client: TestClient
+    ) -> None:
+        project = _project(client, start="2026-10-20", end=None)
+        risk = client.post(
+            "/api/risks",
+            json={
+                "project_id": project["id"],
+                "description": "Editable end",
+                "likelihood": "High",
+                "impact": "High",
+                "risk_start_date": "2026-10-20",
+                "risk_end_date": "2026-11-01",
+            },
+            headers=_headers(7, "Project Manager"),
+        ).json()
+        resp = client.patch(
+            f"/api/risks/{risk['id']}",
+            json={"risk_end_date": "2026-10-01"},
+            headers=_headers(7, "Project Manager"),
+        )
+        assert resp.status_code == 422
+        assert "risk end date" in resp.text.lower()
+
     def test_risk_end_before_start_is_rejected(self, client: TestClient) -> None:
         project = _project(client, start="2026-10-20", end=None)
         resp = client.post(

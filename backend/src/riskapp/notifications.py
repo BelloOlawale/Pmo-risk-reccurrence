@@ -47,6 +47,9 @@ EVENT_OWNER_REMINDER = "owner_reminder"
 EVENT_ESCALATION = "escalation"
 EVENT_WEEKLY_SUMMARY = "weekly_summary"
 EVENT_MATERIALIZED = "materialized"
+# Risk Start Date arrived -> the risk (and its owner) move into the working
+# state Open -> In Progress.
+EVENT_ACTIVATED = "risk_activated"
 # Risk Owner submitted a resolution -> the Project Manager reviews it.
 EVENT_RESOLVED = "resolution_submitted"
 # Project Manager rejected the resolution -> the Risk Owner is notified.
@@ -122,6 +125,14 @@ def resolve_recipients(event: str, ctx: RecipientContext) -> Recipients:
         return Recipients(
             to_user_ids=_unique_ids(ctx.owner_user_id),
             to_emails=_unique(ctx.owner_email),
+            cc_emails=(),
+        )
+    if event == EVENT_ACTIVATED:
+        # The risk start date has arrived: the owner begins work and the PM is
+        # informed that the risk is now In Progress.
+        return Recipients(
+            to_user_ids=_unique_ids(ctx.owner_user_id, ctx.pm_user_id),
+            to_emails=_unique(ctx.owner_email, ctx.pm_email),
             cc_emails=(),
         )
     if event == EVENT_ESCALATION:

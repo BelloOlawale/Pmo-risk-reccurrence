@@ -22,8 +22,10 @@ from riskapp.notifications import NotificationService
 from riskapp.scheduler import (
     find_daily_reminder_risks,
     find_escalation_risks,
+    find_risks_to_activate,
     run_daily_reminders,
     run_escalation_monitor,
+    run_start_date_activation,
     run_weekly_summary,
     weekly_summary_data,
 )
@@ -177,6 +179,54 @@ class TestRunEscalationMonitor:
         _risk(db_session, code="RSK-ESC4", end_date=dt.date(2026, 8, 25))
         first = run_escalation_monitor(db_session, NotificationService(), TODAY)
         second = run_escalation_monitor(db_session, NotificationService(), TODAY)
+        assert first == 1
+        assert second == 0
+
+
+class TestStartDateActivation:
+    def test_open_risk_with_arrived_start_date_activates(self, db_session: Session) -> None:
+        risk = _risk(db_session, code="RSK-ACT")
+        assert risk.risk_start_date is not None and risk.risk_start_date <= TODAY
+
+        assert find_risks_to_activate(db_session, TODAY) == [risk]
+        count = run_start_date_activation(db_session, NotificationService(), TODAY)
+        assert count == 1
+
+        db_session.refresh(risk)
+        assert risk.status == RiskStatus.IN_PROGRESS.value
+        notifications = db_session.scalars(
+            select(models.Notification).where(
+                models.Notification.type == "risk_activated"
+            )
+        ).all()
+        assert {n.recipient_user_id for n in notifications} == {
+            risk.owner_user_id,
+            risk.project.pm_user_id,
+        }
+
+    def test_future_start_date_is_not_activated(self, db_session: Session) -> None:
+        _risk(db_session, code="RSK-FUT", start_date=dt.date(2026, 8, 30))
+        assert find_risks_to_activate(db_session, TODAY) == []
+
+    def test_missing_start_date_is_not_activated(self, db_session: Session) -> None:
+        _risk(db_session, code="RSK-NOSTART", start_date=None)
+        assert find_risks_to_activate(db_session, TODAY) == []
+
+    def test_later_states_are_never_overwritten(self, db_session: Session) -> None:
+        for code, status in (
+            ("RSK-CLOSED", "Closed"),
+            ("RSK-RESOLVED", "Resolved"),
+            ("RSK-ESC", "Escalated"),
+            ("RSK-EVT", "Event"),
+            ("RSK-PEND", "Pending Resolution"),
+        ):
+            _risk(db_session, code=code, status=status)
+        assert find_risks_to_activate(db_session, TODAY) == []
+
+    def test_activation_is_idempotent(self, db_session: Session) -> None:
+        _risk(db_session, code="RSK-ONCEACT")
+        first = run_start_date_activation(db_session, NotificationService(), TODAY)
+        second = run_start_date_activation(db_session, NotificationService(), TODAY)
         assert first == 1
         assert second == 0
 

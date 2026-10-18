@@ -1,7 +1,7 @@
 """Risk acknowledgement workflow.
 
 No owner              -> Acknowledge hidden / rejected
-Owner assigned        -> status In Progress, Acknowledge available
+Owner assigned        -> stays Open (activation is start-date driven)
 Acknowledged          -> never escalates
 Not acknowledged,     -> Escalated (two days before end date), owner + PM emailed,
   near end date           NO Issue created
@@ -54,16 +54,17 @@ def _assign_owner(client: TestClient, db: Session, risk_id: int) -> models.User:
     return owner
 
 
-def test_assigning_owner_moves_risk_to_in_progress(
+def test_assigning_owner_does_not_activate_without_start_date(
     client: TestClient, db_session: Session
 ) -> None:
+    """Owner assignment is not activation; only the Risk Start Date is."""
     _, risk = _project_and_risk(client)
     assert risk["status"] == "Open"
 
     _assign_owner(client, db_session, risk["id"])
 
     read = client.get(f"/api/risks/{risk['id']}").json()
-    assert read["status"] == "In Progress"
+    assert read["status"] == "Open"
     assert read["owner_user_id"] is not None
     # Ownership alone does not acknowledge the risk.
     assert read["sla_acknowledged"] is False
@@ -191,4 +192,5 @@ def test_acknowledge_does_not_resolve(client: TestClient, db_session: Session) -
 
     read = client.get(f"/api/risks/{risk['id']}").json()
     assert read["sla_acknowledged"] is True
-    assert read["status"] == "In Progress"
+    # No start date has arrived, so acknowledgement leaves the risk Open.
+    assert read["status"] == "Open"

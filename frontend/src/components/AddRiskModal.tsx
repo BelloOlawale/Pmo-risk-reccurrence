@@ -24,7 +24,6 @@ interface FormState {
   likelihood: string;
   impact: string;
   response_strategy: string;
-  response_plan: string;
   owner_user_id: string;
   risk_start_date: string;
   risk_end_date: string;
@@ -39,7 +38,6 @@ const EMPTY: FormState = {
   likelihood: 'Medium',
   impact: 'Medium',
   response_strategy: '',
-  response_plan: '',
   owner_user_id: '',
   risk_start_date: '',
   risk_end_date: '',
@@ -112,7 +110,6 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
         likelihood: form.likelihood,
         impact: form.impact,
         response_strategy: (form.response_strategy || null) as ResponseStrategy | null,
-        response_plan: form.response_plan.trim() || null,
         owner_user_id: form.owner_user_id === '' ? null : Number(form.owner_user_id),
         risk_start_date: form.risk_start_date || null,
         risk_end_date: form.risk_end_date || null,
@@ -259,14 +256,6 @@ export function AddRiskModal({ projects, initialProjectId, onClose, onCreated }:
                 onSelect={(user) =>
                   set('owner_user_id', user === null ? '' : String(user.id))
                 }
-              />
-            </div>
-            <div className="field" style={{ gridColumn: '1 / -1' }}>
-              <label>Response plan</label>
-              <textarea
-                value={form.response_plan}
-                onChange={(e) => set('response_plan', e.target.value)}
-                placeholder="How will this risk be addressed?"
               />
             </div>
           </div>

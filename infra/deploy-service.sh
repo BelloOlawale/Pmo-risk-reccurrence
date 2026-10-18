@@ -449,6 +449,18 @@ fetch_registry_credentials() {
 # Render the Bicep parameters file
 # -----------------------------------------------------------------------------
 
+# Convert an MSYS/Git Bash path to a form the *native* Python interpreter can
+# open. Git Bash's ``mktemp`` returns POSIX paths such as ``/tmp/tmp.XXXX``,
+# which Windows Python cannot resolve (FileNotFoundError); ``cygpath`` maps them
+# to ``C:\...\tmp.XXXX``. On Linux/macOS (no ``cygpath``) the path is unchanged.
+native_path() {
+    if command -v cygpath >/dev/null 2>&1; then
+        cygpath -w "$1"
+    else
+        printf '%s' "$1"
+    fi
+}
+
 render_params() {
     local out="$1" deploy_apps="$2"
     : > "$SCALARS_FILE"
@@ -475,8 +487,11 @@ render_params() {
     scalar deployApps "$deploy_apps"
 
     # Values travel through files (never env vars) so Git Bash on Windows cannot
-    # path-convert resource IDs and secrets.
-    PARTS_FILE="$PARTS_FILE" SCALARS_FILE="$SCALARS_FILE" OUT_FILE="$out" \
+    # path-convert resource IDs and secrets. The file *paths* are handed to
+    # native Python as Windows paths (see native_path) so MSYS keeps working.
+    PARTS_FILE="$(native_path "$PARTS_FILE")" \
+    SCALARS_FILE="$(native_path "$SCALARS_FILE")" \
+    OUT_FILE="$(native_path "$out")" \
     "$PYTHON_BIN" - <<'PY'
 import json, os
 

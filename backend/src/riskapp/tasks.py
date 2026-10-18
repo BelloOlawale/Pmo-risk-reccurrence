@@ -17,6 +17,7 @@ from riskapp.scheduler import (
     run_daily_reminders,
     run_end_date_monitor,
     run_escalation_monitor,
+    run_start_date_activation,
     run_weekly_summary,
 )
 
@@ -24,6 +25,13 @@ from riskapp.scheduler import (
 def _today() -> dt.date:
     """Today in the configured business timezone."""
     return dt.datetime.now(settings.tz).date()
+
+
+@celery_app.task(name="riskapp.tasks.activate_risks_on_start_date")  # type: ignore[untyped-decorator]
+def activate_risks_on_start_date() -> int:
+    """Daily: move Open risks to In Progress once their start date arrives."""
+    with SessionLocal() as db:
+        return run_start_date_activation(db, build_notification_service(), _today())
 
 
 @celery_app.task(name="riskapp.tasks.send_daily_reminders")  # type: ignore[untyped-decorator]

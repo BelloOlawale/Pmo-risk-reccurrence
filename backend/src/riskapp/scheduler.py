@@ -26,6 +26,7 @@ from riskapp.domain.sla import escalation_date, reminder_last_date
 from riskapp.domain.status import RiskStatus
 from riskapp.external import acknowledgement_url
 from riskapp.notifications import (
+    EVENT_ACTIVATED,
     EVENT_ESCALATION,
     EVENT_MATERIALIZED,
     EVENT_OWNER_REMINDER,
@@ -46,6 +47,56 @@ _MATERIALIZABLE_STATUSES = (
     RiskStatus.IN_PROGRESS.value,
     RiskStatus.ESCALATED.value,
 )
+
+
+def find_risks_to_activate(db: Session, today: dt.date) -> list[models.Risk]:
+    """Open risks whose Risk Start Date has arrived and are ready to work.
+
+    Owner assignment and acknowledgement never advance a risk on their own: the
+    status moves ``Open -> In Progress`` only once the start date arrives. Risks
+    with no start date are deliberately excluded — they stay ``Open`` and are
+    not monitored. ``Resolved`` / ``Closed`` / ``Escalated`` / ``Event`` risks
+    are never selected, so an automatic run cannot overwrite a later state.
+    """
+    return list(
+        db.scalars(
+            select(models.Risk)
+            .where(
+                models.Risk.status == RiskStatus.OPEN.value,
+                models.Risk.risk_start_date.is_not(None),
+                models.Risk.risk_start_date <= today,
+            )
+            .order_by(models.Risk.id)
+        ).all()
+    )
+
+
+def run_start_date_activation(
+    db: Session, notifier: NotificationService, today: dt.date
+) -> int:
+    """Activate risks whose Risk Start Date has arrived: ``Open -> In Progress``.
+
+    Idempotent: only ``Open`` risks are selected, so a re-run on the same day
+    finds nothing to do and writes no duplicate audit row or notification. A
+    pure date comparison against the current business date means the job also
+    catches up after downtime.
+    """
+    risks = find_risks_to_activate(db, today)
+    for risk in risks:
+        assert risk.risk_start_date is not None  # filtered above
+        transition_risk(db, risk, RiskStatus.IN_PROGRESS.value)
+        notifier.notify(
+            db,
+            event=EVENT_ACTIVATED,
+            title=f"Risk activated: {risk.risk_code}",
+            body=(
+                f"Risk {risk.risk_code} has reached its risk start date "
+                f"({risk.risk_start_date.isoformat()}) and is now In Progress."
+            ),
+            risk=risk,
+        )
+    db.commit()
+    return len(risks)
 
 
 def find_daily_reminder_risks(db: Session, today: dt.date) -> list[models.Risk]:
