@@ -3,6 +3,9 @@
 > Authoritative architecture overview. Complements `SPEC.md` (the product/spec
 > decisions) and `README.md` (quickstart). This document explains *how the
 > system is put together*, with a deep dive on authentication and authorization.
+>
+> For the target module design and the phased path to it, see
+> [`docs/CODEBASE_DESIGN.md`](docs/CODEBASE_DESIGN.md).
 
 ---
 

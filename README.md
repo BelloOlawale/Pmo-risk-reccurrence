@@ -53,6 +53,7 @@ salted scrypt hashes and can never be read back.
 
 ## Development conventions
 
+- Target module design and phased refactor plan: [`docs/CODEBASE_DESIGN.md`](docs/CODEBASE_DESIGN.md).
 - TDD: write tests first, then implement.
 - `src/riskapp/domain/` holds pure, side-effect-free logic (no DB, no HTTP).
 - Feedback loops before committing: `pytest`, `ruff check .`, `mypy src`
